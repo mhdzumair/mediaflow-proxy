@@ -119,13 +119,17 @@ For players like VLC that require properly encoded URLs, use the `encode_mediafl
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
 
 encoded_url = encode_mediaflow_proxy_url(
-    "http://127.0.0.1:8888",
-    "/proxy/mpd/manifest",
-    "https://media.axprod.net/TestVectors/v7-MultiDRM-SingleKey/Manifest_1080p_ClearKey.mpd",
-    {
+    mediaflow_proxy_url="http://127.0.0.1:8888",
+    endpoint="/proxy/mpd/manifest",
+    destination_url="https://media.axprod.net/TestVectors/v7-MultiDRM-SingleKey/Manifest_1080p_ClearKey.mpd",
+    query_params={
         "key_id": "nrQFDeRLSAKTLifXUIPiZg",
         "key": "FmY0xnWCPCNaSpRG-tUuTQ",
         "api_password": "your_password"
+    },
+    proxy_headers={
+        "referer": "https://media.axprod.net/",
+        "origin": "https://media.axprod.net",
     }
 )
 
