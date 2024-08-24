@@ -56,9 +56,8 @@ class M3U8Processor:
             original_uri = uri_match.group(1)
             uri = parse.urlparse(original_uri)
             if self.key_url:
-                uri.scheme = self.key_url.scheme
-                uri.netloc = self.key_url.netloc
-            new_uri = await self.proxy_url(str(uri), base_url)
+                uri = uri._replace(scheme=self.key_url.scheme, netloc=self.key_url.host)
+            new_uri = await self.proxy_url(uri.geturl(), base_url)
             line = line.replace(f'URI="{original_uri}"', f'URI="{new_uri}"')
         return line
 

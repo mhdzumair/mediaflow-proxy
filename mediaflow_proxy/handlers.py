@@ -124,7 +124,7 @@ async def fetch_and_process_m3u8(url: str, headers: dict, request: Request, key_
         try:
             streamer = Streamer(client)
             content = await streamer.get_text(url, headers)
-            processor = M3U8Processor(request, HttpUrl)
+            processor = M3U8Processor(request, key_url)
             processed_content = await processor.process_m3u8(content, str(streamer.response.url))
             return Response(
                 content=processed_content,
