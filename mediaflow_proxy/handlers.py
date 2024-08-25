@@ -9,6 +9,7 @@ from pydantic import HttpUrl
 from starlette.background import BackgroundTask
 
 from .configs import settings
+from .const import SUPPORTED_RESPONSE_HEADERS
 from .mpd_processor import process_manifest, process_playlist, process_segment
 from .utils.cache_utils import get_cached_mpd, get_cached_init_segment
 from .utils.http_utils import Streamer, DownloadError, download_file_with_retry, request_with_retry
@@ -47,13 +48,12 @@ async def handle_hls_stream_proxy(request: Request, destination: str, headers: d
             return await fetch_and_process_m3u8(streamer, destination, headers, request, key_url)
 
         headers.update({"accept-ranges": headers.get("range", "bytes=0-")})
-        # handle the encoding response header, since decompression is handled by the httpx
-        if "content-encoding" in response.headers:
-            del response.headers["content-encoding"]
+        # clean up the headers to only include the necessary headers and remove acl headers
+        response_headers = {k: v for k, v in response.headers.items() if k.lower() in SUPPORTED_RESPONSE_HEADERS}
 
         return StreamingResponse(
             streamer.stream_content(destination, headers),
-            headers=response.headers,
+            headers=response_headers,
             background=BackgroundTask(streamer.close),
         )
     except httpx.HTTPStatusError as e:
@@ -106,13 +106,16 @@ async def handle_stream_request(method: str, video_url: str, headers: dict):
     streamer = Streamer(client)
     try:
         response = await streamer.head(video_url, headers)
+        # clean up the headers to only include the necessary headers and remove acl headers
+        response_headers = {k: v for k, v in response.headers.items() if k.lower() in SUPPORTED_RESPONSE_HEADERS}
+
         if method == "HEAD":
             await streamer.close()
-            return Response(headers=response.headers, status_code=response.status_code)
+            return Response(headers=response_headers, status_code=response.status_code)
         else:
             return StreamingResponse(
                 streamer.stream_content(video_url, headers),
-                headers=response.headers,
+                headers=response_headers,
                 background=BackgroundTask(streamer.close),
             )
     except httpx.HTTPStatusError as e:
