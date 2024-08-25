@@ -3,11 +3,23 @@ from urllib import parse
 
 import httpx
 import tenacity
+from starlette.requests import Request
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from mediaflow_proxy.configs import settings
 
 logger = logging.getLogger(__name__)
+
+supported_request_headers = [
+    "accept",
+    "accept-encoding",
+    "accept-language",
+    "connection",
+    "transfer-encoding",
+    "range",
+    "if-range",
+    "user-agent",
+]
 
 
 class DownloadError(Exception):
@@ -220,7 +232,7 @@ def encode_mediaflow_proxy_url(
     return f"{base_url}?{encoded_params}"
 
 
-def get_original_scheme(request) -> str:
+def get_original_scheme(request: Request) -> str:
     """
     Determines the original scheme (http or https) of the request.
 
@@ -249,3 +261,18 @@ def get_original_scheme(request) -> str:
 
     # Default to http if no indicators of https are found
     return "http"
+
+
+def get_proxy_headers(request: Request) -> dict:
+    """
+    Extracts proxy headers from the request query parameters.
+
+    Args:
+        request (Request): The incoming HTTP request.
+
+    Returns:
+        dict: A dictionary of proxy headers.
+    """
+    request_headers = {k: v for k, v in request.headers.items() if k in supported_request_headers}
+    request_headers.update({k[2:].lower(): v for k, v in request.query_params.items() if k.startswith("h_")})
+    return request_headers
