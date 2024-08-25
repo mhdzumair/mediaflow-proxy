@@ -9,12 +9,6 @@ SUPPORTED_RESPONSE_HEADERS = [
     "etag",
     "server",
     "date",
-    "cache-control",
-    "expires",
-    "pragma",
-    "content-disposition",
-    "range",
-    "content-encoding",
 ]
 
 SUPPORTED_REQUEST_HEADERS = [

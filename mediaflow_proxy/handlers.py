@@ -47,17 +47,15 @@ async def handle_hls_stream_proxy(request: Request, destination: str, headers: d
         if "mpegurl" in response.headers.get("content-type", "").lower():
             return await fetch_and_process_m3u8(streamer, destination, headers, request, key_url)
 
-        headers.update({"accept-ranges": headers.get("range", "bytes=0-")})
+        headers.update({"range": headers.get("range", "bytes=0-")})
         # clean up the headers to only include the necessary headers and remove acl headers
         response_headers = {
             k.title(): v for k, v in response.headers.items() if k.lower() in SUPPORTED_RESPONSE_HEADERS
         }
-        # set chunked transfer encoding for streaming
-        response_headers["Transfer-Encoding"] = "chunked"
 
         return StreamingResponse(
             streamer.stream_content(destination, headers),
-            status_code=response.status_code,
+            status_code=206,
             headers=response_headers,
             background=BackgroundTask(streamer.close),
         )
@@ -120,8 +118,6 @@ async def handle_stream_request(method: str, video_url: str, headers: dict):
             await streamer.close()
             return Response(headers=response_headers, status_code=response.status_code)
         else:
-            # set chunked transfer encoding for streaming
-            response_headers["Transfer-Encoding"] = "chunked"
             return StreamingResponse(
                 streamer.stream_content(video_url, headers),
                 headers=response_headers,
