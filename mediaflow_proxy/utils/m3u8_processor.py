@@ -3,7 +3,7 @@ from urllib import parse
 
 from pydantic import HttpUrl
 
-from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
+from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url, get_original_scheme
 
 
 class M3U8Processor:
@@ -17,6 +17,7 @@ class M3U8Processor:
         """
         self.request = request
         self.key_url = key_url
+        self.mediaflow_proxy_url = str(request.url_for("hls_stream_proxy").replace(scheme=get_original_scheme(request)))
 
     async def process_m3u8(self, content: str, base_url: str) -> str:
         """
@@ -75,7 +76,7 @@ class M3U8Processor:
         full_url = parse.urljoin(base_url, url)
 
         return encode_mediaflow_proxy_url(
-            str(self.request.url_for("hls_stream_proxy")),
+            self.mediaflow_proxy_url,
             "",
             full_url,
             query_params=dict(self.request.query_params),

@@ -218,3 +218,34 @@ def encode_mediaflow_proxy_url(
 
     base_url = parse.urljoin(mediaflow_proxy_url, endpoint)
     return f"{base_url}?{encoded_params}"
+
+
+def get_original_scheme(request) -> str:
+    """
+    Determines the original scheme (http or https) of the request.
+
+    Args:
+        request (Request): The incoming HTTP request.
+
+    Returns:
+        str: The original scheme ('http' or 'https')
+    """
+    # Check the X-Forwarded-Proto header first
+    forwarded_proto = request.headers.get("X-Forwarded-Proto")
+    if forwarded_proto:
+        return forwarded_proto
+
+    # Check if the request is secure
+    if request.url.scheme == "https" or request.headers.get("X-Forwarded-Ssl") == "on":
+        return "https"
+
+    # Check for other common headers that might indicate HTTPS
+    if (
+        request.headers.get("X-Forwarded-Ssl") == "on"
+        or request.headers.get("X-Forwarded-Protocol") == "https"
+        or request.headers.get("X-Url-Scheme") == "https"
+    ):
+        return "https"
+
+    # Default to http if no indicators of https are found
+    return "http"
