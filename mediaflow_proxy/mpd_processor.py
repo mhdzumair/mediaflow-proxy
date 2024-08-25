@@ -7,7 +7,7 @@ from fastapi import Request, Response, HTTPException
 
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.drm.decrypter import decrypt_segment
-from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
+from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url, get_original_scheme
 
 logger = logging.getLogger(__name__)
 
@@ -103,10 +103,14 @@ def build_hls(mpd_dict: dict, request: Request, key_id: str = None, key: str = N
     video_profiles = {}
     audio_profiles = {}
 
+    # Get the base URL for the playlist_endpoint endpoint
+    proxy_url = request.url_for("playlist_endpoint")
+    proxy_url = str(proxy_url.replace(scheme=get_original_scheme(request)))
+
     for profile in mpd_dict["profiles"]:
         query_params.update({"profile_id": profile["id"], "key_id": key_id or "", "key": key or ""})
         playlist_url = encode_mediaflow_proxy_url(
-            str(request.url_for("playlist_endpoint")),
+            proxy_url,
             query_params=query_params,
         )
 
@@ -150,6 +154,10 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
     current_time = datetime.now(timezone.utc)
     live_stream_delay = timedelta(seconds=settings.mpd_live_stream_delay)
     target_end_time = current_time - live_stream_delay
+
+    proxy_url = request.url_for("segment_endpoint")
+    proxy_url = str(proxy_url.replace(scheme=get_original_scheme(request)))
+
     for index, profile in enumerate(profiles):
         segments = profile["segments"]
         if not segments:
@@ -189,7 +197,7 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
             )
             hls.append(
                 encode_mediaflow_proxy_url(
-                    str(request.url_for("segment_endpoint")),
+                    proxy_url,
                     query_params=query_params,
                 )
             )
