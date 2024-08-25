@@ -4,7 +4,7 @@ emoji: 🎥
 colorFrom: blue
 colorTo: green
 sdk: docker
-sdk_version: '3.9'
+app_port: 8888
 pinned: false
 license: mit
 thumbnail: >-
