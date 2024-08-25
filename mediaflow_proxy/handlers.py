@@ -49,10 +49,15 @@ async def handle_hls_stream_proxy(request: Request, destination: str, headers: d
 
         headers.update({"accept-ranges": headers.get("range", "bytes=0-")})
         # clean up the headers to only include the necessary headers and remove acl headers
-        response_headers = {k: v for k, v in response.headers.items() if k.lower() in SUPPORTED_RESPONSE_HEADERS}
+        response_headers = {
+            k.title(): v for k, v in response.headers.items() if k.lower() in SUPPORTED_RESPONSE_HEADERS
+        }
+        # set chunked transfer encoding for streaming
+        response_headers["Transfer-Encoding"] = "chunked"
 
         return StreamingResponse(
             streamer.stream_content(destination, headers),
+            status_code=response.status_code,
             headers=response_headers,
             background=BackgroundTask(streamer.close),
         )
@@ -107,15 +112,20 @@ async def handle_stream_request(method: str, video_url: str, headers: dict):
     try:
         response = await streamer.head(video_url, headers)
         # clean up the headers to only include the necessary headers and remove acl headers
-        response_headers = {k: v for k, v in response.headers.items() if k.lower() in SUPPORTED_RESPONSE_HEADERS}
+        response_headers = {
+            k.title(): v for k, v in response.headers.items() if k.lower() in SUPPORTED_RESPONSE_HEADERS
+        }
 
         if method == "HEAD":
             await streamer.close()
             return Response(headers=response_headers, status_code=response.status_code)
         else:
+            # set chunked transfer encoding for streaming
+            response_headers["Transfer-Encoding"] = "chunked"
             return StreamingResponse(
                 streamer.stream_content(video_url, headers),
                 headers=response_headers,
+                status_code=206,
                 background=BackgroundTask(streamer.close),
             )
     except httpx.HTTPStatusError as e:
