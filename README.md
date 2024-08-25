@@ -213,3 +213,13 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## Disclaimer
 
 This project is for educational purposes only. The developers of MediaFlow Proxy are not responsible for any misuse of this software. Please ensure that you have the necessary permissions to access and use the media streams you are proxying.
+
+---
+title: MediaFlow Proxy
+emoji: 🎥
+colorFrom: blue
+colorTo: green
+sdk: docker
+sdk_version: "3.9"
+pinned: false
+---
