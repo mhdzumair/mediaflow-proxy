@@ -2,21 +2,9 @@ from fastapi import Request, Depends, APIRouter
 from pydantic import HttpUrl
 
 from .handlers import handle_hls_stream_proxy, proxy_stream, get_manifest, get_playlist, get_segment, get_public_ip
+from .utils.http_utils import get_proxy_headers
 
 proxy_router = APIRouter()
-
-
-def get_proxy_headers(request: Request) -> dict:
-    """
-    Extracts proxy headers from the request query parameters.
-
-    Args:
-        request (Request): The incoming HTTP request.
-
-    Returns:
-        dict: A dictionary of proxy headers.
-    """
-    return {k[2:]: v for k, v in request.query_params.items() if k.startswith("h_")}
 
 
 @proxy_router.head("/hls")
