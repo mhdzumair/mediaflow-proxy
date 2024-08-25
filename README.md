@@ -1,6 +1,8 @@
 # MediaFlow Proxy
 
-<img src="logo.png?raw=true" alt="MediaFlow Proxy Logo" width="200" style="border-radius: 15px;">
+<div style="text-align: center;">
+  <img src="https://cdn.githubraw.com/mhdzumair/mediaflow-proxy/main/logo.png" alt="MediaFlow Proxy Logo" width="200" style="border-radius: 15px;">
+</div>
 
 MediaFlow Proxy is a powerful and flexible solution for proxifying various types of media streams. It supports HTTP(S) links, HLS (M3U8) streams, and MPEG-DASH streams, including DRM-protected content. This proxy can convert MPEG-DASH DRM-protected streams to decrypted HLS live streams in real-time, making it one of the fastest live decrypter servers available.
 
@@ -18,15 +20,16 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 ## Installation
 
 
-### Using Docker from Docker Hub (Recommended)
+### Option 1: Self-Hosted Deployment
+
+#### Using Docker from Docker Hub
 
 1. Pull & Run the Docker image:
    ```
    docker run -p 8888:8888 -e API_PASSWORD=your_password mhdzumair/mediaflow-proxy
    ```
 
-
-### Using Poetry
+#### Using Poetry
 
 1. Clone the repository:
    ```
@@ -50,7 +53,7 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
    ```
 
 
-### Build and Run Docker Image Locally
+#### Build and Run Docker Image Locally
 
 1. Build the Docker image:
    ```
@@ -62,13 +65,31 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
    docker run -p 8888:8888 -e API_PASSWORD=your_password mediaflow-proxy
    ```
 
-## Configuration
+#### Configuration
 
 Set the following environment variables:
 
 - `API_PASSWORD`: Required. Protects against unauthorized access and API network abuses.
 - `PROXY_URL`: Optional. HTTP/HTTPS/SOCKS5 proxy URL for forwarding network requests.
 - `MPD_LIVE_STREAM_DELAY`: Optional. Delay in seconds for live DASH streams. This is useful to prevent buffering issues with live streams. Default is `30` seconds.
+
+
+### Option 2: Premium Hosted Service (ElfHosted)
+<div style="text-align: center;">
+  <img src="https://store.elfhosted.com/wp-content/uploads/2024/08/mediaflow-proxy.jpg" alt="ElfHosted Logo" width="200" style="border-radius: 15px;">
+</div>
+For a hassle-free, high-performance deployment of MediaFlow Proxy, consider the premium hosted service through ElfHosted.
+
+To purchase:
+1. Visit [https://store.elfhosted.com/product/mediaflow-proxy](https://store.elfhosted.com/product/mediaflow-proxy)
+2. Follow ElfHosted's setup instructions
+
+Benefits:
+- Instant setup and automatic updates
+- High performance and 24/7 availability
+- No server maintenance required
+
+Ideal for users who want a reliable, plug-and-play solution without the technical overhead of self-hosting.
 
 ## Usage
 
@@ -127,13 +148,15 @@ encoded_url = encode_mediaflow_proxy_url(
         "key": "FmY0xnWCPCNaSpRG-tUuTQ",
         "api_password": "your_password"
     },
-    proxy_headers={
+    request_headers={
         "referer": "https://media.axprod.net/",
         "origin": "https://media.axprod.net",
     }
 )
 
 print(encoded_url)
+
+# http://127.0.0.1:8888/proxy/mpd/manifest?key_id=nrQFDeRLSAKTLifXUIPiZg&key=FmY0xnWCPCNaSpRG-tUuTQ&api_password=your_password&d=https%3A%2F%2Fmedia.axprod.net%2FTestVectors%2Fv7-MultiDRM-SingleKey%2FManifest_1080p_ClearKey.mpd&h_referer=https%3A%2F%2Fmedia.axprod.net%2F&h_origin=https%3A%2F%2Fmedia.axprod.net
 ```
 
 This will output a properly encoded URL that can be used with players like VLC.
