@@ -31,17 +31,43 @@ async def handle_hls_stream_proxy(request: Request, destination: str, headers: d
     Returns:
         Response: The HTTP response with the processed m3u8 playlist or streamed content.
     """
+    client = httpx.AsyncClient(
+        follow_redirects=True,
+        timeout=httpx.Timeout(30.0),
+        limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+        proxy=settings.proxy_url,
+    )
+    streamer = Streamer(client)
     try:
-        if destination.endswith((".m3u", ".m3u8")) or "mpegurl" in headers.get("accept", "").lower():
-            return await fetch_and_process_m3u8(destination, headers, request, key_url)
+        if destination.endswith((".m3u", ".m3u8")):
+            return await fetch_and_process_m3u8(streamer, destination, headers, request, key_url)
 
-        return await handle_stream_request(request.method, destination, headers)
+        response = await streamer.head(destination, headers)
+        if "mpegurl" in response.headers.get("content-type", "").lower():
+            return await fetch_and_process_m3u8(streamer, destination, headers, request, key_url)
+
+        headers.update({"accept-ranges": headers.get("range", "bytes=0-")})
+        # handle the encoding response header, since decompression is handled by the httpx
+        if "content-encoding" in response.headers:
+            del response.headers["content-encoding"]
+
+        return StreamingResponse(
+            streamer.stream_content(destination, headers),
+            headers=response.headers,
+            background=BackgroundTask(streamer.close),
+        )
     except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error while fetching m3u8: {e}")
-        return Response(status_code=e.response.status_code, content=str(e))
+        await client.aclose()
+        logger.error(f"Upstream service error while handling request: {e}")
+        return Response(status_code=e.response.status_code, content=f"Upstream service error: {e}")
+    except DownloadError as e:
+        await client.aclose()
+        logger.error(f"Error downloading {destination}: {e}")
+        return Response(status_code=e.status_code, content=str(e))
     except Exception as e:
-        logger.exception(f"Error in live_stream_proxy: {str(e)}")
-        return Response(status_code=500, content=f"Internal server error: {str(e)}")
+        await client.aclose()
+        logger.error(f"Internal server error while handling request: {e}")
+        return Response(status_code=502, content=f"Internal server error: {e}")
 
 
 async def proxy_stream(method: str, video_url: str, headers: dict):
@@ -90,23 +116,27 @@ async def handle_stream_request(method: str, video_url: str, headers: dict):
                 background=BackgroundTask(streamer.close),
             )
     except httpx.HTTPStatusError as e:
-        logger.error(f"Upstream service error while handling {method} request: {e}")
         await client.aclose()
+        logger.error(f"Upstream service error while handling {method} request: {e}")
         return Response(status_code=e.response.status_code, content=f"Upstream service error: {e}")
     except DownloadError as e:
-        logger.error(f"Error downloading {video_url}: {e}")
-        return Response(status_code=502, content=str(e))
-    except Exception as e:
-        logger.error(f"Internal server error while handling {method} request: {e}")
         await client.aclose()
+        logger.error(f"Error downloading {video_url}: {e}")
+        return Response(status_code=e.status_code, content=str(e))
+    except Exception as e:
+        await client.aclose()
+        logger.error(f"Internal server error while handling {method} request: {e}")
         return Response(status_code=502, content=f"Internal server error: {e}")
 
 
-async def fetch_and_process_m3u8(url: str, headers: dict, request: Request, key_url: HttpUrl = None):
+async def fetch_and_process_m3u8(
+    streamer: Streamer, url: str, headers: dict, request: Request, key_url: HttpUrl = None
+):
     """
     Fetches and processes the m3u8 playlist, converting it to an HLS playlist.
 
     Args:
+        streamer (Streamer): The HTTP client to use for streaming.
         url (str): The URL of the m3u8 playlist.
         headers (dict): The headers to include in the request.
         request (Request): The incoming HTTP request.
@@ -115,34 +145,29 @@ async def fetch_and_process_m3u8(url: str, headers: dict, request: Request, key_
     Returns:
         Response: The HTTP response with the processed m3u8 playlist.
     """
-    async with httpx.AsyncClient(
-        follow_redirects=True,
-        timeout=httpx.Timeout(30.0),
-        limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
-        proxy=settings.proxy_url,
-    ) as client:
-        try:
-            streamer = Streamer(client)
-            content = await streamer.get_text(url, headers)
-            processor = M3U8Processor(request, key_url)
-            processed_content = await processor.process_m3u8(content, str(streamer.response.url))
-            return Response(
-                content=processed_content,
-                media_type="application/vnd.apple.mpegurl",
-                headers={
-                    "Content-Disposition": "inline",
-                    "Accept-Ranges": "none",
-                },
-            )
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error while fetching m3u8: {e}")
-            return Response(status_code=e.response.status_code, content=str(e))
-        except DownloadError as e:
-            logger.error(f"Error downloading m3u8: {url}")
-            return Response(status_code=502, content=str(e))
-        except Exception as e:
-            logger.exception(f"Unexpected error while processing m3u8: {e}")
-            return Response(status_code=502, content=str(e))
+    try:
+        content = await streamer.get_text(url, headers)
+        processor = M3U8Processor(request, key_url)
+        processed_content = await processor.process_m3u8(content, str(streamer.response.url))
+        return Response(
+            content=processed_content,
+            media_type="application/vnd.apple.mpegurl",
+            headers={
+                "Content-Disposition": "inline",
+                "Accept-Ranges": "none",
+            },
+        )
+    except httpx.HTTPStatusError as e:
+        logger.error(f"HTTP error while fetching m3u8: {e}")
+        return Response(status_code=e.response.status_code, content=str(e))
+    except DownloadError as e:
+        logger.error(f"Error downloading m3u8: {url}")
+        return Response(status_code=502, content=str(e))
+    except Exception as e:
+        logger.exception(f"Unexpected error while processing m3u8: {e}")
+        return Response(status_code=502, content=str(e))
+    finally:
+        await streamer.close()
 
 
 async def handle_drm_key_data(key_id, key, drm_info):
