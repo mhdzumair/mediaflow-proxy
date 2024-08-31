@@ -52,6 +52,10 @@ Set the following environment variables:
    ```
 
 #### Using pip
+
+> ![Note]
+> Ensure that you have Python 3.10 or higher installed.
+
 1. Install the package:
    ```
    pip install mediaflow-proxy
@@ -69,6 +73,10 @@ Set the following environment variables:
 
 
 #### Using git & poetry
+
+> ![Note]
+> Ensure that you have Python 3.10 or higher installed.
+
 
 1. Clone the repository:
    ```
