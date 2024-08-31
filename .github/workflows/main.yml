@@ -63,6 +63,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -73,9 +75,20 @@ jobs:
         run: |
           pip install huggingface_hub
 
+      - name: Configure Git
+        run: |
+          git config --global user.email "mhdzumair@gmail.com"
+          git config --global user.name "Mohamed Zumair"
+
       - name: Push to Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           huggingface-cli login --token $HF_TOKEN
-          git push https://huggingface.co/spaces/mhdzumair/mediaflow-proxy main
+          git remote add hf https://huggingface.co/spaces/mhdzumair/mediaflow-proxy
+          git fetch hf
+          git checkout -b main || git checkout main
+          git pull hf main --rebase || true
+          git add .
+          git commit -m "Update to version ${{ github.ref_name }}" || echo "No changes to commit"
+          git push hf main
