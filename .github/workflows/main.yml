@@ -39,7 +39,7 @@ jobs:
       - name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
 
-  deploy:
+  publish_to_pypi:
     runs-on: ubuntu-latest
 
     steps:
@@ -84,11 +84,11 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          huggingface-cli login --token $HF_TOKEN
+          huggingface-cli login --token $HF_TOKEN --add-to-git-credential
           git remote add hf https://huggingface.co/spaces/mhdzumair/mediaflow-proxy
           git fetch hf
           git checkout -b main || git checkout main
           git pull hf main --rebase || true
           git add .
           git commit -m "Update to version ${{ github.ref_name }}" || echo "No changes to commit"
-          git push hf main
+          git push https://$HF_TOKEN@huggingface.co/spaces/mhdzumair/mediaflow-proxy main
