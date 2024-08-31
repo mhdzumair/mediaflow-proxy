@@ -8,14 +8,14 @@ app_port: 8888
 pinned: false
 license: mit
 thumbnail: >-
-  https://cdn.githubraw.com/mhdzumair/mediaflow-proxy/main/static/logo.png
+  https://cdn.githubraw.com/mhdzumair/mediaflow-proxy/main/mediaflow_proxy/static/logo.png
 ---
 
 
 # MediaFlow Proxy
 
 <div style="text-align: center;">
-  <img src="https://cdn.githubraw.com/mhdzumair/mediaflow-proxy/main/static/logo.png" alt="MediaFlow Proxy Logo" width="200" style="border-radius: 15px;">
+  <img src="https://cdn.githubraw.com/mhdzumair/mediaflow-proxy/main/mediaflow_proxy/static/logo.png" alt="MediaFlow Proxy Logo" width="200" style="border-radius: 15px;">
 </div>
 
 MediaFlow Proxy is a powerful and flexible solution for proxifying various types of media streams. It supports HTTP(S) links, HLS (M3U8) streams, and MPEG-DASH streams, including DRM-protected content. This proxy can convert MPEG-DASH DRM-protected streams to decrypted HLS live streams in real-time, making it one of the fastest live decrypter servers available.
