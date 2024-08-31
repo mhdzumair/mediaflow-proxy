@@ -1,9 +1,16 @@
 import logging
+import typing
+from functools import partial
 from urllib import parse
 
+import anyio
 import httpx
 import tenacity
+from fastapi import Response
+from starlette.background import BackgroundTask
+from starlette.concurrency import iterate_in_threadpool
 from starlette.requests import Request
+from starlette.types import Receive, Send, Scope
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from mediaflow_proxy.configs import settings
@@ -84,7 +91,7 @@ class Streamer:
         """
         async with self.client.stream("GET", url, headers=headers, follow_redirects=True) as self.response:
             self.response.raise_for_status()
-            async for chunk in self.response.aiter_bytes():
+            async for chunk in self.response.aiter_raw():
                 yield chunk
 
     async def head(self, url: str, headers: dict):
@@ -266,3 +273,80 @@ def get_proxy_headers(request: Request) -> dict:
     request_headers = {k: v for k, v in request.headers.items() if k in SUPPORTED_REQUEST_HEADERS}
     request_headers.update({k[2:].lower(): v for k, v in request.query_params.items() if k.startswith("h_")})
     return request_headers
+
+
+class EnhancedStreamingResponse(Response):
+    body_iterator: typing.AsyncIterable[typing.Any]
+
+    def __init__(
+        self,
+        content: typing.Union[typing.AsyncIterable[typing.Any], typing.Iterable[typing.Any]],
+        status_code: int = 200,
+        headers: typing.Optional[typing.Mapping[str, str]] = None,
+        media_type: typing.Optional[str] = None,
+        background: typing.Optional[BackgroundTask] = None,
+    ) -> None:
+        if isinstance(content, typing.AsyncIterable):
+            self.body_iterator = content
+        else:
+            self.body_iterator = iterate_in_threadpool(content)
+        self.status_code = status_code
+        self.media_type = self.media_type if media_type is None else media_type
+        self.background = background
+        self.init_headers(headers)
+
+    @staticmethod
+    async def listen_for_disconnect(receive: Receive) -> None:
+        try:
+            while True:
+                message = await receive()
+                if message["type"] == "http.disconnect":
+                    logger.debug("Client disconnected")
+                    break
+        except Exception as e:
+            logger.error(f"Error in listen_for_disconnect: {str(e)}")
+
+    async def stream_response(self, send: Send) -> None:
+        try:
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": self.status_code,
+                    "headers": self.raw_headers,
+                }
+            )
+            async for chunk in self.body_iterator:
+                if not isinstance(chunk, (bytes, memoryview)):
+                    chunk = chunk.encode(self.charset)
+                try:
+                    await send({"type": "http.response.body", "body": chunk, "more_body": True})
+                except (ConnectionResetError, anyio.BrokenResourceError):
+                    logger.info("Client disconnected during streaming")
+                    return
+
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+        except Exception as e:
+            logger.error(f"Error in stream_response: {str(e)}")
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        async with anyio.create_task_group() as task_group:
+
+            async def wrap(func: typing.Callable[[], typing.Awaitable[None]]) -> None:
+                try:
+                    await func()
+                except ExceptionGroup as e:
+                    if not any(isinstance(exc, anyio.get_cancelled_exc_class()) for exc in e.exceptions):
+                        logger.exception("Error in streaming task")
+                    raise
+                except Exception as e:
+                    if not isinstance(e, anyio.get_cancelled_exc_class()):
+                        logger.exception("Error in streaming task")
+                    raise
+                finally:
+                    task_group.cancel_scope.cancel()
+
+            task_group.start_soon(wrap, partial(self.stream_response, send))
+            await wrap(partial(self.listen_for_disconnect, receive))
+
+        if self.background is not None:
+            await self.background()

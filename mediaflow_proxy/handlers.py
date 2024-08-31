@@ -1,18 +1,23 @@
 import base64
 import logging
-from ipaddress import ip_address
 
 import httpx
 from fastapi import Request, Response, HTTPException
-from fastapi.responses import StreamingResponse
 from pydantic import HttpUrl
 from starlette.background import BackgroundTask
+from starlette.status import HTTP_206_PARTIAL_CONTENT
 
 from .configs import settings
 from .const import SUPPORTED_RESPONSE_HEADERS
 from .mpd_processor import process_manifest, process_playlist, process_segment
 from .utils.cache_utils import get_cached_mpd, get_cached_init_segment
-from .utils.http_utils import Streamer, DownloadError, download_file_with_retry, request_with_retry
+from .utils.http_utils import (
+    Streamer,
+    DownloadError,
+    download_file_with_retry,
+    request_with_retry,
+    EnhancedStreamingResponse,
+)
 from .utils.m3u8_processor import M3U8Processor
 from .utils.mpd_utils import pad_base64
 
@@ -49,13 +54,18 @@ async def handle_hls_stream_proxy(request: Request, destination: str, headers: d
 
         headers.update({"range": headers.get("range", "bytes=0-")})
         # clean up the headers to only include the necessary headers and remove acl headers
-        response_headers = {
-            k.title(): v for k, v in response.headers.items() if k.lower() in SUPPORTED_RESPONSE_HEADERS
-        }
+        response_headers = {k: v for k, v in response.headers.multi_items() if k in SUPPORTED_RESPONSE_HEADERS}
 
-        return StreamingResponse(
+        if transfer_encoding := response_headers.get("transfer-encoding"):
+            if "chunked" not in transfer_encoding:
+                transfer_encoding += ", chunked"
+        else:
+            transfer_encoding = "chunked"
+        response_headers["transfer-encoding"] = transfer_encoding
+
+        return EnhancedStreamingResponse(
             streamer.stream_content(destination, headers),
-            status_code=206,
+            status_code=HTTP_206_PARTIAL_CONTENT,
             headers=response_headers,
             background=BackgroundTask(streamer.close),
         )
@@ -110,18 +120,22 @@ async def handle_stream_request(method: str, video_url: str, headers: dict):
     try:
         response = await streamer.head(video_url, headers)
         # clean up the headers to only include the necessary headers and remove acl headers
-        response_headers = {
-            k.title(): v for k, v in response.headers.items() if k.lower() in SUPPORTED_RESPONSE_HEADERS
-        }
+        response_headers = {k: v for k, v in response.headers.multi_items() if k in SUPPORTED_RESPONSE_HEADERS}
+        if transfer_encoding := response_headers.get("transfer-encoding"):
+            if "chunked" not in transfer_encoding:
+                transfer_encoding += ", chunked"
+        else:
+            transfer_encoding = "chunked"
+        response_headers["transfer-encoding"] = transfer_encoding
 
         if method == "HEAD":
             await streamer.close()
-            return Response(headers=response_headers, status_code=response.status_code)
+            return Response(headers=response_headers, status_code=HTTP_206_PARTIAL_CONTENT)
         else:
-            return StreamingResponse(
+            return EnhancedStreamingResponse(
                 streamer.stream_content(video_url, headers),
                 headers=response_headers,
-                status_code=206,
+                status_code=HTTP_206_PARTIAL_CONTENT,
                 background=BackgroundTask(streamer.close),
             )
     except httpx.HTTPStatusError as e:
@@ -162,8 +176,9 @@ async def fetch_and_process_m3u8(
             content=processed_content,
             media_type="application/vnd.apple.mpegurl",
             headers={
-                "Content-Disposition": "inline",
-                "Accept-Ranges": "none",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
             },
         )
     except httpx.HTTPStatusError as e:

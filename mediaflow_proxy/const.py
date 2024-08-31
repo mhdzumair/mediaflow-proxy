@@ -7,8 +7,8 @@ SUPPORTED_RESPONSE_HEADERS = [
     "transfer-encoding",
     "last-modified",
     "etag",
-    "server",
-    "date",
+    "cache-control",
+    "expires",
 ]
 
 SUPPORTED_REQUEST_HEADERS = [
@@ -16,8 +16,9 @@ SUPPORTED_REQUEST_HEADERS = [
     "accept-encoding",
     "accept-language",
     "connection",
-    "transfer-encoding",
     "range",
     "if-range",
     "user-agent",
+    "referer",
+    "origin",
 ]
