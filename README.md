@@ -31,9 +31,8 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 - Support for HTTP/HTTPS/SOCKS5 proxy forwarding
 - Protect against unauthorized access and network bandwidth abuses
 
-## Installation
 
-### Configuration
+## Configuration
 
 Set the following environment variables:
 
@@ -41,6 +40,7 @@ Set the following environment variables:
 - `PROXY_URL`: Optional. HTTP/HTTPS/SOCKS5 proxy URL for forwarding network requests.
 - `MPD_LIVE_STREAM_DELAY`: Optional. Delay in seconds for live DASH streams. This is useful to prevent buffering issues with live streams. Default is `30` seconds.
 
+## Installation
 
 ### Option 1: Self-Hosted Deployment
 
@@ -51,7 +51,24 @@ Set the following environment variables:
    docker run -p 8888:8888 -e API_PASSWORD=your_password mhdzumair/mediaflow-proxy
    ```
 
-#### Using Poetry
+#### Using pip
+1. Install the package:
+   ```
+   pip install mediaflow-proxy
+   ```
+
+2. Set the `API_PASSWORD` and other environment variables in `.env`:
+   ```
+   echo "API_PASSWORD=your_password" > .env
+   ```
+
+3. Run the MediaFlow Proxy server:
+   ```
+   mediaflow-proxy
+   ```
+
+
+#### Using git & poetry
 
 1. Clone the repository:
    ```

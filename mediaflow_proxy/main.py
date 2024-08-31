@@ -1,4 +1,5 @@
 import logging
+from importlib import resources
 
 from fastapi import FastAPI, Depends, Security, HTTPException
 from fastapi.security import APIKeyQuery, APIKeyHeader
@@ -42,10 +43,16 @@ async def get_favicon():
 
 
 app.include_router(proxy_router, prefix="/proxy", tags=["proxy"], dependencies=[Depends(verify_api_key)])
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
+static_path = resources.files("mediaflow_proxy").joinpath("static")
+app.mount("/", StaticFiles(directory=str(static_path), html=True), name="static")
 
 
-if __name__ == "__main__":
+def run():
     import uvicorn
 
     uvicorn.run(app, host="127.0.0.1", port=8888)
+
+
+if __name__ == "__main__":
+    run()
