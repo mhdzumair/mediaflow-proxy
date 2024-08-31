@@ -33,6 +33,14 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 
 ## Installation
 
+### Configuration
+
+Set the following environment variables:
+
+- `API_PASSWORD`: Required. Protects against unauthorized access and API network abuses.
+- `PROXY_URL`: Optional. HTTP/HTTPS/SOCKS5 proxy URL for forwarding network requests.
+- `MPD_LIVE_STREAM_DELAY`: Optional. Delay in seconds for live DASH streams. This is useful to prevent buffering issues with live streams. Default is `30` seconds.
+
 
 ### Option 1: Self-Hosted Deployment
 
@@ -76,17 +84,8 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 
 2. Run the Docker container:
    ```
-   docker run -p 8888:8888 -e API_PASSWORD=your_password mediaflow-proxy
+   docker run -d -p 8888:8888 -e API_PASSWORD=your_password --restart unless-stopped --name mediaflow-proxy mediaflow-proxy
    ```
-
-#### Configuration
-
-Set the following environment variables:
-
-- `API_PASSWORD`: Required. Protects against unauthorized access and API network abuses.
-- `PROXY_URL`: Optional. HTTP/HTTPS/SOCKS5 proxy URL for forwarding network requests.
-- `MPD_LIVE_STREAM_DELAY`: Optional. Delay in seconds for live DASH streams. This is useful to prevent buffering issues with live streams. Default is `30` seconds.
-
 
 ### Option 2: Premium Hosted Service (ElfHosted)
 <div style="text-align: center;">
