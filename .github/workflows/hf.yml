@@ -1,0 +1,28 @@
+name: Sync to Hugging Face hub
+on:
+  push:
+    branches: [main]
+
+jobs:
+  push_to_huggingface:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        env:
+          GIT_NAME: ${{ secrets.GIT_NAME }}
+          GIT_EMAIL: ${{ secrets.GIT_EMAIL }}
+        run: |
+          git config --global user.name "$GIT_NAME"
+          git config --global user.email "$GIT_EMAIL"
+
+      - name: Push to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git push https://mhdzumair:$HF_TOKEN@huggingface.co/spaces/mhdzumair/mediaflow-proxy main -f
