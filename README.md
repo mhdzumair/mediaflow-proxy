@@ -30,7 +30,7 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 - Retrieve public IP address of the MediaFlow Proxy server for use with Debrid services
 - Support for HTTP/HTTPS/SOCKS5 proxy forwarding
 - Protect against unauthorized access and network bandwidth abuses
-
+- Support for play expired or self-signed SSL certificates server streams
 
 ## Configuration
 
@@ -156,6 +156,13 @@ Once the server is running, for more details on the available endpoints and thei
 ```bash
 mpv "http://localhost:8888/proxy/stream?d=https://jsoncompare.org/LearningContainer/SampleFiles/Video/MP4/sample-mp4-file.mp4&api_password=your_password"
 ```
+
+#### Proxy HTTPS self-signed certificate Stream
+
+```bash
+mpv "http://localhost:8888/proxy/stream?d=https://self-signed.badssl.com/&api_password=your_password&verify_ssl=false"
+```
+
 
 #### Proxy HLS Stream with Headers
 

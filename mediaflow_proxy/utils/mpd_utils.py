@@ -10,12 +10,12 @@ import xmltodict
 logger = logging.getLogger(__name__)
 
 
-def parse_mpd(mpd_content: str) -> dict:
+def parse_mpd(mpd_content: str | bytes) -> dict:
     """
     Parses the MPD content into a dictionary.
 
     Args:
-        mpd_content (str): The MPD content as a string.
+        mpd_content (str | bytes): The MPD content to parse.
 
     Returns:
         dict: The parsed MPD content as a dictionary.

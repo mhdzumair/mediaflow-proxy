@@ -24,7 +24,9 @@ from .utils.mpd_utils import pad_base64
 logger = logging.getLogger(__name__)
 
 
-async def handle_hls_stream_proxy(request: Request, destination: str, headers: dict, key_url: HttpUrl = None):
+async def handle_hls_stream_proxy(
+    request: Request, destination: str, headers: dict, key_url: HttpUrl = None, verify_ssl: bool = True
+):
     """
     Handles the HLS stream proxy request, fetching and processing the m3u8 playlist or streaming the content.
 
@@ -33,6 +35,7 @@ async def handle_hls_stream_proxy(request: Request, destination: str, headers: d
         destination (str): The destination URL to fetch the content from.
         headers (dict): The headers to include in the request.
         key_url (str, optional): The HLS Key URL to replace the original key URL. Defaults to None.
+        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to True.
 
     Returns:
         Response: The HTTP response with the processed m3u8 playlist or streamed content.
@@ -42,6 +45,7 @@ async def handle_hls_stream_proxy(request: Request, destination: str, headers: d
         timeout=httpx.Timeout(30.0),
         limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
         proxy=settings.proxy_url,
+        verify=verify_ssl,
     )
     streamer = Streamer(client)
     try:
@@ -83,7 +87,7 @@ async def handle_hls_stream_proxy(request: Request, destination: str, headers: d
         return Response(status_code=502, content=f"Internal server error: {e}")
 
 
-async def proxy_stream(method: str, video_url: str, headers: dict):
+async def proxy_stream(method: str, video_url: str, headers: dict, verify_ssl: bool = True):
     """
     Proxies the stream request to the given video URL.
 
@@ -91,14 +95,15 @@ async def proxy_stream(method: str, video_url: str, headers: dict):
         method (str): The HTTP method (e.g., GET, HEAD).
         video_url (str): The URL of the video to stream.
         headers (dict): The headers to include in the request.
+        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to True.
 
     Returns:
         Response: The HTTP response with the streamed content.
     """
-    return await handle_stream_request(method, video_url, headers)
+    return await handle_stream_request(method, video_url, headers, verify_ssl)
 
 
-async def handle_stream_request(method: str, video_url: str, headers: dict):
+async def handle_stream_request(method: str, video_url: str, headers: dict, verify_ssl: bool = True):
     """
     Handles the stream request, fetching the content from the video URL and streaming it.
 
@@ -106,6 +111,7 @@ async def handle_stream_request(method: str, video_url: str, headers: dict):
         method (str): The HTTP method (e.g., GET, HEAD).
         video_url (str): The URL of the video to stream.
         headers (dict): The headers to include in the request.
+        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to True.
 
     Returns:
         Response: The HTTP response with the streamed content.
@@ -115,6 +121,7 @@ async def handle_stream_request(method: str, video_url: str, headers: dict):
         timeout=httpx.Timeout(30.0),
         limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
         proxy=settings.proxy_url,
+        verify=verify_ssl,
     )
     streamer = Streamer(client)
     try:
@@ -223,7 +230,9 @@ async def handle_drm_key_data(key_id, key, drm_info):
     return key_id, key
 
 
-async def get_manifest(request: Request, mpd_url: str, headers: dict, key_id: str = None, key: str = None):
+async def get_manifest(
+    request: Request, mpd_url: str, headers: dict, key_id: str = None, key: str = None, verify_ssl: bool = True
+):
     """
     Retrieves and processes the MPD manifest, converting it to an HLS manifest.
 
@@ -233,12 +242,15 @@ async def get_manifest(request: Request, mpd_url: str, headers: dict, key_id: st
         headers (dict): The headers to include in the request.
         key_id (str, optional): The DRM key ID. Defaults to None.
         key (str, optional): The DRM key. Defaults to None.
+        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to True.
 
     Returns:
         Response: The HTTP response with the HLS manifest.
     """
     try:
-        mpd_dict = await get_cached_mpd(mpd_url, headers=headers, parse_drm=not key_id and not key)
+        mpd_dict = await get_cached_mpd(
+            mpd_url, headers=headers, parse_drm=not key_id and not key, verify_ssl=verify_ssl
+        )
     except DownloadError as e:
         raise HTTPException(status_code=e.status_code, detail=f"Failed to download MPD: {e.message}")
     drm_info = mpd_dict.get("drmInfo", {})
@@ -259,7 +271,13 @@ async def get_manifest(request: Request, mpd_url: str, headers: dict, key_id: st
 
 
 async def get_playlist(
-    request: Request, mpd_url: str, profile_id: str, headers: dict, key_id: str = None, key: str = None
+    request: Request,
+    mpd_url: str,
+    profile_id: str,
+    headers: dict,
+    key_id: str = None,
+    key: str = None,
+    verify_ssl: bool = True,
 ):
     """
     Retrieves and processes the MPD manifest, converting it to an HLS playlist for a specific profile.
@@ -271,18 +289,29 @@ async def get_playlist(
         headers (dict): The headers to include in the request.
         key_id (str, optional): The DRM key ID. Defaults to None.
         key (str, optional): The DRM key. Defaults to None.
+        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to True.
 
     Returns:
         Response: The HTTP response with the HLS playlist.
     """
     mpd_dict = await get_cached_mpd(
-        mpd_url, headers=headers, parse_drm=not key_id and not key, parse_segment_profile_id=profile_id
+        mpd_url,
+        headers=headers,
+        parse_drm=not key_id and not key,
+        parse_segment_profile_id=profile_id,
+        verify_ssl=verify_ssl,
     )
     return await process_playlist(request, mpd_dict, profile_id)
 
 
 async def get_segment(
-    init_url: str, segment_url: str, mimetype: str, headers: dict, key_id: str = None, key: str = None
+    init_url: str,
+    segment_url: str,
+    mimetype: str,
+    headers: dict,
+    key_id: str = None,
+    key: str = None,
+    verify_ssl: bool = True,
 ):
     """
     Retrieves and processes a media segment, decrypting it if necessary.
@@ -294,13 +323,14 @@ async def get_segment(
         headers (dict): The headers to include in the request.
         key_id (str, optional): The DRM key ID. Defaults to None.
         key (str, optional): The DRM key. Defaults to None.
+        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to True.
 
     Returns:
         Response: The HTTP response with the processed segment.
     """
     try:
-        init_content = await get_cached_init_segment(init_url, headers)
-        segment_content = await download_file_with_retry(segment_url, headers)
+        init_content = await get_cached_init_segment(init_url, headers, verify_ssl)
+        segment_content = await download_file_with_retry(segment_url, headers, verify_ssl=verify_ssl)
     except DownloadError as e:
         raise HTTPException(status_code=e.status_code, detail=f"Failed to download segment: {e.message}")
     return await process_segment(init_content, segment_content, mimetype, key_id, key)
