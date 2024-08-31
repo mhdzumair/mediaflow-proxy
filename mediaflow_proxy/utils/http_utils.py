@@ -137,7 +137,7 @@ class Streamer:
         await self.client.aclose()
 
 
-async def download_file_with_retry(url: str, headers: dict, timeout: float = 10.0):
+async def download_file_with_retry(url: str, headers: dict, timeout: float = 10.0, verify_ssl: bool = True):
     """
     Downloads a file with retry logic.
 
@@ -145,6 +145,7 @@ async def download_file_with_retry(url: str, headers: dict, timeout: float = 10.
         url (str): The URL of the file to download.
         headers (dict): The headers to include in the request.
         timeout (float, optional): The request timeout. Defaults to 10.0.
+        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to True.
 
     Returns:
         bytes: The downloaded file content.
@@ -152,7 +153,9 @@ async def download_file_with_retry(url: str, headers: dict, timeout: float = 10.
     Raises:
         DownloadError: If the download fails after retries.
     """
-    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout, proxy=settings.proxy_url) as client:
+    async with httpx.AsyncClient(
+        follow_redirects=True, timeout=timeout, proxy=settings.proxy_url, verify=verify_ssl
+    ) as client:
         try:
             response = await fetch_with_retry(client, "GET", url, headers)
             return response.content
