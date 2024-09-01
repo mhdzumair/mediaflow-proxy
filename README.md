@@ -53,7 +53,7 @@ Set the following environment variables:
 
 #### Using pip
 
-> ![Note]
+> ![IMPORTANT]
 > Ensure that you have Python 3.10 or higher installed.
 
 1. Install the package:
@@ -74,7 +74,7 @@ Set the following environment variables:
 
 #### Using git & poetry
 
-> ![Note]
+> ![IMPORTANT]
 > Ensure that you have Python 3.10 or higher installed.
 
 
