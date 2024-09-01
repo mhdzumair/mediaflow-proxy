@@ -5,7 +5,6 @@ import httpx
 from fastapi import Request, Response, HTTPException
 from pydantic import HttpUrl
 from starlette.background import BackgroundTask
-from starlette.status import HTTP_206_PARTIAL_CONTENT
 
 from .configs import settings
 from .const import SUPPORTED_RESPONSE_HEADERS
@@ -69,7 +68,7 @@ async def handle_hls_stream_proxy(
 
         return EnhancedStreamingResponse(
             streamer.stream_content(destination, headers),
-            status_code=HTTP_206_PARTIAL_CONTENT,
+            status_code=response.status_code,
             headers=response_headers,
             background=BackgroundTask(streamer.close),
         )
@@ -137,12 +136,12 @@ async def handle_stream_request(method: str, video_url: str, headers: dict, veri
 
         if method == "HEAD":
             await streamer.close()
-            return Response(headers=response_headers, status_code=HTTP_206_PARTIAL_CONTENT)
+            return Response(headers=response_headers, status_code=response.status_code)
         else:
             return EnhancedStreamingResponse(
                 streamer.stream_content(video_url, headers),
                 headers=response_headers,
-                status_code=HTTP_206_PARTIAL_CONTENT,
+                status_code=response.status_code,
                 background=BackgroundTask(streamer.close),
             )
     except httpx.HTTPStatusError as e:
@@ -183,9 +182,8 @@ async def fetch_and_process_m3u8(
             content=processed_content,
             media_type="application/vnd.apple.mpegurl",
             headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-                "Expires": "0",
+                "Content-Disposition": "inline",
+                "Accept-Ranges": "none",
             },
         )
     except httpx.HTTPStatusError as e:
