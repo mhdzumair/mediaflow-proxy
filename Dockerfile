@@ -26,7 +26,7 @@ COPY --chown=mediaflow_proxy:mediaflow_proxy pyproject.toml poetry.lock* /mediaf
 
 # Project initialization:
 RUN poetry config virtualenvs.in-project true \
-    && poetry install --no-interaction --no-ansi --no-dev
+    && poetry install --no-interaction --no-ansi --no-root --only main
 
 # Copy project files
 COPY --chown=mediaflow_proxy:mediaflow_proxy . /mediaflow_proxy
