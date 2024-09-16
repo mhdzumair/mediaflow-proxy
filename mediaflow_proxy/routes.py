@@ -14,7 +14,7 @@ async def hls_stream_proxy(
     d: HttpUrl,
     headers: dict = Depends(get_proxy_headers),
     key_url: HttpUrl | None = None,
-    verify_ssl: bool = True,
+    verify_ssl: bool = False,
 ):
     """
     Proxify HLS stream requests, fetching and processing the m3u8 playlist or streaming the content.
@@ -24,7 +24,7 @@ async def hls_stream_proxy(
         d (HttpUrl): The destination URL to fetch the content from.
         key_url (HttpUrl, optional): The HLS Key URL to replace the original key URL. Defaults to None. (Useful for bypassing some sneaky protection)
         headers (dict): The headers to include in the request.
-        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to True.
+        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to False.
 
     Returns:
         Response: The HTTP response with the processed m3u8 playlist or streamed content.
@@ -36,7 +36,7 @@ async def hls_stream_proxy(
 @proxy_router.head("/stream")
 @proxy_router.get("/stream")
 async def proxy_stream_endpoint(
-    request: Request, d: HttpUrl, headers: dict = Depends(get_proxy_headers), verify_ssl: bool = True
+    request: Request, d: HttpUrl, headers: dict = Depends(get_proxy_headers), verify_ssl: bool = False
 ):
     """
     Proxies stream requests to the given video URL.
@@ -45,7 +45,7 @@ async def proxy_stream_endpoint(
         request (Request): The incoming HTTP request.
         d (HttpUrl): The URL of the video to stream.
         headers (dict): The headers to include in the request.
-        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to True.
+        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to False.
 
     Returns:
         Response: The HTTP response with the streamed content.
@@ -61,7 +61,7 @@ async def manifest_endpoint(
     headers: dict = Depends(get_proxy_headers),
     key_id: str = None,
     key: str = None,
-    verify_ssl: bool = True,
+    verify_ssl: bool = False,
 ):
     """
     Retrieves and processes the MPD manifest, converting it to an HLS manifest.
@@ -72,7 +72,7 @@ async def manifest_endpoint(
         headers (dict): The headers to include in the request.
         key_id (str, optional): The DRM key ID. Defaults to None.
         key (str, optional): The DRM key. Defaults to None.
-        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to True.
+        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to False.
 
     Returns:
         Response: The HTTP response with the HLS manifest.
@@ -88,7 +88,7 @@ async def playlist_endpoint(
     headers: dict = Depends(get_proxy_headers),
     key_id: str = None,
     key: str = None,
-    verify_ssl: bool = True,
+    verify_ssl: bool = False,
 ):
     """
     Retrieves and processes the MPD manifest, converting it to an HLS playlist for a specific profile.
@@ -100,7 +100,7 @@ async def playlist_endpoint(
         headers (dict): The headers to include in the request.
         key_id (str, optional): The DRM key ID. Defaults to None.
         key (str, optional): The DRM key. Defaults to None.
-        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to True.
+        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to False.
 
     Returns:
         Response: The HTTP response with the HLS playlist.
@@ -116,7 +116,7 @@ async def segment_endpoint(
     headers: dict = Depends(get_proxy_headers),
     key_id: str = None,
     key: str = None,
-    verify_ssl: bool = True,
+    verify_ssl: bool = False,
 ):
     """
     Retrieves and processes a media segment, decrypting it if necessary.
@@ -128,7 +128,7 @@ async def segment_endpoint(
         headers (dict): The headers to include in the request.
         key_id (str, optional): The DRM key ID. Defaults to None.
         key (str, optional): The DRM key. Defaults to None.
-        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to True.
+        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to False.
 
     Returns:
         Response: The HTTP response with the processed segment.
