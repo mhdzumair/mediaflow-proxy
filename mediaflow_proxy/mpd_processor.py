@@ -7,18 +7,21 @@ from fastapi import Request, Response, HTTPException
 
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.drm.decrypter import decrypt_segment
-from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url, get_original_scheme
+from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url, get_original_scheme, ProxyRequestHeaders
 
 logger = logging.getLogger(__name__)
 
 
-async def process_manifest(request: Request, mpd_dict: dict, key_id: str = None, key: str = None) -> Response:
+async def process_manifest(
+    request: Request, mpd_dict: dict, proxy_headers: ProxyRequestHeaders, key_id: str = None, key: str = None
+) -> Response:
     """
     Processes the MPD manifest and converts it to an HLS manifest.
 
     Args:
         request (Request): The incoming HTTP request.
         mpd_dict (dict): The MPD manifest data.
+        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
         key_id (str, optional): The DRM key ID. Defaults to None.
         key (str, optional): The DRM key. Defaults to None.
 
@@ -26,10 +29,12 @@ async def process_manifest(request: Request, mpd_dict: dict, key_id: str = None,
         Response: The HLS manifest as an HTTP response.
     """
     hls_content = build_hls(mpd_dict, request, key_id, key)
-    return Response(content=hls_content, media_type="application/vnd.apple.mpegurl")
+    return Response(content=hls_content, media_type="application/vnd.apple.mpegurl", headers=proxy_headers.response)
 
 
-async def process_playlist(request: Request, mpd_dict: dict, profile_id: str) -> Response:
+async def process_playlist(
+    request: Request, mpd_dict: dict, profile_id: str, proxy_headers: ProxyRequestHeaders
+) -> Response:
     """
     Processes the MPD manifest and converts it to an HLS playlist for a specific profile.
 
@@ -37,6 +42,7 @@ async def process_playlist(request: Request, mpd_dict: dict, profile_id: str) ->
         request (Request): The incoming HTTP request.
         mpd_dict (dict): The MPD manifest data.
         profile_id (str): The profile ID to generate the playlist for.
+        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
 
     Returns:
         Response: The HLS playlist as an HTTP response.
@@ -49,13 +55,14 @@ async def process_playlist(request: Request, mpd_dict: dict, profile_id: str) ->
         raise HTTPException(status_code=404, detail="Profile not found")
 
     hls_content = build_hls_playlist(mpd_dict, matching_profiles, request)
-    return Response(content=hls_content, media_type="application/vnd.apple.mpegurl")
+    return Response(content=hls_content, media_type="application/vnd.apple.mpegurl", headers=proxy_headers.response)
 
 
 async def process_segment(
     init_content: bytes,
     segment_content: bytes,
     mimetype: str,
+    proxy_headers: ProxyRequestHeaders,
     key_id: str = None,
     key: str = None,
 ) -> Response:
@@ -66,6 +73,7 @@ async def process_segment(
         init_content (bytes): The initialization segment content.
         segment_content (bytes): The media segment content.
         mimetype (str): The MIME type of the segment.
+        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
         key_id (str, optional): The DRM key ID. Defaults to None.
         key (str, optional): The DRM key. Defaults to None.
 
@@ -81,7 +89,7 @@ async def process_segment(
         # For non-DRM protected content, we just concatenate init and segment content
         decrypted_content = init_content + segment_content
 
-    return Response(content=decrypted_content, media_type=mimetype)
+    return Response(content=decrypted_content, media_type=mimetype, headers=proxy_headers.response)
 
 
 def build_hls(mpd_dict: dict, request: Request, key_id: str = None, key: str = None) -> str:

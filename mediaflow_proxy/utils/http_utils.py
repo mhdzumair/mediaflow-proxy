@@ -1,5 +1,6 @@
 import logging
 import typing
+from dataclasses import dataclass
 from functools import partial
 from urllib import parse
 
@@ -137,7 +138,13 @@ class Streamer:
         await self.client.aclose()
 
 
-async def download_file_with_retry(url: str, headers: dict, timeout: float = 10.0, verify_ssl: bool = True):
+async def download_file_with_retry(
+    url: str,
+    headers: dict,
+    timeout: float = 10.0,
+    verify_ssl: bool = True,
+    use_request_proxy: bool = True,
+):
     """
     Downloads a file with retry logic.
 
@@ -146,6 +153,7 @@ async def download_file_with_retry(url: str, headers: dict, timeout: float = 10.
         headers (dict): The headers to include in the request.
         timeout (float, optional): The request timeout. Defaults to 10.0.
         verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to True.
+        use_request_proxy (bool, optional): Whether to use the proxy configuration from the user's MediaFlow config. Defaults to True.
 
     Returns:
         bytes: The downloaded file content.
@@ -154,7 +162,10 @@ async def download_file_with_retry(url: str, headers: dict, timeout: float = 10.
         DownloadError: If the download fails after retries.
     """
     async with httpx.AsyncClient(
-        follow_redirects=True, timeout=timeout, proxy=settings.proxy_url, verify=verify_ssl
+        follow_redirects=True,
+        timeout=timeout,
+        proxy=settings.proxy_url if use_request_proxy else None,
+        verify=verify_ssl,
     ) as client:
         try:
             response = await fetch_with_retry(client, "GET", url, headers)
@@ -166,7 +177,9 @@ async def download_file_with_retry(url: str, headers: dict, timeout: float = 10.
             raise DownloadError(502, f"Failed to download file: {e.last_attempt.result()}")
 
 
-async def request_with_retry(method: str, url: str, headers: dict, timeout: float = 10.0, **kwargs):
+async def request_with_retry(
+    method: str, url: str, headers: dict, timeout: float = 10.0, use_request_proxy: bool = True, **kwargs
+):
     """
     Sends an HTTP request with retry logic.
 
@@ -175,6 +188,7 @@ async def request_with_retry(method: str, url: str, headers: dict, timeout: floa
         url (str): The URL to send the request to.
         headers (dict): The headers to include in the request.
         timeout (float, optional): The request timeout. Defaults to 10.0.
+        use_request_proxy (bool, optional): Whether to use the proxy configuration from the user's MediaFlow config. Defaults to True.
         **kwargs: Additional arguments to pass to the request.
 
     Returns:
@@ -183,7 +197,9 @@ async def request_with_retry(method: str, url: str, headers: dict, timeout: floa
     Raises:
         DownloadError: If the request fails after retries.
     """
-    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout, proxy=settings.proxy_url) as client:
+    async with httpx.AsyncClient(
+        follow_redirects=True, timeout=timeout, proxy=settings.proxy_url if use_request_proxy else None
+    ) as client:
         try:
             response = await fetch_with_retry(client, method, url, headers, **kwargs)
             return response
@@ -198,6 +214,7 @@ def encode_mediaflow_proxy_url(
     destination_url: str | None = None,
     query_params: dict | None = None,
     request_headers: dict | None = None,
+    response_headers: dict | None = None,
 ) -> str:
     """
     Encodes a MediaFlow proxy URL with query parameters and headers.
@@ -208,6 +225,7 @@ def encode_mediaflow_proxy_url(
         destination_url (str, optional): The destination URL to include in the query parameters. Defaults to None.
         query_params (dict, optional): Additional query parameters to include. Defaults to None.
         request_headers (dict, optional): Headers to include as query parameters. Defaults to None.
+        response_headers (dict, optional): Headers to include as query parameters. Defaults to None.
 
     Returns:
         str: The encoded MediaFlow proxy URL.
@@ -220,6 +238,10 @@ def encode_mediaflow_proxy_url(
     if request_headers:
         query_params.update(
             {key if key.startswith("h_") else f"h_{key}": value for key, value in request_headers.items()}
+        )
+    if response_headers:
+        query_params.update(
+            {key if key.startswith("r_") else f"r_{key}": value for key, value in response_headers.items()}
         )
     # Encode the query parameters
     encoded_params = parse.urlencode(query_params, quote_via=parse.quote)
@@ -263,7 +285,13 @@ def get_original_scheme(request: Request) -> str:
     return "http"
 
 
-def get_proxy_headers(request: Request) -> dict:
+@dataclass
+class ProxyRequestHeaders:
+    request: dict
+    response: dict
+
+
+def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
     """
     Extracts proxy headers from the request query parameters.
 
@@ -271,11 +299,12 @@ def get_proxy_headers(request: Request) -> dict:
         request (Request): The incoming HTTP request.
 
     Returns:
-        dict: A dictionary of proxy headers.
+        ProxyRequest: A named tuple containing the request headers and response headers.
     """
     request_headers = {k: v for k, v in request.headers.items() if k in SUPPORTED_REQUEST_HEADERS}
     request_headers.update({k[2:].lower(): v for k, v in request.query_params.items() if k.startswith("h_")})
-    return request_headers
+    response_headers = {k[2:].lower(): v for k, v in request.query_params.items() if k.startswith("r_")}
+    return ProxyRequestHeaders(request_headers, response_headers)
 
 
 class EnhancedStreamingResponse(Response):
