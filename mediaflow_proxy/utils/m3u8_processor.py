@@ -3,6 +3,7 @@ from urllib import parse
 
 from pydantic import HttpUrl
 
+from mediaflow_proxy.utils.crypto_utils import encryption_handler
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url, get_original_scheme
 
 
@@ -74,10 +75,13 @@ class M3U8Processor:
             str: The proxied URL.
         """
         full_url = parse.urljoin(base_url, url)
+        query_params = dict(self.request.query_params)
+        has_encrypted = query_params.pop("has_encrypted", False)
 
         return encode_mediaflow_proxy_url(
             self.mediaflow_proxy_url,
             "",
             full_url,
             query_params=dict(self.request.query_params),
+            encryption_handler=encryption_handler if has_encrypted else None,
         )

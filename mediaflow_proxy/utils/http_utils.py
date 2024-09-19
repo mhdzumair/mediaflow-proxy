@@ -3,6 +3,7 @@ import typing
 from dataclasses import dataclass
 from functools import partial
 from urllib import parse
+from urllib.parse import urlencode
 
 import anyio
 import httpx
@@ -16,6 +17,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.const import SUPPORTED_REQUEST_HEADERS
+from mediaflow_proxy.utils.crypto_utils import EncryptionHandler
 
 logger = logging.getLogger(__name__)
 
@@ -215,9 +217,12 @@ def encode_mediaflow_proxy_url(
     query_params: dict | None = None,
     request_headers: dict | None = None,
     response_headers: dict | None = None,
+    encryption_handler: EncryptionHandler = None,
+    expiration: int = None,
+    ip: str = None,
 ) -> str:
     """
-    Encodes a MediaFlow proxy URL with query parameters and headers.
+    Encodes & Encrypt (Optional) a MediaFlow proxy URL with query parameters and headers.
 
     Args:
         mediaflow_proxy_url (str): The base MediaFlow proxy URL.
@@ -226,6 +231,9 @@ def encode_mediaflow_proxy_url(
         query_params (dict, optional): Additional query parameters to include. Defaults to None.
         request_headers (dict, optional): Headers to include as query parameters. Defaults to None.
         response_headers (dict, optional): Headers to include as query parameters. Defaults to None.
+        encryption_handler (EncryptionHandler, optional): The encryption handler to use. Defaults to None.
+        expiration (int, optional): The expiration time for the encrypted token. Defaults to None.
+        ip (str, optional): The public IP address to include in the query parameters. Defaults to None.
 
     Returns:
         str: The encoded MediaFlow proxy URL.
@@ -243,8 +251,12 @@ def encode_mediaflow_proxy_url(
         query_params.update(
             {key if key.startswith("r_") else f"r_{key}": value for key, value in response_headers.items()}
         )
-    # Encode the query parameters
-    encoded_params = parse.urlencode(query_params, quote_via=parse.quote)
+
+    if encryption_handler:
+        encrypted_token = encryption_handler.encrypt_data(query_params, expiration, ip)
+        encoded_params = urlencode({"token": encrypted_token})
+    else:
+        encoded_params = urlencode(query_params)
 
     # Construct the full URL
     if endpoint is None:

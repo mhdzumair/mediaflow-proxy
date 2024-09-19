@@ -30,7 +30,10 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 - Retrieve public IP address of the MediaFlow Proxy server for use with Debrid services
 - Support for HTTP/HTTPS/SOCKS5 proxy forwarding
 - Protect against unauthorized access and network bandwidth abuses
-- Support for play expired or self-signed SSL certificates server streams
+- Support for play expired or self-signed SSL certificates server streams `(verify_ssl=false)` default is `false`
+- Flexible request proxy usage control per request `(use_request_proxy=true/false)` default is `true`
+- Obfuscating endpoint parameters by encrypting them to hide sensitive information from third-party.
+- Optional IP-based access control restriction & expiration for encrypted URLs to prevent unauthorized access
 
 ## Configuration
 
@@ -151,10 +154,10 @@ Once the server is running, for more details on the available endpoints and thei
 
 ### Examples
 
-#### Proxy HTTPS Stream
+#### Proxy HTTPS Stream (without using configured proxy)
 
 ```bash
-mpv "http://localhost:8888/proxy/stream?d=https://jsoncompare.org/LearningContainer/SampleFiles/Video/MP4/sample-mp4-file.mp4&api_password=your_password"
+mpv "http://localhost:8888/proxy/stream?d=https://jsoncompare.org/LearningContainer/SampleFiles/Video/MP4/sample-mp4-file.mp4&api_password=your_password&use_request_proxy=false"
 ```
 
 #### Proxy HTTPS self-signed certificate Stream
@@ -216,6 +219,38 @@ This will output a properly encoded URL that can be used with players like VLC.
 ```bash
 vlc "http://127.0.0.1:8888/proxy/mpd/manifest?key_id=nrQFDeRLSAKTLifXUIPiZg&key=FmY0xnWCPCNaSpRG-tUuTQ&api_password=dedsec&d=https%3A%2F%2Fmedia.axprod.net%2FTestVectors%2Fv7-MultiDRM-SingleKey%2FManifest_1080p_ClearKey.mpd"
 ```
+
+### Generating Encrypted URLs
+
+To generate an encrypted URL with optional IP restriction and expiration, Use the `/generate_encrypted_or_encoded_url` endpoint via swagger UI or programmatically as shown below:
+```python
+import requests
+
+url = "http://localhost:8888/generate_encrypted_or_encoded_url"
+data = {
+    "mediaflow_proxy_url": "http://localhost:8888",
+    "endpoint": "/proxy/mpd/manifest",
+    "destination_url": "https://media.axprod.net/TestVectors/v7-MultiDRM-SingleKey/Manifest_1080p_ClearKey.mpd",
+    "query_params": {
+        "key_id": "nrQFDeRLSAKTLifXUIPiZg",
+        "key": "FmY0xnWCPCNaSpRG-tUuTQ"
+    },
+    "request_headers": {
+        "referer": "https://media.axprod.net/",
+        "origin": "https://media.axprod.net",
+    },
+    "expiration": 3600,  # URL will expire in 1 hour
+    "ip": "123.123.123.123",  # Optional: Restrict access to this IP
+    "api_password": "your_password"
+}
+
+response = requests.post(url, json=data)
+encrypted_url = response.json()["encoded_url"]
+print(encrypted_url)
+```
+
+You can then use the `encoded_url` in your player or application to access the media stream.
+
 
 ### Using MediaFlow Proxy with Debrid Services and Stremio Addons
 

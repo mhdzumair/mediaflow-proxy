@@ -9,6 +9,9 @@ from starlette.staticfiles import StaticFiles
 
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.routes import proxy_router
+from mediaflow_proxy.schemas import GenerateUrlRequest
+from mediaflow_proxy.utils.crypto_utils import EncryptionHandler, EncryptionMiddleware
+from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 app = FastAPI()
@@ -21,6 +24,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(EncryptionMiddleware)
 
 
 async def verify_api_key(api_key: str = Security(api_password_query), api_key_alt: str = Security(api_password_header)):
@@ -48,6 +52,25 @@ async def health_check():
 @app.get("/favicon.ico")
 async def get_favicon():
     return RedirectResponse(url="/logo.png")
+
+
+@app.post("/generate_encrypted_or_encoded_url")
+async def generate_encrypted_or_encoded_url(request: GenerateUrlRequest):
+    if "api_password" not in request.query_params:
+        request.query_params["api_password"] = request.api_password
+
+    encoded_url = encode_mediaflow_proxy_url(
+        request.mediaflow_proxy_url,
+        request.endpoint,
+        request.destination_url,
+        request.query_params,
+        request.request_headers,
+        request.response_headers,
+        EncryptionHandler(request.api_password) if request.api_password else None,
+        request.expiration,
+        str(request.ip) if request.ip else None,
+    )
+    return {"encoded_url": encoded_url}
 
 
 app.include_router(proxy_router, prefix="/proxy", tags=["proxy"], dependencies=[Depends(verify_api_key)])
