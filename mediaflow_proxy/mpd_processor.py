@@ -7,6 +7,7 @@ from fastapi import Request, Response, HTTPException
 
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.drm.decrypter import decrypt_segment
+from mediaflow_proxy.utils.crypto_utils import encryption_handler
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url, get_original_scheme, ProxyRequestHeaders
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,7 @@ def build_hls(mpd_dict: dict, request: Request, key_id: str = None, key: str = N
     """
     hls = ["#EXTM3U", "#EXT-X-VERSION:6"]
     query_params = dict(request.query_params)
+    has_encrypted = query_params.pop("has_encrypted", False)
 
     video_profiles = {}
     audio_profiles = {}
@@ -120,6 +122,7 @@ def build_hls(mpd_dict: dict, request: Request, key_id: str = None, key: str = N
         playlist_url = encode_mediaflow_proxy_url(
             proxy_url,
             query_params=query_params,
+            encryption_handler=encryption_handler if has_encrypted else None,
         )
 
         if "video" in profile["mimeType"]:
@@ -193,6 +196,7 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
         query_params = dict(request.query_params)
         query_params.pop("profile_id", None)
         query_params.pop("d", None)
+        has_encrypted = query_params.pop("has_encrypted", False)
 
         for segment in segments:
             if mpd_dict["isLive"]:
@@ -207,6 +211,7 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
                 encode_mediaflow_proxy_url(
                     proxy_url,
                     query_params=query_params,
+                    encryption_handler=encryption_handler if has_encrypted else None,
                 )
             )
             added_segments += 1
