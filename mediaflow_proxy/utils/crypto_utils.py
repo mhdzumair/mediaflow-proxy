@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 import time
 from urllib.parse import urlencode
 
@@ -75,7 +76,11 @@ class EncryptionMiddleware(BaseHTTPMiddleware):
             except HTTPException as e:
                 return JSONResponse(content={"error": str(e.detail)}, status_code=e.status_code)
 
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception as e:
+            logging.exception("An error occurred while processing the request")
+            return JSONResponse(content={"error": str(e)}, status_code=500)
         return response
 
     @staticmethod

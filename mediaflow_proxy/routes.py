@@ -7,8 +7,8 @@ from .utils.http_utils import get_proxy_headers, ProxyRequestHeaders
 proxy_router = APIRouter()
 
 
-@proxy_router.head("/hls")
-@proxy_router.get("/hls")
+@proxy_router.head("/hls/manifest.m3u8")
+@proxy_router.get("/hls/manifest.m3u8")
 async def hls_stream_proxy(
     request: Request,
     d: HttpUrl,
@@ -61,7 +61,7 @@ async def proxy_stream_endpoint(
     return await proxy_stream(request.method, str(d), proxy_headers, verify_ssl, use_request_proxy)
 
 
-@proxy_router.get("/mpd/manifest")
+@proxy_router.get("/mpd/manifest.m3u8")
 async def manifest_endpoint(
     request: Request,
     d: HttpUrl,
@@ -89,7 +89,7 @@ async def manifest_endpoint(
     return await get_manifest(request, str(d), proxy_headers, key_id, key, verify_ssl, use_request_proxy)
 
 
-@proxy_router.get("/mpd/playlist")
+@proxy_router.get("/mpd/playlist.m3u8")
 async def playlist_endpoint(
     request: Request,
     d: HttpUrl,
