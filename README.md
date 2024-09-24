@@ -143,10 +143,10 @@ Ideal for users who want a reliable, plug-and-play solution without the technica
 
 ### Endpoints
 
-1. `/proxy/hls`: Proxify HLS streams
+1. `/proxy/hls/manifest.m3u8`: Proxify HLS streams
 2. `/proxy/stream`: Proxy generic http video streams
-3. `/proxy/mpd/manifest`: Process MPD manifests
-4. `/proxy/mpd/playlist`: Generate HLS playlists from MPD
+3. `/proxy/mpd/manifest.m3u8`: Process MPD manifests
+4. `/proxy/mpd/playlist.m3u8`: Generate HLS playlists from MPD
 5. `/proxy/mpd/segment`: Process and decrypt media segments
 6. `/proxy/ip`: Get the public IP address of the MediaFlow Proxy server
 
@@ -170,19 +170,19 @@ mpv "http://localhost:8888/proxy/stream?d=https://self-signed.badssl.com/&api_pa
 #### Proxy HLS Stream with Headers
 
 ```bash
-mpv "http://localhost:8888/proxy/hls?d=https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8&h_referer=https://apple.com/&h_origin=https://apple.com&h_user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36&api_password=your_password"
+mpv "http://localhost:8888/proxy/hls/manifest.m3u8?d=https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8&h_referer=https://apple.com/&h_origin=https://apple.com&h_user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36&api_password=your_password"
 ```
 
 #### Live DASH Stream (Non-DRM Protected)
 
 ```bash
-mpv -v "http://localhost:8888/proxy/mpd/manifest?d=https://livesim.dashif.org/livesim/chunkdur_1/ato_7/testpic4_8s/Manifest.mpd&api_password=your_password"
+mpv -v "http://localhost:8888/proxy/mpd/manifest.m3u8?d=https://livesim.dashif.org/livesim/chunkdur_1/ato_7/testpic4_8s/Manifest.mpd&api_password=your_password"
 ```
 
 #### VOD DASH Stream (DRM Protected)
 
 ```bash
-mpv -v "http://localhost:8888/proxy/mpd/manifest?d=https://media.axprod.net/TestVectors/v7-MultiDRM-SingleKey/Manifest_1080p_ClearKey.mpd&key_id=nrQFDeRLSAKTLifXUIPiZg&key=FmY0xnWCPCNaSpRG-tUuTQ&api_password=your_password"
+mpv -v "http://localhost:8888/proxy/mpd/manifest.m3u8?d=https://media.axprod.net/TestVectors/v7-MultiDRM-SingleKey/Manifest_1080p_ClearKey.mpd&key_id=nrQFDeRLSAKTLifXUIPiZg&key=FmY0xnWCPCNaSpRG-tUuTQ&api_password=your_password"
 ```
 
 Note: The `key` and `key_id` parameters are automatically processed if they're not in the correct format.
@@ -196,7 +196,7 @@ from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
 
 encoded_url = encode_mediaflow_proxy_url(
     mediaflow_proxy_url="http://127.0.0.1:8888",
-    endpoint="/proxy/mpd/manifest",
+    endpoint="/proxy/mpd/manifest.m3u8",
     destination_url="https://media.axprod.net/TestVectors/v7-MultiDRM-SingleKey/Manifest_1080p_ClearKey.mpd",
     query_params={
         "key_id": "nrQFDeRLSAKTLifXUIPiZg",
@@ -211,13 +211,13 @@ encoded_url = encode_mediaflow_proxy_url(
 
 print(encoded_url)
 
-# http://127.0.0.1:8888/proxy/mpd/manifest?key_id=nrQFDeRLSAKTLifXUIPiZg&key=FmY0xnWCPCNaSpRG-tUuTQ&api_password=your_password&d=https%3A%2F%2Fmedia.axprod.net%2FTestVectors%2Fv7-MultiDRM-SingleKey%2FManifest_1080p_ClearKey.mpd&h_referer=https%3A%2F%2Fmedia.axprod.net%2F&h_origin=https%3A%2F%2Fmedia.axprod.net
+# http://127.0.0.1:8888/proxy/mpd/manifest.m3u8?key_id=nrQFDeRLSAKTLifXUIPiZg&key=FmY0xnWCPCNaSpRG-tUuTQ&api_password=your_password&d=https%3A%2F%2Fmedia.axprod.net%2FTestVectors%2Fv7-MultiDRM-SingleKey%2FManifest_1080p_ClearKey.mpd&h_referer=https%3A%2F%2Fmedia.axprod.net%2F&h_origin=https%3A%2F%2Fmedia.axprod.net
 ```
 
 This will output a properly encoded URL that can be used with players like VLC.
 
 ```bash
-vlc "http://127.0.0.1:8888/proxy/mpd/manifest?key_id=nrQFDeRLSAKTLifXUIPiZg&key=FmY0xnWCPCNaSpRG-tUuTQ&api_password=dedsec&d=https%3A%2F%2Fmedia.axprod.net%2FTestVectors%2Fv7-MultiDRM-SingleKey%2FManifest_1080p_ClearKey.mpd"
+vlc "http://127.0.0.1:8888/proxy/mpd/manifest.m3u8?key_id=nrQFDeRLSAKTLifXUIPiZg&key=FmY0xnWCPCNaSpRG-tUuTQ&api_password=dedsec&d=https%3A%2F%2Fmedia.axprod.net%2FTestVectors%2Fv7-MultiDRM-SingleKey%2FManifest_1080p_ClearKey.mpd"
 ```
 
 ### Generating Encrypted URLs
@@ -229,7 +229,7 @@ import requests
 url = "http://localhost:8888/generate_encrypted_or_encoded_url"
 data = {
     "mediaflow_proxy_url": "http://localhost:8888",
-    "endpoint": "/proxy/mpd/manifest",
+    "endpoint": "/proxy/mpd/manifest.m3u8",
     "destination_url": "https://media.axprod.net/TestVectors/v7-MultiDRM-SingleKey/Manifest_1080p_ClearKey.mpd",
     "query_params": {
         "key_id": "nrQFDeRLSAKTLifXUIPiZg",
