@@ -1,7 +1,9 @@
-from fastapi import Request, Depends, APIRouter
-from pydantic import HttpUrl
+from typing import Annotated
+
+from fastapi import Request, Depends, APIRouter, Query
 
 from .handlers import handle_hls_stream_proxy, proxy_stream, get_manifest, get_playlist, get_segment, get_public_ip
+from .schemas import MPDSegmentParams, MPDPlaylistParams, HLSManifestParams, ProxyStreamParams, MPDManifestParams
 from .utils.http_utils import get_proxy_headers, ProxyRequestHeaders
 
 proxy_router = APIRouter()
@@ -11,144 +13,101 @@ proxy_router = APIRouter()
 @proxy_router.get("/hls/manifest.m3u8")
 async def hls_stream_proxy(
     request: Request,
-    d: HttpUrl,
-    proxy_headers: ProxyRequestHeaders = Depends(get_proxy_headers),
-    key_url: HttpUrl | None = None,
-    verify_ssl: bool = False,
-    use_request_proxy: bool = True,
+    hls_params: Annotated[HLSManifestParams, Query()],
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
 ):
     """
     Proxify HLS stream requests, fetching and processing the m3u8 playlist or streaming the content.
 
     Args:
         request (Request): The incoming HTTP request.
-        d (HttpUrl): The destination URL to fetch the content from.
-        key_url (HttpUrl, optional): The HLS Key URL to replace the original key URL. Defaults to None. (Useful for bypassing some sneaky protection)
+        hls_params (HLSPlaylistParams): The parameters for the HLS stream request.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
-        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to False.
-        use_request_proxy (bool, optional): Whether to use the MediaFlow proxy configuration. Defaults to True.
 
     Returns:
         Response: The HTTP response with the processed m3u8 playlist or streamed content.
     """
-    destination = str(d)
-    return await handle_hls_stream_proxy(request, destination, proxy_headers, key_url, verify_ssl, use_request_proxy)
+    return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
 
 
 @proxy_router.head("/stream")
 @proxy_router.get("/stream")
 async def proxy_stream_endpoint(
     request: Request,
-    d: HttpUrl,
-    proxy_headers: ProxyRequestHeaders = Depends(get_proxy_headers),
-    verify_ssl: bool = False,
-    use_request_proxy: bool = True,
+    stream_params: Annotated[ProxyStreamParams, Query()],
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
 ):
     """
     Proxies stream requests to the given video URL.
 
     Args:
         request (Request): The incoming HTTP request.
-        d (HttpUrl): The URL of the video to stream.
+        stream_params (ProxyStreamParams): The parameters for the stream request.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
-        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to False.
-        use_request_proxy (bool, optional): Whether to use the MediaFlow proxy configuration. Defaults to True.
 
     Returns:
         Response: The HTTP response with the streamed content.
     """
     proxy_headers.request.update({"range": proxy_headers.request.get("range", "bytes=0-")})
-    return await proxy_stream(request.method, str(d), proxy_headers, verify_ssl, use_request_proxy)
+    return await proxy_stream(request.method, stream_params, proxy_headers)
 
 
 @proxy_router.get("/mpd/manifest.m3u8")
 async def manifest_endpoint(
     request: Request,
-    d: HttpUrl,
-    proxy_headers: ProxyRequestHeaders = Depends(get_proxy_headers),
-    key_id: str = None,
-    key: str = None,
-    verify_ssl: bool = False,
-    use_request_proxy: bool = True,
+    manifest_params: Annotated[MPDManifestParams, Query()],
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
 ):
     """
     Retrieves and processes the MPD manifest, converting it to an HLS manifest.
 
     Args:
         request (Request): The incoming HTTP request.
-        d (HttpUrl): The URL of the MPD manifest.
+        manifest_params (MPDManifestParams): The parameters for the manifest request.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
-        key_id (str, optional): The DRM key ID. Defaults to None.
-        key (str, optional): The DRM key. Defaults to None.
-        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to False.
-        use_request_proxy (bool, optional): Whether to use the MediaFlow proxy configuration. Defaults to True.
 
     Returns:
         Response: The HTTP response with the HLS manifest.
     """
-    return await get_manifest(request, str(d), proxy_headers, key_id, key, verify_ssl, use_request_proxy)
+    return await get_manifest(request, manifest_params, proxy_headers)
 
 
 @proxy_router.get("/mpd/playlist.m3u8")
 async def playlist_endpoint(
     request: Request,
-    d: HttpUrl,
-    profile_id: str,
-    proxy_headers: ProxyRequestHeaders = Depends(get_proxy_headers),
-    key_id: str = None,
-    key: str = None,
-    verify_ssl: bool = False,
-    use_request_proxy: bool = True,
+    playlist_params: Annotated[MPDPlaylistParams, Query()],
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
 ):
     """
     Retrieves and processes the MPD manifest, converting it to an HLS playlist for a specific profile.
 
     Args:
         request (Request): The incoming HTTP request.
-        d (HttpUrl): The URL of the MPD manifest.
-        profile_id (str): The profile ID to generate the playlist for.
+        playlist_params (MPDPlaylistParams): The parameters for the playlist request.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
-        key_id (str, optional): The DRM key ID. Defaults to None.
-        key (str, optional): The DRM key. Defaults to None.
-        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to False.
-        use_request_proxy (bool, optional): Whether to use the MediaFlow proxy configuration. Defaults to True.
 
     Returns:
         Response: The HTTP response with the HLS playlist.
     """
-    return await get_playlist(request, str(d), profile_id, proxy_headers, key_id, key, verify_ssl, use_request_proxy)
+    return await get_playlist(request, playlist_params, proxy_headers)
 
 
 @proxy_router.get("/mpd/segment")
 async def segment_endpoint(
-    init_url: HttpUrl,
-    segment_url: HttpUrl,
-    mime_type: str,
-    proxy_headers: ProxyRequestHeaders = Depends(get_proxy_headers),
-    key_id: str = None,
-    key: str = None,
-    verify_ssl: bool = False,
-    use_request_proxy: bool = True,
+    segment_params: Annotated[MPDSegmentParams, Query()],
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
 ):
     """
     Retrieves and processes a media segment, decrypting it if necessary.
 
     Args:
-        init_url (HttpUrl): The URL of the initialization segment.
-        segment_url (HttpUrl): The URL of the media segment.
-        mime_type (str): The MIME type of the segment.
+        segment_params (MPDSegmentParams): The parameters for the segment request.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
-        key_id (str, optional): The DRM key ID. Defaults to None.
-        key (str, optional): The DRM key. Defaults to None.
-        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to False.
-        use_request_proxy (bool, optional): Whether to use the MediaFlow proxy configuration. Defaults to True.
 
     Returns:
         Response: The HTTP response with the processed segment.
     """
-    return await get_segment(
-        str(init_url), str(segment_url), mime_type, proxy_headers, key_id, key, verify_ssl, use_request_proxy
-    )
+    return await get_segment(segment_params, proxy_headers)
 
 
 @proxy_router.get("/ip")
