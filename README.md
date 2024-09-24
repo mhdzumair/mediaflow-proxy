@@ -77,7 +77,7 @@ Set the following environment variables:
 
 #### Using git & poetry
 
-> ![IMPORTANT]  
+> [!IMPORTANT]  
 > Ensure that you have Python 3.10 or higher installed.
 
 
