@@ -1,11 +1,9 @@
 import logging
 import math
 import time
-from datetime import datetime, timezone, timedelta
 
 from fastapi import Request, Response, HTTPException
 
-from mediaflow_proxy.configs import settings
 from mediaflow_proxy.drm.decrypter import decrypt_segment
 from mediaflow_proxy.utils.crypto_utils import encryption_handler
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url, get_original_scheme, ProxyRequestHeaders
@@ -162,9 +160,6 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
     hls = ["#EXTM3U", "#EXT-X-VERSION:6"]
 
     added_segments = 0
-    current_time = datetime.now(timezone.utc)
-    live_stream_delay = timedelta(seconds=settings.mpd_live_stream_delay)
-    target_end_time = current_time - live_stream_delay
 
     proxy_url = request.url_for("segment_endpoint")
     proxy_url = str(proxy_url.replace(scheme=get_original_scheme(request)))
@@ -199,10 +194,6 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
         has_encrypted = query_params.pop("has_encrypted", False)
 
         for segment in segments:
-            if mpd_dict["isLive"]:
-                if segment["end_time"] > target_end_time:
-                    continue
-                hls.append(f"#EXT-X-PROGRAM-DATE-TIME:{segment['program_date_time']}")
             hls.append(f'#EXTINF:{segment["extinf"]:.3f},')
             query_params.update(
                 {"init_url": init_url, "segment_url": segment["media"], "mime_type": profile["mimeType"]}
