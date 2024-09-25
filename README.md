@@ -41,7 +41,6 @@ Set the following environment variables:
 
 - `API_PASSWORD`: Required. Protects against unauthorized access and API network abuses.
 - `PROXY_URL`: Optional. HTTP/HTTPS/SOCKS5 proxy URL for forwarding network requests.
-- `MPD_LIVE_STREAM_DELAY`: Optional. Delay in seconds for live DASH streams. This is useful to prevent buffering issues with live streams. Default is `30` seconds.
 
 ## Installation
 
