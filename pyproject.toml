@@ -31,7 +31,7 @@ cachetools = "^5.4.0"
 pydantic-settings = "^2.5.2"
 gunicorn = "^23.0.0"
 pycryptodome = "^3.20.0"
-uvicorn = "^0.30.6"
+uvicorn = ">=0.30.6,<0.32.0"
 
 
 [tool.poetry.group.dev.dependencies]
