@@ -72,6 +72,12 @@ Set the following environment variables:
    ```
    mediaflow-proxy
    ```
+   You can access the server at `http://localhost:8888`.
+
+4. To run the server with uvicorn options: (Optional)
+   ```
+   uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888 --workers 4
+   ```
 
 
 #### Using git & poetry
@@ -98,7 +104,7 @@ Set the following environment variables:
 
 4. Run the FastAPI server:
    ```
-   poetry run uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888
+   poetry run uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888 --workers 4
    ```
 
 
