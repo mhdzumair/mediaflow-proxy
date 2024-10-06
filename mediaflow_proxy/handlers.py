@@ -97,7 +97,11 @@ async def handle_hls_stream_proxy(
                 streamer, hls_params.destination, proxy_headers, request, hls_params.key_url
             )
 
-        proxy_headers.request.update({"range": proxy_headers.request.get("range", "bytes=0-")})
+        content_range = proxy_headers.request.get("range", "bytes=0-")
+        if "NaN" in content_range:
+            # Handle invalid range requests "bytes=NaN-NaN"
+            raise HTTPException(status_code=416, detail="Invalid Range Header")
+        proxy_headers.request.update({"range": content_range})
         response_headers = prepare_response_headers(response.headers, proxy_headers.response)
 
         return EnhancedStreamingResponse(

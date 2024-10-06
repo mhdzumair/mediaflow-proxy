@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import Request, Depends, APIRouter, Query
+from fastapi import Request, Depends, APIRouter, Query, HTTPException
 
 from .handlers import handle_hls_stream_proxy, proxy_stream, get_manifest, get_playlist, get_segment, get_public_ip
 from .schemas import MPDSegmentParams, MPDPlaylistParams, HLSManifestParams, ProxyStreamParams, MPDManifestParams
@@ -48,7 +48,11 @@ async def proxy_stream_endpoint(
     Returns:
         Response: The HTTP response with the streamed content.
     """
-    proxy_headers.request.update({"range": proxy_headers.request.get("range", "bytes=0-")})
+    content_range = proxy_headers.request.get("range", "bytes=0-")
+    if "nan" in content_range.casefold():
+        # Handle invalid range requests "bytes=NaN-NaN"
+        raise HTTPException(status_code=416, detail="Invalid Range Header")
+    proxy_headers.request.update({"range": content_range})
     return await proxy_stream(request.method, stream_params, proxy_headers)
 
 
