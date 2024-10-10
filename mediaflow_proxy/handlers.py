@@ -1,9 +1,9 @@
 import base64
 import logging
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import Request, Response, HTTPException
-from pydantic import HttpUrl
 from starlette.background import BackgroundTask
 
 from .configs import settings
@@ -86,7 +86,7 @@ async def handle_hls_stream_proxy(
     client, streamer = await setup_client_and_streamer(hls_params.use_request_proxy, hls_params.verify_ssl)
 
     try:
-        if hls_params.destination.endswith((".m3u", ".m3u8")):
+        if urlparse(hls_params.destination).path.endswith((".m3u", ".m3u8")):
             return await fetch_and_process_m3u8(
                 streamer, hls_params.destination, proxy_headers, request, hls_params.key_url
             )
@@ -199,7 +199,7 @@ async def proxy_stream(method: str, stream_params: ProxyStreamParams, proxy_head
 
 
 async def fetch_and_process_m3u8(
-    streamer: Streamer, url: str, proxy_headers: ProxyRequestHeaders, request: Request, key_url: HttpUrl = None
+    streamer: Streamer, url: str, proxy_headers: ProxyRequestHeaders, request: Request, key_url: str = None
 ):
     """
     Fetches and processes the m3u8 playlist, converting it to an HLS playlist.
@@ -209,7 +209,7 @@ async def fetch_and_process_m3u8(
         url (str): The URL of the m3u8 playlist.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
         request (Request): The incoming HTTP request.
-        key_url (HttpUrl, optional): The HLS Key URL to replace the original key URL. Defaults to None.
+        key_url (str, optional): The HLS Key URL to replace the original key URL. Defaults to None.
 
     Returns:
         Response: The HTTP response with the processed m3u8 playlist.
