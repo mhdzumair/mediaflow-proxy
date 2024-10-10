@@ -1,14 +1,12 @@
 import re
 from urllib import parse
 
-from pydantic import HttpUrl
-
 from mediaflow_proxy.utils.crypto_utils import encryption_handler
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url, get_original_scheme
 
 
 class M3U8Processor:
-    def __init__(self, request, key_url: HttpUrl = None):
+    def __init__(self, request, key_url: str = None):
         """
         Initializes the M3U8Processor with the request and URL prefix.
 
@@ -17,7 +15,7 @@ class M3U8Processor:
             key_url (HttpUrl, optional): The URL of the key server. Defaults to None.
         """
         self.request = request
-        self.key_url = key_url
+        self.key_url = parse.urlparse(key_url) if key_url else None
         self.mediaflow_proxy_url = str(request.url_for("hls_stream_proxy").replace(scheme=get_original_scheme(request)))
 
     async def process_m3u8(self, content: str, base_url: str) -> str:
@@ -58,7 +56,7 @@ class M3U8Processor:
             original_uri = uri_match.group(1)
             uri = parse.urlparse(original_uri)
             if self.key_url:
-                uri = uri._replace(scheme=self.key_url.scheme, netloc=self.key_url.host)
+                uri = uri._replace(scheme=self.key_url.scheme, netloc=self.key_url.netloc)
             new_uri = await self.proxy_url(uri.geturl(), base_url)
             line = line.replace(f'URI="{original_uri}"', f'URI="{new_uri}"')
         return line

@@ -370,7 +370,7 @@ class EnhancedStreamingResponse(Response):
 
             await send({"type": "http.response.body", "body": b"", "more_body": False})
         except Exception as e:
-            logger.error(f"Error in stream_response: {str(e)}")
+            logger.exception(f"Error in stream_response: {str(e)}")
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         async with anyio.create_task_group() as task_group:
