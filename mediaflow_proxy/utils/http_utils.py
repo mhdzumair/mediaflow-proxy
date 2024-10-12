@@ -14,6 +14,7 @@ from starlette.concurrency import iterate_in_threadpool
 from starlette.requests import Request
 from starlette.types import Receive, Send, Scope
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tqdm.asyncio import tqdm as tqdm_asyncio
 
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.const import SUPPORTED_REQUEST_HEADERS
@@ -80,6 +81,7 @@ class Streamer:
         """
         self.client = client
         self.response = None
+        self.progress_bar = None
 
     async def stream_content(self, url: str, headers: dict):
         """
@@ -94,8 +96,34 @@ class Streamer:
         """
         async with self.client.stream("GET", url, headers=headers, follow_redirects=True) as self.response:
             self.response.raise_for_status()
-            async for chunk in self.response.aiter_raw():
-                yield chunk
+
+            if settings.enable_streaming_progress:
+                with tqdm_asyncio(
+                    total=self.get_content_length(),
+                    initial=self.get_start_byte(headers),
+                    unit="B",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                    desc="MediaFlow Proxy Streaming",
+                ) as self.progress_bar:
+                    async for chunk in self.response.aiter_bytes():
+                        yield chunk
+                        self.progress_bar.update(len(chunk))
+            else:
+                async for chunk in self.response.aiter_bytes():
+                    yield chunk
+
+    def get_content_length(self) -> int:
+        content_range = self.response.headers.get("Content-Range")
+        if content_range:
+            return int(content_range.split("/")[-1])
+        return int(self.response.headers.get("Content-Length", 0))
+
+    @staticmethod
+    def get_start_byte(headers: dict) -> int:
+        range_header = headers.get("range")
+        start_byte = int(range_header.split("=")[-1].split("-")[0])
+        return start_byte
 
     async def head(self, url: str, headers: dict):
         """
@@ -137,6 +165,9 @@ class Streamer:
         """
         if self.response:
             await self.response.aclose()
+        if self.progress_bar:
+            self.progress_bar.close()
+            logger.info("Stopped the current streaming session")
         await self.client.aclose()
 
 

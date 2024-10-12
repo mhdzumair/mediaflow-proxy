@@ -41,6 +41,7 @@ Set the following environment variables:
 
 - `API_PASSWORD`: Required. Protects against unauthorized access and API network abuses.
 - `PROXY_URL`: Optional. HTTP/HTTPS/SOCKS5 proxy URL for forwarding network requests.
+- `ENABLE_STREAMING_PROGRESS`: Optional. Enable streaming progress logging. Default is `false`.
 
 ## Installation
 
