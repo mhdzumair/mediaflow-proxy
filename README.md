@@ -153,7 +153,7 @@ Ideal for users who want a reliable, plug-and-play solution without the technica
 2. `/proxy/stream`: Proxy generic http video streams
 3. `/proxy/mpd/manifest.m3u8`: Process MPD manifests
 4. `/proxy/mpd/playlist.m3u8`: Generate HLS playlists from MPD
-5. `/proxy/mpd/segment`: Process and decrypt media segments
+5. `/proxy/mpd/segment.mp4`: Process and decrypt media segments
 6. `/proxy/ip`: Get the public IP address of the MediaFlow Proxy server
 
 Once the server is running, for more details on the available endpoints and their parameters, visit the Swagger UI at `http://localhost:8888/docs`.

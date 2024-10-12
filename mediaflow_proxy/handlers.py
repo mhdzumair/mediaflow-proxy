@@ -63,7 +63,7 @@ def handle_exceptions(exception: Exception) -> Response:
         logger.error(f"Error downloading content: {exception}")
         return Response(status_code=exception.status_code, content=str(exception))
     else:
-        logger.error(f"Internal server error while handling request: {exception}")
+        logger.exception(f"Internal server error while handling request: {exception}")
         return Response(status_code=502, content=f"Internal server error: {exception}")
 
 
