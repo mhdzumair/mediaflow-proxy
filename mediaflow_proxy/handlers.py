@@ -173,10 +173,6 @@ def prepare_response_headers(original_headers, proxy_response_headers) -> dict:
         dict: The prepared headers for the proxy response.
     """
     response_headers = {k: v for k, v in original_headers.multi_items() if k in SUPPORTED_RESPONSE_HEADERS}
-    transfer_encoding = response_headers.get("transfer-encoding", "")
-    if "chunked" not in transfer_encoding:
-        transfer_encoding += ", chunked" if transfer_encoding else "chunked"
-    response_headers["transfer-encoding"] = transfer_encoding
     response_headers.update(proxy_response_headers)
     return response_headers
 
