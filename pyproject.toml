@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mediaflow-proxy"
-version = "1.7.4"
+version = "1.7.5"
 description = "A high-performance proxy server for streaming media, supporting HTTP(S), HLS, and MPEG-DASH with real-time DRM decryption."
 authors = ["mhdzumair <mhdzumair@gmail.com>"]
 readme = "README.md"
@@ -32,6 +32,7 @@ pydantic-settings = "^2.5.2"
 gunicorn = "^23.0.0"
 pycryptodome = "^3.20.0"
 uvicorn = "^0.31.0"
+tqdm = "^4.66.5"
 
 
 [tool.poetry.group.dev.dependencies]
