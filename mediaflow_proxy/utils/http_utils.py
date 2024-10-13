@@ -82,8 +82,12 @@ class Streamer:
         self.client = client
         self.response = None
         self.progress_bar = None
+        self.bytes_transferred = 0
+        self.start_byte = 0
+        self.end_byte = 0
+        self.total_size = 0
 
-    async def stream_content(self, url: str, headers: dict):
+    async def stream_content(self, url: str, headers: dict) -> typing.AsyncGenerator[bytes, None]:
         """
         Streams content from a URL.
 
@@ -94,36 +98,59 @@ class Streamer:
         Yields:
             bytes: Chunks of the streamed content.
         """
-        async with self.client.stream("GET", url, headers=headers, follow_redirects=True) as self.response:
-            self.response.raise_for_status()
+        try:
+            async with self.client.stream("GET", url, headers=headers, follow_redirects=True) as self.response:
+                self.response.raise_for_status()
+                self.parse_content_range()
 
-            if settings.enable_streaming_progress:
-                with tqdm_asyncio(
-                    total=self.get_content_length(),
-                    initial=self.get_start_byte(headers),
-                    unit="B",
-                    unit_scale=True,
-                    unit_divisor=1024,
-                    desc="MediaFlow Proxy Streaming",
-                ) as self.progress_bar:
+                if settings.enable_streaming_progress:
+                    with tqdm_asyncio(
+                        total=self.total_size,
+                        initial=self.start_byte,
+                        unit="B",
+                        unit_scale=True,
+                        unit_divisor=1024,
+                        desc="Streaming",
+                        ncols=100,
+                        mininterval=1,
+                    ) as self.progress_bar:
+                        async for chunk in self.response.aiter_bytes():
+                            yield chunk
+                            chunk_size = len(chunk)
+                            self.bytes_transferred += chunk_size
+                            self.progress_bar.set_postfix_str(
+                                f"📥 : {self.format_bytes(self.bytes_transferred)}", refresh=False
+                            )
+                            self.progress_bar.update(chunk_size)
+                else:
                     async for chunk in self.response.aiter_bytes():
                         yield chunk
-                        self.progress_bar.update(len(chunk))
-            else:
-                async for chunk in self.response.aiter_bytes():
-                    yield chunk
-
-    def get_content_length(self) -> int:
-        content_range = self.response.headers.get("Content-Range")
-        if content_range:
-            return int(content_range.split("/")[-1])
-        return int(self.response.headers.get("Content-Length", 0))
+        except GeneratorExit:
+            logger.info("Streaming session stopped by the user")
+        except Exception as e:
+            logger.error(f"Error streaming content: {e}")
+        finally:
+            await self.close()
 
     @staticmethod
-    def get_start_byte(headers: dict) -> int:
-        range_header = headers.get("range")
-        start_byte = int(range_header.split("=")[-1].split("-")[0])
-        return start_byte
+    def format_bytes(size) -> str:
+        power = 2**10
+        n = 0
+        units = {0: "B", 1: "KB", 2: "MB", 3: "GB", 4: "TB"}
+        while size > power:
+            size /= power
+            n += 1
+        return f"{size:.2f} {units[n]}"
+
+    def parse_content_range(self):
+        content_range = self.response.headers.get("Content-Range", "")
+        if content_range:
+            range_info = content_range.split()[-1]
+            self.start_byte, self.end_byte, self.total_size = map(int, range_info.replace("/", "-").split("-"))
+        else:
+            self.start_byte = 0
+            self.total_size = int(self.response.headers.get("Content-Length", 0))
+            self.end_byte = self.total_size - 1 if self.total_size > 0 else 0
 
     async def head(self, url: str, headers: dict):
         """
@@ -167,7 +194,6 @@ class Streamer:
             await self.response.aclose()
         if self.progress_bar:
             self.progress_bar.close()
-            logger.info("Stopped the current streaming session")
         await self.client.aclose()
 
 
