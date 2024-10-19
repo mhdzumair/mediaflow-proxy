@@ -1,61 +1,55 @@
-from fastapi import APIRouter,Query
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Query
+from fastapi.responses import JSONResponse, RedirectResponse
 from .extractors.doodstream import doodstream_url
 from .extractors.uqload import uqload_url
 from .extractors.mixdrop import mixdrop_url
+from mediaflow_proxy.configs import settings
+
 extractor_router = APIRouter()
+host_map = {"Doodstream": doodstream_url, "Mixdrop": mixdrop_url, "Uqload": uqload_url}
 
 
-@extractor_router.get("/doodstream")
-async def doodstream_extractor(d: str = Query(..., description="DoodStream URL"), use_request_proxy: bool = Query(False, description="Whether to use the MediaFlow proxy configuration.")):
-    '''
-    Extract a clean link from DoodStream URL
-
-    Args: request (Request): The incoming HTTP request
-
-    Returns: The clean link (url) and the headers needed to access the url
-    
-    N.B. You can't use a rotating proxy for this endpoint
-    '''
-    final_url = await doodstream_url(d,use_request_proxy)
-    headers_dict = {
-        "Referer": "https://d000d.com/"
-    } #Needed Headers to access the Response
-    return JSONResponse(content={"url": final_url,"headers": headers_dict})
-
-
-
-@extractor_router.get("/uqload")
-async def uqload_extractor(d: str = Query(..., description="Uqload Url"), use_request_proxy: bool = Query(False, description="Whether to use the MediaFlow proxy configuration.")):
-    '''
-    Extract a clean link from Uqload URL
+@extractor_router.get("/extractor")
+async def doodstream_extractor(
+    d: str = Query(..., description="Extract Clean Link from various Hosts"),
+    use_request_proxy: bool = Query(False, description="Whether to use the MediaFlow proxy configuration."),
+    host: str = Query(
+        ..., description='From which Host the URL comes from, here avaiable ones: "Doodstream","Mixdrop","Uqload"'
+    ),
+    redirect_stream: bool = Query(
+        False,
+        description="If enabled the response will be redirected to stream endpoint automatically and the stream will be proxied",
+    ),
+):
+    """
+    Extract a clean link from DoodStream,Mixdrop,Uqload
 
     Args: request (Request): The incoming HTTP request
 
     Returns: The clean link (url) and the headers needed to access the url
 
-    '''
-    final_url = await uqload_url(d,use_request_proxy)
-    headers_dict = {
-        "Referer": "https://uqload.to/"
-    }
-    return JSONResponse(content={"url": final_url,"headers": headers_dict})
+    N.B. You can't use a rotating proxy if type is set to "Doodstream"
+    """
+    try:
+        final_url, headers_dict = await host_map[host](d, use_request_proxy)
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)})
+    if redirect_stream == True:
+        formatted_headers = format_headers(headers_dict)
+        redirected_stream = f"/proxy/stream?api_password={settings.api_password}&d={final_url}&{formatted_headers}"
+        return RedirectResponse(url=redirected_stream)
+    elif redirect_stream == False:
+        return JSONResponse(content={"url": final_url, "headers": headers_dict})
 
 
-@extractor_router.get("/mixdrop")
-async def mixdrop_extractor(d: str = Query(..., description="MixDrop URL",), use_request_proxy: bool = Query(False, description="Whether to use the MediaFlow proxy configuration.")):
-    '''
-    Extract a clean link from MixDrop URL
+def format_headers(headers):
+    """
+    Format the headers dictionary into a query string format with 'h_' prefix.
 
-    Args: request (Request): The incoming HTTP request
+    Args:
+    - headers: A dictionary of headers.
 
-    Returns: The clean link (url) and the headers needed to access the url
-
-    '''
-    final_url = await mixdrop_url(d,use_request_proxy)
-    headers_dict = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.10; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
-    }
-    return JSONResponse(content={"url": final_url,"headers": headers_dict})
-
-
+    Returns:
+    - A query string formatted string of headers.
+    """
+    return "&".join(f"h_{key}={value}" for key, value in headers.items())
