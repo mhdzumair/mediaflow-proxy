@@ -17,7 +17,7 @@ from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 app = FastAPI()
 api_password_query = APIKeyQuery(name="api_password", auto_error=False)
-api_password_header = APIKeyHeader(name="api_password", auto_error=False)  
+api_password_header = APIKeyHeader(name="api_password", auto_error=False)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -75,7 +75,7 @@ async def generate_encrypted_or_encoded_url(request: GenerateUrlRequest):
 
 
 app.include_router(proxy_router, prefix="/proxy", tags=["proxy"], dependencies=[Depends(verify_api_key)])
-app.include_router(extractor_router, prefix="/extractors", tags=["extractors"], dependencies=[Depends(verify_api_key)])
+app.include_router(extractor_router, tags=["extractors"], dependencies=[Depends(verify_api_key)])
 
 
 static_path = resources.files("mediaflow_proxy").joinpath("static")
