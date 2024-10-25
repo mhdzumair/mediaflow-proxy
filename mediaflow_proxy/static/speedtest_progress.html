@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Speedtest</title>
+        <style>
+            body.light-mode {
+                font-family: Arial, sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+                background-color: #f4f4f9;
+                color: #333;
+            }
+            body.dark-mode {
+                font-family: Arial, sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+                background-color: #121212;
+                color: #ffffff;
+            }
+            .container {
+                text-align: center;
+            }
+            h1 {
+                font-size: 24px;
+            }
+            .progress-bar {
+                width: 80%;
+                margin: 20px auto;
+                height: 20px;
+                background-color: #e0e0e0;
+                border-radius: 10px;
+                overflow: hidden;
+                position: relative;
+            }
+            .progress-bar::after {
+                content: "";
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 0%;
+                height: 100%;
+                background-color: #3498db;
+                animation: progress 180s linear forwards;
+            }
+            @keyframes progress {
+                0% { width: 0%; }
+                100% { width: 100%; }
+            }
+            .toggle-switch {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+            }
+        </style>
+        <script>
+            const urlParams = new URLSearchParams(window.location.search);
+            const taskId = urlParams.get("task_id");
+
+            async function checkStatus() {
+                try {
+                    const response = await fetch(`/speedtest/results/${taskId}`);
+                    const data = await response.json();
+
+                    // Check if the test is complete based on the response data
+                    if (!data.message || !data.message.includes("still running")) {
+                        // Redirect to the results if the test is done
+                        window.location.href = `/speedtest/results/${taskId}`;
+                    } else {
+                        // Poll again after 5 seconds if the test is still running
+                        setTimeout(checkStatus, 5000);
+                    }
+                } catch (error) {
+                    console.error("Error fetching status:", error);
+                    // Retry after 5 seconds in case of error
+                    setTimeout(checkStatus, 5000);
+                }
+            }
+
+            // Start the first status check after 120 seconds (120000 milliseconds)
+            setTimeout(checkStatus, 120000);
+
+            // Toggle dark mode
+            function toggleDarkMode() {
+                const body = document.body;
+                body.classList.toggle('dark-mode');
+                body.classList.toggle('light-mode');
+            }
+        </script>
+    </head>
+    <body class="light-mode">
+        <div class="toggle-switch">
+            <label for="darkModeToggle">Dark Mode</label>
+            <input type="checkbox" id="darkModeToggle" onclick="toggleDarkMode()">
+        </div>
+        <div class="container">
+            <h1>Speedtest in progress... Please wait up to 3 minutes.</h1>
+            <div class="progress-bar"></div>
+        </div>
+    </body>
+</html>

@@ -1,16 +1,18 @@
 import logging
 from importlib import resources
+import uuid
 
-from fastapi import FastAPI, Depends, Security, HTTPException
+from fastapi import FastAPI, Depends, Security, HTTPException, BackgroundTasks
 from fastapi.security import APIKeyQuery, APIKeyHeader
 from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import RedirectResponse
+from starlette.responses import RedirectResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
 
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.routes import proxy_router
 from mediaflow_proxy.schemas import GenerateUrlRequest
 from mediaflow_proxy.utils.crypto_utils import EncryptionHandler, EncryptionMiddleware
+from mediaflow_proxy.utils.rd_speedtest import run_speedtest, prune_task, results
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -47,6 +49,26 @@ async def verify_api_key(api_key: str = Security(api_password_query), api_key_al
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/speedtest")
+async def trigger_speedtest(background_tasks: BackgroundTasks, api_password: str = Depends(verify_api_key)):
+    # Generate a random UUID as task_id
+    task_id = str(uuid.uuid4())  # Generate unique task ID
+    background_tasks.add_task(run_speedtest, task_id)
+    
+    # Schedule the task to be pruned after 1 hour
+    background_tasks.add_task(prune_task, task_id)
+
+    return RedirectResponse(url=f"/speedtest_progress.html?task_id={task_id}")
+
+
+@app.get("/speedtest/results/{task_id}", response_class=JSONResponse)
+async def get_speedtest_result(task_id: str):
+    if task_id in results:
+        return results[task_id]
+    else:
+        return {"message": "Speedtest is still running, please wait or the task may have expired."}
 
 
 @app.get("/favicon.ico")
