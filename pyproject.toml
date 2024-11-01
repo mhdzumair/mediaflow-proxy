@@ -33,6 +33,7 @@ gunicorn = "^23.0.0"
 pycryptodome = "^3.20.0"
 uvicorn = "^0.31.0"
 tqdm = "^4.66.5"
+requests = "^2.31.0"
 
 
 [tool.poetry.group.dev.dependencies]
