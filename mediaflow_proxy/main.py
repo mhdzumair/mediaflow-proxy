@@ -10,6 +10,7 @@ from starlette.staticfiles import StaticFiles
 
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.routes import proxy_router
+from mediaflow_proxy.extractors_routes import extractor_router
 from mediaflow_proxy.schemas import GenerateUrlRequest
 from mediaflow_proxy.utils.crypto_utils import EncryptionHandler, EncryptionMiddleware
 from mediaflow_proxy.utils.rd_speedtest import run_speedtest, prune_task, results
@@ -96,6 +97,8 @@ async def generate_encrypted_or_encoded_url(request: GenerateUrlRequest):
 
 
 app.include_router(proxy_router, prefix="/proxy", tags=["proxy"], dependencies=[Depends(verify_api_key)])
+app.include_router(extractor_router, tags=["extractors"], dependencies=[Depends(verify_api_key)])
+
 
 static_path = resources.files("mediaflow_proxy").joinpath("static")
 app.mount("/", StaticFiles(directory=str(static_path), html=True), name="static")
