@@ -130,7 +130,10 @@ class Streamer:
         except Exception as e:
             logger.error(f"Error streaming content: {e}")
         finally:
-            await self.close()
+            if self.response:
+                await self.response.aclose()
+            if self.progress_bar:
+                self.progress_bar.close()
 
     @staticmethod
     def format_bytes(size) -> str:

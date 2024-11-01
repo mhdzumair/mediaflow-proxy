@@ -63,19 +63,27 @@
         <script>
             const urlParams = new URLSearchParams(window.location.search);
             const taskId = urlParams.get("task_id");
-
+        
             async function checkStatus() {
                 try {
                     const response = await fetch(`/speedtest/results/${taskId}`);
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
                     const data = await response.json();
+                    console.log("Fetched data:", data);
 
-                    // Check if the test is complete based on the response data
-                    if (!data.message || !data.message.includes("still running")) {
-                        // Redirect to the results if the test is done
-                        window.location.href = `/speedtest/results/${taskId}`;
-                    } else {
+                    // Check if the test is still running based on the response data
+                    if (data && data.message && data.message.includes("still running")) {
+                        console.log("Test still running, polling again...");
                         // Poll again after 5 seconds if the test is still running
                         setTimeout(checkStatus, 5000);
+                    } else {
+                        console.log("Test complete, redirecting after a short delay...");
+                        // Redirect to the results if the test is done after a short delay
+                        setTimeout(() => {
+                            window.location.href = `/speedtest/results/${taskId}`;
+                        }, 2000); // 2 seconds delay
                     }
                 } catch (error) {
                     console.error("Error fetching status:", error);
@@ -83,10 +91,10 @@
                     setTimeout(checkStatus, 5000);
                 }
             }
-
+        
             // Start the first status check after 120 seconds (120000 milliseconds)
             setTimeout(checkStatus, 120000);
-
+        
             // Toggle dark mode
             function toggleDarkMode() {
                 const body = document.body;
