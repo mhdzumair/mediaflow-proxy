@@ -63,34 +63,56 @@
         <script>
             const urlParams = new URLSearchParams(window.location.search);
             const taskId = urlParams.get("task_id");
+            if (!taskId || !/^[a-zA-Z0-9-_]+$/.test(taskId)) {
+                window.location.href = "/speedtest";
+            }
         
+            let statusCheckTimeout;
+            let retryCount = 0;
+            const MAX_RETRIES = 5;
+
             async function checkStatus() {
                 try {
-                    const response = await fetch(`/speedtest/results/${taskId}`);
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 5000);
+                    const response = await fetch(`/speedtest/results/${taskId}`, {
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeoutId);
+
                     if (!response.ok) {
                         throw new Error('Network response was not ok');
                     }
                     const data = await response.json();
                     console.log("Fetched data:", data);
+                    retryCount = 0;
 
-                    // Check if the test is still running based on the response data
                     if (data && data.message && data.message.includes("still running")) {
                         console.log("Test still running, polling again...");
-                        // Poll again after 5 seconds if the test is still running
-                        setTimeout(checkStatus, 5000);
+                        statusCheckTimeout = setTimeout(checkStatus, 5000);
                     } else {
                         console.log("Test complete, redirecting after a short delay...");
-                        // Redirect to the results if the test is done after a short delay
                         setTimeout(() => {
                             window.location.href = `/speedtest/results/${taskId}`;
-                        }, 2000); // 2 seconds delay
+                        }, 2000);
                     }
                 } catch (error) {
                     console.error("Error fetching status:", error);
-                    // Retry after 5 seconds in case of error
-                    setTimeout(checkStatus, 5000);
+                    retryCount++;
+                    if (retryCount < MAX_RETRIES) {
+                        statusCheckTimeout = setTimeout(checkStatus, 5000);
+                    } else {
+                        alert("Failed to check status after multiple attempts. Please refresh the page.");
+                    }
                 }
             }
+
+            // Cleanup on page unload
+            window.addEventListener('unload', () => {
+                if (statusCheckTimeout) {
+                    clearTimeout(statusCheckTimeout);
+                }
+            });
         
             // Start the first status check after 120 seconds (120000 milliseconds)
             setTimeout(checkStatus, 120000);
@@ -105,12 +127,14 @@
     </head>
     <body class="light-mode">
         <div class="toggle-switch">
-            <label for="darkModeToggle">Dark Mode</label>
-            <input type="checkbox" id="darkModeToggle" onclick="toggleDarkMode()">
+            <label for="darkModeToggle" class="switch">
+                <input type="checkbox" id="darkModeToggle" onclick="toggleDarkMode()" aria-label="Toggle dark mode">
+                <span class="slider">Dark Mode</span>
+            </label>
         </div>
         <div class="container">
             <h1>Speedtest in progress... Please wait up to 3 minutes.</h1>
-            <div class="progress-bar"></div>
+            <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
         </div>
     </body>
 </html>
