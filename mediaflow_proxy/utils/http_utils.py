@@ -125,6 +125,10 @@ class Streamer:
                 else:
                     async for chunk in self.response.aiter_bytes():
                         yield chunk
+                        self.bytes_transferred += len(chunk)
+        except httpx.TimeoutException:
+            logger.warning(f"Timeout while streaming {url}")
+            raise DownloadError(409, f"Timeout while streaming {url}")
         except GeneratorExit:
             logger.info("Streaming session stopped by the user")
         except Exception as e:
