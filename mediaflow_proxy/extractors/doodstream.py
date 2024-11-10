@@ -1,25 +1,34 @@
-import httpx
-import time
 import re
-from mediaflow_proxy.configs import settings
+import time
+from typing import Tuple, Dict
+
+from mediaflow_proxy.extractors.base import BaseExtractor
 
 
-async def doodstream_url(d: str, use_request_proxy: bool):
-    async with httpx.AsyncClient(proxy=settings.proxy_url if use_request_proxy else None) as client:
-        headers = {
-            "Range": "bytes=0-",
-            "Referer": "https://d000d.com/",
-        }
+class DoodStreamExtractor(BaseExtractor):
+    """DoodStream URL extractor."""
 
-        response = await client.get(d, follow_redirects=True)
-        if response.status_code == 200:
-            # Get unique timestamp for the request
-            real_time = str(int(time.time()))
-            pattern = r"(\/pass_md5\/.*?)'.*(\?token=.*?expiry=)"
-            match = re.search(pattern, response.text, re.DOTALL)
-            if match:
-                url = f"https://d000d.com{match[1]}"
-                rebobo = await client.get(url, headers=headers, follow_redirects=True)
-                final_url = f"{rebobo.text}123456789{match[2]}{real_time}"
-                doodstream_dict = {"Referer": "https://d000d.com/"}
-                return final_url, doodstream_dict
+    def __init__(self, proxy_enabled: bool = False):
+        super().__init__(proxy_enabled)
+        self.base_url = "https://d000d.com"
+
+    async def extract(self, url: str) -> Tuple[str, Dict[str, str]]:
+        """Extract DoodStream URL."""
+        response = await self._make_request(url)
+
+        # Extract URL pattern
+        pattern = r"(\/pass_md5\/.*?)'.*(\?token=.*?expiry=)"
+        match = re.search(pattern, response.text, re.DOTALL)
+        if not match:
+            raise ValueError("Failed to extract URL pattern")
+
+        # Build final URL
+        pass_url = f"{self.base_url}{match[1]}"
+        referer = f"{self.base_url}/"
+        headers = {"Range": "bytes=0-", "Referer": referer}
+
+        rebobo_response = await self._make_request(pass_url, headers=headers)
+        timestamp = str(int(time.time()))
+        final_url = f"{rebobo_response.text}123456789{match[2]}{timestamp}"
+
+        return final_url, {"Referer": referer}

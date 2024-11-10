@@ -2,9 +2,22 @@ from typing import Annotated
 
 from fastapi import Request, Depends, APIRouter, Query, HTTPException
 
-from .handlers import handle_hls_stream_proxy, proxy_stream, get_manifest, get_playlist, get_segment, get_public_ip
-from .schemas import MPDSegmentParams, MPDPlaylistParams, HLSManifestParams, ProxyStreamParams, MPDManifestParams
-from .utils.http_utils import get_proxy_headers, ProxyRequestHeaders
+from mediaflow_proxy.handlers import (
+    handle_hls_stream_proxy,
+    proxy_stream,
+    get_manifest,
+    get_playlist,
+    get_segment,
+    get_public_ip,
+)
+from mediaflow_proxy.schemas import (
+    MPDSegmentParams,
+    MPDPlaylistParams,
+    HLSManifestParams,
+    ProxyStreamParams,
+    MPDManifestParams,
+)
+from mediaflow_proxy.utils.http_utils import get_proxy_headers, ProxyRequestHeaders
 
 proxy_router = APIRouter()
 

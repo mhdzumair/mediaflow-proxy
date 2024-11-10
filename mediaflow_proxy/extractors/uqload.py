@@ -1,14 +1,18 @@
-import httpx
 import re
-from mediaflow_proxy.configs import settings
+from typing import Dict, Tuple
+
+from mediaflow_proxy.extractors.base import BaseExtractor
 
 
-async def uqload_url(d: str, use_request_proxy: bool):
-    async with httpx.AsyncClient(proxy=settings.proxy_url if use_request_proxy else None) as client:
+class UqloadExtractor(BaseExtractor):
+    """Uqload URL extractor."""
 
-        response = await client.get(d, follow_redirects=True)
+    async def extract(self, url: str) -> Tuple[str, Dict[str, str]]:
+        """Extract Uqload URL."""
+        response = await self._make_request(url)
+
         video_url_match = re.search(r'sources: \["(.*?)"\]', response.text)
-        if video_url_match:
-            final_url = video_url_match.group(1)
-        uqload_dict = {"Referer": "https://uqload.to/"}
-        return final_url, uqload_dict
+        if not video_url_match:
+            raise ValueError("Failed to extract video URL")
+
+        return video_url_match.group(1), {"Referer": "https://uqload.to/"}

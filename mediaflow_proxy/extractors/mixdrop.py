@@ -1,27 +1,31 @@
-import httpx
 import re
 import string
-from mediaflow_proxy.configs import settings
+from typing import Dict, Tuple
+
+from mediaflow_proxy.extractors.base import BaseExtractor
 
 
-async def mixdrop_url(d: str, use_request_proxy: bool):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.10; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
-        "Accept-Language": "en-US,en;q=0.5",
-    }
-    async with httpx.AsyncClient(proxy=settings.proxy_url if use_request_proxy else None) as client:
-        response = await client.get(d, headers=headers, follow_redirects=True, timeout=30)
-        [s1, s2] = re.search(r"\}\('(.+)',.+,'(.+)'\.split", response.text).group(1, 2)
+class MixdropExtractor(BaseExtractor):
+    """Mixdrop URL extractor."""
+
+    async def extract(self, url: str) -> Tuple[str, Dict[str, str]]:
+        """Extract Mixdrop URL."""
+        response = await self._make_request(url)
+
+        # Extract and decode URL
+        match = re.search(r"\}\('(.+)',.+,'(.+)'\.split", response.text)
+        if not match:
+            raise ValueError("Failed to extract URL components")
+
+        s1, s2 = match.group(1, 2)
         schema = s1.split(";")[2][5:-1]
         terms = s2.split("|")
+
+        # Build character mapping
         charset = string.digits + string.ascii_letters
-        d = dict()
-        for i in range(len(terms)):
-            d[charset[i]] = terms[i] or charset[i]
-        final_url = "https:"
-        for c in schema:
-            final_url += d[c] if c in d else c
-        headers_dict = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.10; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
-        }
-    return final_url, headers_dict
+        char_map = {charset[i]: terms[i] or charset[i] for i in range(len(terms))}
+
+        # Construct final URL
+        final_url = "https:" + "".join(char_map.get(c, c) for c in schema)
+
+        return final_url, {"User-Agent": self.base_headers["User-Agent"]}
