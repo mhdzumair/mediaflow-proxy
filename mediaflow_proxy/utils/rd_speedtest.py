@@ -37,32 +37,33 @@ async def perform_speed_test():
     async with AsyncClient() as client:
         streamer = Streamer(client)
 
-        for location, base_url in test_urls.items():
-                # Generate a random float with 16 decimal places
-                random_number = f"{random.uniform(0, 1):.16f}"
-                url = f"{base_url}{random_number}"
-
-                logging.info(f"Testing URL: {url}")
-
+        async def test_single_url(location: str, url: str) -> Dict[str, Any]:
+            try:
                 start_time = time.time()
                 total_bytes = 0
                 
-                try:
-                    # Stream the response
-                    async for chunk in streamer.stream_content(url, headers={}):
-                        if time.time() - start_time >= test_duration:
-                            break
-                        total_bytes += len(chunk)
+                async for chunk in streamer.stream_content(url, headers={}):
+                    if time.time() - start_time >= test_duration:
+                        break
+                    total_bytes += len(chunk)
 
-                    duration = time.time() - start_time
-                    speed_mbps = (total_bytes * 8) / (duration * 1_000_000)
-                    speed[location] = {
-                        "speed_mbps": round(speed_mbps, 2),
-                        "duration": round(duration, 2)
-                    }
-                    logging.info(f"Speed for {location}: {speed_mbps} Mbps in {duration} seconds")
-                except Exception as e:
-                    speed[location] = {"error": str(e)}
-                    logging.error(f"Error for {location}: {e}")
+                duration = time.time() - start_time
+                speed_mbps = (total_bytes * 8) / (duration * 1_000_000)
+                return {
+                    "speed_mbps": round(speed_mbps, 2),
+                    "duration": round(duration, 2)
+                }
+            except Exception as e:
+                logging.error(f"Error testing {location}: {e}")
+                return {"error": str(e)}
 
+        for location, base_url in test_urls.items():
+            random_number = f"{random.uniform(0, 1):.16f}"
+            url = f"{base_url}{random_number}"
+            logging.info(f"Testing URL: {url}")
+            
+            speed[location] = await test_single_url(location, url)
+            
+            # Add rate limiting between tests
+            await asyncio.sleep(1)
     return speed

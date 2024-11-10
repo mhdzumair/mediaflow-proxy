@@ -10,7 +10,7 @@ host_map = {"Doodstream": doodstream_url, "Mixdrop": mixdrop_url, "Uqload": uqlo
 
 
 @extractor_router.get("/extractor")
-async def doodstream_extractor(
+async def extract_media_url(
     d: str = Query(..., description="Extract Clean Link from various Hosts"),
     use_request_proxy: bool = Query(False, description="Whether to use the MediaFlow proxy configuration."),
     host: str = Query(
@@ -32,8 +32,15 @@ async def doodstream_extractor(
     """
     try:
         final_url, headers_dict = await host_map[host](d, use_request_proxy)
+    except KeyError:
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Invalid host type. Available hosts: {', '.join(host_map.keys())}"}
+        )
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
     except Exception as e:
-        return JSONResponse(content={"error": str(e)})
+        return JSONResponse(status_code=500, content={"error": "Internal server error"})
     if redirect_stream == True:
         formatted_headers = format_headers(headers_dict)
         redirected_stream = f"/proxy/stream?api_password={settings.api_password}&d={final_url}&{formatted_headers}"
