@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mediaflow-proxy"
-version = "1.7.6"
+version = "1.8.0"
 description = "A high-performance proxy server for streaming media, supporting HTTP(S), HLS, and MPEG-DASH with real-time DRM decryption."
 authors = ["mhdzumair <mhdzumair@gmail.com>"]
 readme = "README.md"
@@ -23,16 +23,16 @@ include = ["LICENSE", "README.md", "mediaflow_proxy/static/*"]
 
 [tool.poetry.dependencies]
 python = ">=3.10"
-fastapi = "0.115.0"
+fastapi = "0.115.4"
 httpx = {extras = ["socks"], version = "^0.27.2"}
 tenacity = "^9.0.0"
-xmltodict = "^0.14.0"
+xmltodict = "^0.14.2"
 cachetools = "^5.4.0"
-pydantic-settings = "^2.5.2"
+pydantic-settings = "^2.6.1"
 gunicorn = "^23.0.0"
 pycryptodome = "^3.20.0"
-uvicorn = "^0.31.0"
-tqdm = "^4.66.5"
+uvicorn = "^0.32.0"
+tqdm = "^4.67.0"
 
 
 [tool.poetry.group.dev.dependencies]
