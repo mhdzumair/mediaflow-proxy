@@ -31,7 +31,7 @@ cachetools = "^5.4.0"
 pydantic-settings = "^2.5.2"
 gunicorn = "^23.0.0"
 pycryptodome = "^3.20.0"
-uvicorn = "^0.31.0"
+uvicorn = ">=0.31,<0.33"
 tqdm = "^4.66.5"
 
 
