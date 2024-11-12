@@ -125,12 +125,19 @@ class Streamer:
                 else:
                     async for chunk in self.response.aiter_bytes():
                         yield chunk
+                        self.bytes_transferred += len(chunk)
+        except httpx.TimeoutException:
+            logger.warning(f"Timeout while streaming {url}")
+            raise DownloadError(409, f"Timeout while streaming {url}")
         except GeneratorExit:
             logger.info("Streaming session stopped by the user")
         except Exception as e:
             logger.error(f"Error streaming content: {e}")
         finally:
-            await self.close()
+            if self.response:
+                await self.response.aclose()
+            if self.progress_bar:
+                self.progress_bar.close()
 
     @staticmethod
     def format_bytes(size) -> str:
@@ -238,7 +245,7 @@ async def download_file_with_retry(
 
 async def request_with_retry(
     method: str, url: str, headers: dict, timeout: float = 10.0, use_request_proxy: bool = True, **kwargs
-):
+) -> httpx.Response:
     """
     Sends an HTTP request with retry logic.
 

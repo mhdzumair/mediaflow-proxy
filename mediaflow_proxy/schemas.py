@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field, IPvAnyAddress, ConfigDict
 
 
@@ -55,3 +57,9 @@ class MPDSegmentParams(GenericParams):
     mime_type: str = Field(..., description="The MIME type of the segment.")
     key_id: str | None = Field(None, description="The DRM key ID (optional).")
     key: str | None = Field(None, description="The DRM key (optional).")
+
+
+class ExtractorURLParams(GenericParams):
+    host: Literal["Doodstream", "Mixdrop", "Uqload"] = Field(..., description="The host to extract the URL from.")
+    destination: str = Field(..., description="The URL of the stream.", alias="d")
+    redirect_stream: bool = Field(False, description="Whether to redirect to the stream endpoint automatically.")
