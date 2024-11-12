@@ -245,7 +245,7 @@ async def download_file_with_retry(
 
 async def request_with_retry(
     method: str, url: str, headers: dict, timeout: float = 10.0, use_request_proxy: bool = True, **kwargs
-):
+) -> httpx.Response:
     """
     Sends an HTTP request with retry logic.
 
