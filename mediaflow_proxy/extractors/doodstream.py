@@ -8,8 +8,8 @@ from mediaflow_proxy.extractors.base import BaseExtractor
 class DoodStreamExtractor(BaseExtractor):
     """DoodStream URL extractor."""
 
-    def __init__(self, proxy_enabled: bool = False):
-        super().__init__(proxy_enabled)
+    def __init__(self, proxy_enabled: bool, request_headers: dict):
+        super().__init__(proxy_enabled, request_headers)
         self.base_url = "https://d000d.com"
 
     async def extract(self, url: str) -> Tuple[str, Dict[str, str]]:

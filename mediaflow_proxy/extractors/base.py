@@ -9,11 +9,12 @@ from mediaflow_proxy.configs import settings
 class BaseExtractor(ABC):
     """Base class for all URL extractors."""
 
-    def __init__(self, proxy_enabled: bool = False):
+    def __init__(self, proxy_enabled: bool, request_headers: dict):
         self.proxy_url = settings.proxy_url if proxy_enabled else None
         self.base_headers = {
             "User-Agent": settings.user_agent,
             "Accept-Language": "en-US,en;q=0.5",
+            **request_headers,
         }
 
     async def _make_request(
