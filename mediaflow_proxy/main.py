@@ -1,19 +1,17 @@
 import logging
-import uuid
 from importlib import resources
 
-from fastapi import FastAPI, Depends, Security, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Depends, Security, HTTPException
 from fastapi.security import APIKeyQuery, APIKeyHeader
 from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import RedirectResponse, JSONResponse
+from starlette.responses import RedirectResponse
 from starlette.staticfiles import StaticFiles
 
 from mediaflow_proxy.configs import settings
-from mediaflow_proxy.routes import proxy_router, extractor_router
+from mediaflow_proxy.routes import proxy_router, extractor_router, speedtest_router
 from mediaflow_proxy.schemas import GenerateUrlRequest
 from mediaflow_proxy.utils.crypto_utils import EncryptionHandler, EncryptionMiddleware
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
-from mediaflow_proxy.utils.rd_speedtest import run_speedtest, prune_task, results
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 app = FastAPI()
@@ -51,29 +49,14 @@ async def health_check():
     return {"status": "healthy"}
 
 
-@app.get("/speedtest")
-async def trigger_speedtest(background_tasks: BackgroundTasks, api_password: str = Depends(verify_api_key)):
-    # Generate a random UUID as task_id
-    task_id = str(uuid.uuid4())  # Generate unique task ID
-    background_tasks.add_task(run_speedtest, task_id)
-
-    # Schedule the task to be pruned after 1 hour
-    background_tasks.add_task(prune_task, task_id)
-
-    return RedirectResponse(url=f"/speedtest_progress.html?task_id={task_id}")
-
-
-@app.get("/speedtest/results/{task_id}", response_class=JSONResponse)
-async def get_speedtest_result(task_id: str):
-    if task_id in results:
-        return results[task_id]
-    else:
-        return {"message": "Speedtest is still running, please wait or the task may have expired."}
-
-
 @app.get("/favicon.ico")
 async def get_favicon():
     return RedirectResponse(url="/logo.png")
+
+
+@app.get("/speedtest")
+async def show_speedtest_page():
+    return RedirectResponse(url="/speedtest.html")
 
 
 @app.post("/generate_encrypted_or_encoded_url")
@@ -97,6 +80,7 @@ async def generate_encrypted_or_encoded_url(request: GenerateUrlRequest):
 
 app.include_router(proxy_router, prefix="/proxy", tags=["proxy"], dependencies=[Depends(verify_api_key)])
 app.include_router(extractor_router, prefix="/extractor", tags=["extractors"], dependencies=[Depends(verify_api_key)])
+app.include_router(speedtest_router, prefix="/speedtest", tags=["speedtest"], dependencies=[Depends(verify_api_key)])
 
 static_path = resources.files("mediaflow_proxy").joinpath("static")
 app.mount("/", StaticFiles(directory=str(static_path), html=True), name="static")
