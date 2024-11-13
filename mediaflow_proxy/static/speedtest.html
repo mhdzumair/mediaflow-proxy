@@ -413,7 +413,7 @@
                         handleAuthError();
                         return;
                     }
-                    if (retryCount > maxRetries) {
+                    if (retryCount < maxRetries) {
                         retryCount++
                         await new Promise(resolve => setTimeout(resolve, 2000));
                         continue;
