@@ -25,7 +25,7 @@ class DoodStreamExtractor(BaseExtractor):
         # Build final URL
         pass_url = f"{self.base_url}{match[1]}"
         referer = f"{self.base_url}/"
-        headers = {"Range": "bytes=0-", "Referer": referer}
+        headers = {"range": "bytes=0-", "referer": referer}
 
         rebobo_response = await self._make_request(pass_url, headers=headers)
         timestamp = str(int(time.time()))
