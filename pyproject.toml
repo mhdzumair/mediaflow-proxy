@@ -27,12 +27,12 @@ fastapi = "0.115.4"
 httpx = {extras = ["socks"], version = "^0.27.2"}
 tenacity = "^9.0.0"
 xmltodict = "^0.14.2"
-cachetools = "^5.4.0"
 pydantic-settings = "^2.6.1"
 gunicorn = "^23.0.0"
 pycryptodome = "^3.20.0"
 uvicorn = "^0.32.0"
 tqdm = "^4.67.0"
+aiofiles = "^24.1.0"
 
 
 [tool.poetry.group.dev.dependencies]
