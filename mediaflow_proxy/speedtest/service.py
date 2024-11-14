@@ -1,17 +1,17 @@
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional, Type
 
-from cachetools import TTLCache
 from httpx import AsyncClient
 
+from mediaflow_proxy.configs import settings
 from mediaflow_proxy.utils.http_utils import Streamer
+from mediaflow_proxy.utils.cache_utils import get_cached_speedtest, set_cache_speedtest
 from .models import SpeedTestTask, LocationResult, SpeedTestResult, SpeedTestProvider
 from .providers.all_debrid import AllDebridSpeedTest
 from .providers.base import BaseSpeedTestProvider
 from .providers.real_debrid import RealDebridSpeedTest
-from ..configs import settings
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +20,6 @@ class SpeedTestService:
     """Service for managing speed tests across different providers."""
 
     def __init__(self):
-        # Cache for speed test results (1 hour TTL)
-        self._cache: TTLCache[str, SpeedTestTask] = TTLCache(maxsize=100, ttl=3600)
-
         # Provider mapping
         self._providers: Dict[SpeedTestProvider, Type[BaseSpeedTestProvider]] = {
             SpeedTestProvider.REAL_DEBRID: RealDebridSpeedTest,
@@ -49,19 +46,22 @@ class SpeedTestService:
         # Get initial URLs and user info
         urls, user_info = await provider_impl.get_test_urls()
 
-        task = SpeedTestTask(task_id=task_id, provider=provider, started_at=datetime.utcnow(), user_info=user_info)
+        task = SpeedTestTask(
+            task_id=task_id, provider=provider, started_at=datetime.now(tz=timezone.utc), user_info=user_info
+        )
 
-        self._cache[task_id] = task
+        await set_cache_speedtest(task_id, task)
         return task
 
-    async def get_test_results(self, task_id: str) -> Optional[SpeedTestTask]:
+    @staticmethod
+    async def get_test_results(task_id: str) -> Optional[SpeedTestTask]:
         """Get results for a specific task."""
-        return self._cache.get(task_id)
+        return await get_cached_speedtest(task_id)
 
     async def run_speedtest(self, task_id: str, provider: SpeedTestProvider, api_key: Optional[str] = None):
         """Run the speed test with real-time updates."""
         try:
-            task = self._cache.get(task_id)
+            task = await get_cached_speedtest(task_id)
             if not task:
                 raise ValueError(f"Task {task_id} not found")
 
@@ -74,27 +74,28 @@ class SpeedTestService:
                 for location, url in config.test_urls.items():
                     try:
                         task.current_location = location
+                        await set_cache_speedtest(task_id, task)
                         result = await self._test_location(location, url, streamer, config.test_duration, provider_impl)
                         task.results[location] = result
-                        self._cache[task_id] = task
+                        await set_cache_speedtest(task_id, task)
                     except Exception as e:
                         logger.error(f"Error testing {location}: {str(e)}")
                         task.results[location] = LocationResult(
                             error=str(e), server_name=location, server_url=config.test_urls[location]
                         )
-                        self._cache[task_id] = task
+                        await set_cache_speedtest(task_id, task)
 
             # Mark task as completed
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.now(tz=timezone.utc)
             task.status = "completed"
             task.current_location = None
-            self._cache[task_id] = task
+            await set_cache_speedtest(task_id, task)
 
         except Exception as e:
             logger.error(f"Error in speed test task {task_id}: {str(e)}")
-            if task := self._cache.get(task_id):
+            if task := await get_cached_speedtest(task_id):
                 task.status = "failed"
-                self._cache[task_id] = task
+                await set_cache_speedtest(task_id, task)
 
     async def _test_location(
         self, location: str, url: str, streamer: Streamer, test_duration: int, provider: BaseSpeedTestProvider
