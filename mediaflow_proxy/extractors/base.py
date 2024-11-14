@@ -12,10 +12,10 @@ class BaseExtractor(ABC):
     def __init__(self, proxy_enabled: bool, request_headers: dict):
         self.proxy_url = settings.proxy_url if proxy_enabled else None
         self.base_headers = {
-            "User-Agent": settings.user_agent,
-            "Accept-Language": "en-US,en;q=0.5",
-            **request_headers,
+            "user-agent": settings.user_agent,
+            "accept-language": "en-US,en;q=0.5",
         }
+        self.base_headers.update(request_headers)
 
     async def _make_request(
         self, url: str, headers: Optional[Dict] = None, follow_redirects: bool = True, **kwargs
@@ -23,9 +23,11 @@ class BaseExtractor(ABC):
         """Make HTTP request with error handling."""
         try:
             async with httpx.AsyncClient(proxy=self.proxy_url) as client:
+                request_headers = self.base_headers
+                request_headers.update(headers or {})
                 response = await client.get(
                     url,
-                    headers={**self.base_headers, **(headers or {})},
+                    headers=request_headers,
                     follow_redirects=follow_redirects,
                     timeout=30,
                     **kwargs,
