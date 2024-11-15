@@ -18,6 +18,7 @@ from .utils.http_utils import (
     request_with_retry,
     EnhancedStreamingResponse,
     ProxyRequestHeaders,
+    create_httpx_client,
 )
 from .utils.m3u8_processor import M3U8Processor
 from .utils.mpd_utils import pad_base64
@@ -25,24 +26,14 @@ from .utils.mpd_utils import pad_base64
 logger = logging.getLogger(__name__)
 
 
-async def setup_client_and_streamer(use_request_proxy: bool, verify_ssl: bool) -> tuple[httpx.AsyncClient, Streamer]:
+async def setup_client_and_streamer() -> tuple[httpx.AsyncClient, Streamer]:
     """
     Set up an HTTP client and a streamer.
-
-    Args:
-        use_request_proxy (bool): Whether to use a proxy for the request.
-        verify_ssl (bool): Whether to verify SSL certificates.
 
     Returns:
         tuple: An httpx.AsyncClient instance and a Streamer instance.
     """
-    client = httpx.AsyncClient(
-        follow_redirects=True,
-        timeout=httpx.Timeout(30.0),
-        limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
-        proxy=settings.proxy_url if use_request_proxy else None,
-        verify=verify_ssl,
-    )
+    client = create_httpx_client()
     return client, Streamer(client)
 
 
@@ -83,7 +74,7 @@ async def handle_hls_stream_proxy(
     Returns:
         Union[Response, EnhancedStreamingResponse]: Either a processed m3u8 playlist or a streaming response.
     """
-    client, streamer = await setup_client_and_streamer(hls_params.use_request_proxy, hls_params.verify_ssl)
+    client, streamer = await setup_client_and_streamer()
 
     try:
         if urlparse(hls_params.destination).path.endswith((".m3u", ".m3u8")):
@@ -111,7 +102,6 @@ async def handle_hls_stream_proxy(
             background=BackgroundTask(streamer.close),
         )
     except Exception as e:
-        await client.aclose()
         return handle_exceptions(e)
 
 
@@ -119,8 +109,6 @@ async def handle_stream_request(
     method: str,
     video_url: str,
     proxy_headers: ProxyRequestHeaders,
-    verify_ssl: bool = True,
-    use_request_proxy: bool = True,
 ) -> Response:
     """
     Handle general stream requests.
@@ -131,13 +119,11 @@ async def handle_stream_request(
         method (str): The HTTP method (e.g., 'GET' or 'HEAD').
         video_url (str): The URL of the video to stream.
         proxy_headers (ProxyRequestHeaders): Headers to be used in the proxy request.
-        verify_ssl (bool, optional): Whether to verify SSL certificates. Defaults to True.
-        use_request_proxy (bool, optional): Whether to use a proxy for the request. Defaults to True.
 
     Returns:
         Union[Response, EnhancedStreamingResponse]: Either a HEAD response or a streaming response.
     """
-    client, streamer = await setup_client_and_streamer(use_request_proxy, verify_ssl)
+    client, streamer = await setup_client_and_streamer()
 
     try:
         response = await streamer.head(video_url, proxy_headers.request)
@@ -189,9 +175,7 @@ async def proxy_stream(method: str, stream_params: ProxyStreamParams, proxy_head
     Returns:
         Response: The HTTP response with the streamed content.
     """
-    return await handle_stream_request(
-        method, stream_params.destination, proxy_headers, stream_params.verify_ssl, stream_params.use_request_proxy
-    )
+    return await handle_stream_request(method, stream_params.destination, proxy_headers)
 
 
 async def fetch_and_process_m3u8(
@@ -277,8 +261,6 @@ async def get_manifest(
             manifest_params.destination,
             headers=proxy_headers.request,
             parse_drm=not manifest_params.key_id and not manifest_params.key,
-            verify_ssl=manifest_params.verify_ssl,
-            use_request_proxy=manifest_params.use_request_proxy,
         )
     except DownloadError as e:
         raise HTTPException(status_code=e.status_code, detail=f"Failed to download MPD: {e.message}")
@@ -320,8 +302,6 @@ async def get_playlist(
         headers=proxy_headers.request,
         parse_drm=not playlist_params.key_id and not playlist_params.key,
         parse_segment_profile_id=playlist_params.profile_id,
-        verify_ssl=playlist_params.verify_ssl,
-        use_request_proxy=playlist_params.use_request_proxy,
     )
     return await process_playlist(request, mpd_dict, playlist_params.profile_id, proxy_headers)
 
@@ -341,15 +321,8 @@ async def get_segment(
         Response: The HTTP response with the processed segment.
     """
     try:
-        init_content = await get_cached_init_segment(
-            segment_params.init_url, proxy_headers.request, segment_params.verify_ssl, segment_params.use_request_proxy
-        )
-        segment_content = await download_file_with_retry(
-            segment_params.segment_url,
-            proxy_headers.request,
-            verify_ssl=segment_params.verify_ssl,
-            use_request_proxy=segment_params.use_request_proxy,
-        )
+        init_content = await get_cached_init_segment(segment_params.init_url, proxy_headers.request)
+        segment_content = await download_file_with_retry(segment_params.segment_url, proxy_headers.request)
     except Exception as e:
         return handle_exceptions(e)
 
@@ -363,17 +336,12 @@ async def get_segment(
     )
 
 
-async def get_public_ip(use_request_proxy: bool = True):
+async def get_public_ip():
     """
     Retrieves the public IP address of the MediaFlow proxy.
-
-    Args:
-        use_request_proxy (bool, optional): Whether to use the proxy configuration from the user's MediaFlow config. Defaults to True.
 
     Returns:
         Response: The HTTP response with the public IP address.
     """
-    ip_address_data = await request_with_retry(
-        "GET", "https://api.ipify.org?format=json", {}, use_request_proxy=use_request_proxy
-    )
+    ip_address_data = await request_with_retry("GET", "https://api.ipify.org?format=json", {})
     return ip_address_data.json()

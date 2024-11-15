@@ -4,6 +4,7 @@ from typing import Dict, Tuple, Optional
 import httpx
 
 from mediaflow_proxy.configs import settings
+from mediaflow_proxy.utils.http_utils import create_httpx_client
 
 
 class BaseExtractor(ABC):
@@ -17,19 +18,15 @@ class BaseExtractor(ABC):
         }
         self.base_headers.update(request_headers)
 
-    async def _make_request(
-        self, url: str, headers: Optional[Dict] = None, follow_redirects: bool = True, **kwargs
-    ) -> httpx.Response:
+    async def _make_request(self, url: str, headers: Optional[Dict] = None, **kwargs) -> httpx.Response:
         """Make HTTP request with error handling."""
         try:
-            async with httpx.AsyncClient(proxy=self.proxy_url) as client:
+            async with create_httpx_client() as client:
                 request_headers = self.base_headers
                 request_headers.update(headers or {})
                 response = await client.get(
                     url,
                     headers=request_headers,
-                    follow_redirects=follow_redirects,
-                    timeout=30,
                     **kwargs,
                 )
                 response.raise_for_status()

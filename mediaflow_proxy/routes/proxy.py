@@ -128,13 +128,11 @@ async def segment_endpoint(
 
 
 @proxy_router.get("/ip")
-async def get_mediaflow_proxy_public_ip(
-    use_request_proxy: bool = True,
-):
+async def get_mediaflow_proxy_public_ip():
     """
     Retrieves the public IP address of the MediaFlow proxy server.
 
     Returns:
         Response: The HTTP response with the public IP address in the form of a JSON object. {"ip": "xxx.xxx.xxx.xxx"}
     """
-    return await get_public_ip(use_request_proxy)
+    return await get_public_ip()

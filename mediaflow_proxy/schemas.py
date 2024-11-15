@@ -22,9 +22,6 @@ class GenerateUrlRequest(BaseModel):
 class GenericParams(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    verify_ssl: bool = Field(False, description="Whether to verify the SSL certificate of the destination.")
-    use_request_proxy: bool = Field(True, description="Whether to use the MediaFlow proxy configuration.")
-
 
 class HLSManifestParams(GenericParams):
     destination: str = Field(..., description="The URL of the HLS manifest.", alias="d")
