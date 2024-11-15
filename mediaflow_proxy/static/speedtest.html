@@ -400,6 +400,8 @@
     }
 
     async function pollResults(taskId) {
+        let retryCount = 0;
+        const maxRetries = 10;
         try {
             while (true) {
                 const response = await fetch(`/speedtest/results/${taskId}`, {
@@ -411,10 +413,16 @@
                         handleAuthError();
                         return;
                     }
-                    throw new Error('Failed to fetch results');
+                    if (retryCount < maxRetries) {
+                        retryCount++
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        continue;
+                    }
+                    throw new Error('Failed to fetch results after multiple attempts');
                 }
 
                 const data = await response.json();
+                retryCount = 0; //reset the retry count
 
                 if (data.status === 'failed') {
                     throw new Error('Speed test failed');
