@@ -321,9 +321,7 @@ SPEEDTEST_CACHE = OptimizedHybridCache(
 
 
 # Specific cache implementations
-async def get_cached_init_segment(
-    init_url: str, headers: dict, verify_ssl: bool = True, use_request_proxy: bool = True
-) -> Optional[bytes]:
+async def get_cached_init_segment(init_url: str, headers: dict) -> Optional[bytes]:
     """Get initialization segment from cache or download it."""
     # Try cache first
     cached_data = await INIT_SEGMENT_CACHE.get(init_url)
@@ -332,9 +330,7 @@ async def get_cached_init_segment(
 
     # Download if not cached
     try:
-        init_content = await download_file_with_retry(
-            init_url, headers, verify_ssl=verify_ssl, use_request_proxy=use_request_proxy
-        )
+        init_content = await download_file_with_retry(init_url, headers)
         if init_content:
             await INIT_SEGMENT_CACHE.set(init_url, init_content)
         return init_content
@@ -348,8 +344,6 @@ async def get_cached_mpd(
     headers: dict,
     parse_drm: bool,
     parse_segment_profile_id: str | None = None,
-    verify_ssl: bool = True,
-    use_request_proxy: bool = True,
 ) -> Optional[dict]:
     """Get MPD from cache or download and parse it."""
     # Try cache first
@@ -363,9 +357,7 @@ async def get_cached_mpd(
 
     # Download and parse if not cached
     try:
-        mpd_content = await download_file_with_retry(
-            mpd_url, headers, verify_ssl=verify_ssl, use_request_proxy=use_request_proxy
-        )
+        mpd_content = await download_file_with_retry(mpd_url, headers)
         mpd_dict = parse_mpd(mpd_content)
         parsed_dict = parse_mpd_dict(mpd_dict, mpd_url, parse_drm, parse_segment_profile_id)
 

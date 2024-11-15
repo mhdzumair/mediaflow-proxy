@@ -30,6 +30,13 @@ class DownloadError(Exception):
         super().__init__(message)
 
 
+def create_httpx_client(follow_redirects: bool = True, timeout: float = 30.0, **kwargs) -> httpx.AsyncClient:
+    """Creates an HTTPX client with configured proxy routing"""
+    mounts = settings.proxy_config.get_mounts()
+    client = httpx.AsyncClient(mounts=mounts, follow_redirects=follow_redirects, timeout=timeout, **kwargs)
+    return client
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -204,22 +211,13 @@ class Streamer:
         await self.client.aclose()
 
 
-async def download_file_with_retry(
-    url: str,
-    headers: dict,
-    timeout: float = 10.0,
-    verify_ssl: bool = True,
-    use_request_proxy: bool = True,
-):
+async def download_file_with_retry(url: str, headers: dict):
     """
     Downloads a file with retry logic.
 
     Args:
         url (str): The URL of the file to download.
         headers (dict): The headers to include in the request.
-        timeout (float, optional): The request timeout. Defaults to 10.0.
-        verify_ssl (bool, optional): Whether to verify the SSL certificate of the destination. Defaults to True.
-        use_request_proxy (bool, optional): Whether to use the proxy configuration from the user's MediaFlow config. Defaults to True.
 
     Returns:
         bytes: The downloaded file content.
@@ -227,12 +225,7 @@ async def download_file_with_retry(
     Raises:
         DownloadError: If the download fails after retries.
     """
-    async with httpx.AsyncClient(
-        follow_redirects=True,
-        timeout=timeout,
-        proxy=settings.proxy_url if use_request_proxy else None,
-        verify=verify_ssl,
-    ) as client:
+    async with create_httpx_client() as client:
         try:
             response = await fetch_with_retry(client, "GET", url, headers)
             return response.content
@@ -243,9 +236,7 @@ async def download_file_with_retry(
             raise DownloadError(502, f"Failed to download file: {e.last_attempt.result()}")
 
 
-async def request_with_retry(
-    method: str, url: str, headers: dict, timeout: float = 10.0, use_request_proxy: bool = True, **kwargs
-) -> httpx.Response:
+async def request_with_retry(method: str, url: str, headers: dict, **kwargs) -> httpx.Response:
     """
     Sends an HTTP request with retry logic.
 
@@ -253,8 +244,6 @@ async def request_with_retry(
         method (str): The HTTP method to use (e.g., GET, POST).
         url (str): The URL to send the request to.
         headers (dict): The headers to include in the request.
-        timeout (float, optional): The request timeout. Defaults to 10.0.
-        use_request_proxy (bool, optional): Whether to use the proxy configuration from the user's MediaFlow config. Defaults to True.
         **kwargs: Additional arguments to pass to the request.
 
     Returns:
@@ -263,9 +252,7 @@ async def request_with_retry(
     Raises:
         DownloadError: If the request fails after retries.
     """
-    async with httpx.AsyncClient(
-        follow_redirects=True, timeout=timeout, proxy=settings.proxy_url if use_request_proxy else None
-    ) as client:
+    async with create_httpx_client() as client:
         try:
             response = await fetch_with_retry(client, method, url, headers, **kwargs)
             return response

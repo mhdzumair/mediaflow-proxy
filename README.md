@@ -22,26 +22,86 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 
 ## Features
 
+### Stream Processing
 - Convert MPEG-DASH streams (DRM-protected and non-protected) to HLS
 - Support for Clear Key DRM-protected MPD DASH streams
 - Support for non-DRM protected DASH live and VOD streams
+- Proxy and modify HLS (M3U8) streams in real-time
 - Proxy HTTP/HTTPS links with custom headers
-- Proxy and modify HLS (M3U8) streams in real-time with custom headers and key URL modifications for bypassing some sneaky restrictions.
-- Retrieve public IP address of the MediaFlow Proxy server for use with Debrid services
+
+### Proxy & Routing
+- Advanced proxy routing system with support for:
+  - Domain-based routing rules
+  - Protocol-specific routing (HTTP/HTTPS)
+  - Subdomain and wildcard patterns
+  - Port-specific routing
 - Support for HTTP/HTTPS/SOCKS5 proxy forwarding
-- Protect against unauthorized access and network bandwidth abuses
-- Support for play expired or self-signed SSL certificates server streams `(verify_ssl=false)` default is `false`
-- Flexible request proxy usage control per request `(use_request_proxy=true/false)` default is `true`
-- Obfuscating endpoint parameters by encrypting them to hide sensitive information from third-party.
-- Optional IP-based access control restriction & expiration for encrypted URLs to prevent unauthorized access
+- Flexible SSL verification control per route
+- Support for expired or self-signed SSL certificates
+- Public IP address retrieval for Debrid services integration
+
+### Security
+- API password protection against unauthorized access & Network bandwidth abuse prevention
+- Parameter encryption to hide sensitive information
+- Optional IP-based access control for encrypted URLs
+- URL expiration support for encrypted URLs
+
+### Additional Features
+- Built-in speed test for RealDebrid and AllDebrid services
+- Custom header injection and modification
+- Real-time HLS manifest manipulation
+- HLS Key URL modifications for bypassing stream restrictions
+
 
 ## Configuration
 
 Set the following environment variables:
 
 - `API_PASSWORD`: Required. Protects against unauthorized access and API network abuses.
-- `PROXY_URL`: Optional. HTTP/HTTPS/SOCKS5 proxy URL for forwarding network requests.
 - `ENABLE_STREAMING_PROGRESS`: Optional. Enable streaming progress logging. Default is `false`.
+
+### Proxy Configuration Examples
+
+MediaFlow Proxy now supports advanced proxy routing using HTTPX's routing system. You can configure different proxy rules for different domains, protocols, and patterns. Here are some examples:
+
+1. Basic proxy configuration with a default proxy:
+```env
+PROXY_DEFAULT_URL=http://default-proxy:8080
+```
+
+2. Advanced routing with multiple rules:
+```env
+PROXY_ROUTES='{
+    "all://*.debrid.com": {
+        "proxy_url": "socks5://debrid-proxy:8080"
+    },
+    "https://internal.company.com": {
+        "proxy_url": null,
+        "verify_ssl": false
+    },
+    "all://api.external.com": {
+        "proxy_url": "http://api-proxy:8080",
+        "verify_ssl": false
+    }
+}'
+```
+
+Proxy routing supports various patterns:
+- Domain routing: `"all://example.com"`
+- Subdomain routing: `"all://*.example.com"`
+- Protocol-specific routing: `"https://example.com"`
+- Port-specific routing: `"all://*:1234"`
+- Wildcard routing: `"all://"`
+
+### Speed Test Feature
+
+MediaFlow Proxy now includes a built-in speed test feature for testing RealDebrid and AllDebrid network speeds. To access the speed test:
+
+1. Open your browser and navigate to `http://your-server:8888/speedtest.html`
+2. The speed test page allows you to:
+   - Test download speeds from RealDebrid servers
+   - Test download speeds from AllDebrid servers
+
 
 ## Installation
 
