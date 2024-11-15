@@ -220,16 +220,21 @@ Once the server is running, for more details on the available endpoints and thei
 
 ### Examples
 
-#### Proxy HTTPS Stream (without using configured proxy)
+#### Proxy HTTPS Stream
 
 ```bash
-mpv "http://localhost:8888/proxy/stream?d=https://jsoncompare.org/LearningContainer/SampleFiles/Video/MP4/sample-mp4-file.mp4&api_password=your_password&use_request_proxy=false"
+mpv "http://localhost:8888/proxy/stream?d=https://jsoncompare.org/LearningContainer/SampleFiles/Video/MP4/sample-mp4-file.mp4&api_password=your_password"
 ```
 
 #### Proxy HTTPS self-signed certificate Stream
 
+To bypass SSL verification for a self-signed certificate stream, export the proxy route configuration:
 ```bash
-mpv "http://localhost:8888/proxy/stream?d=https://self-signed.badssl.com/&api_password=your_password&verify_ssl=false"
+PROXY_ROUTES='{"https://self-signed.badssl.com": {"proxy_url": null, "verify_ssl": false}}'
+```
+
+```bash
+mpv "http://localhost:8888/proxy/stream?d=https://self-signed.badssl.com/&api_password=your_password"
 ```
 
 
