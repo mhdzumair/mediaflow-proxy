@@ -16,7 +16,7 @@ import aiofiles.os
 from pydantic import ValidationError
 
 from mediaflow_proxy.speedtest.models import SpeedTestTask
-from mediaflow_proxy.utils.http_utils import download_file_with_retry
+from mediaflow_proxy.utils.http_utils import download_file_with_retry, DownloadError
 from mediaflow_proxy.utils.mpd_utils import parse_mpd, parse_mpd_dict
 
 logger = logging.getLogger(__name__)
@@ -344,7 +344,7 @@ async def get_cached_mpd(
     headers: dict,
     parse_drm: bool,
     parse_segment_profile_id: str | None = None,
-) -> Optional[dict]:
+) -> dict:
     """Get MPD from cache or download and parse it."""
     # Try cache first
     cached_data = await MPD_CACHE.get(mpd_url)
@@ -364,9 +364,12 @@ async def get_cached_mpd(
         # Cache the original MPD dict
         await MPD_CACHE.set(mpd_url, json.dumps(mpd_dict).encode())
         return parsed_dict
-    except Exception as e:
-        logger.error(f"Error processing MPD: {e}")
-        return None
+    except DownloadError as error:
+        logger.error(f"Error downloading MPD: {error}")
+        raise error
+    except Exception as error:
+        logger.exception(f"Error processing MPD: {e}")
+        raise error
 
 
 async def get_cached_speedtest(task_id: str) -> Optional[SpeedTestTask]:
