@@ -297,12 +297,15 @@ async def get_playlist(
     Returns:
         Response: The HTTP response with the HLS playlist.
     """
-    mpd_dict = await get_cached_mpd(
-        playlist_params.destination,
-        headers=proxy_headers.request,
-        parse_drm=not playlist_params.key_id and not playlist_params.key,
-        parse_segment_profile_id=playlist_params.profile_id,
-    )
+    try:
+        mpd_dict = await get_cached_mpd(
+            playlist_params.destination,
+            headers=proxy_headers.request,
+            parse_drm=not playlist_params.key_id and not playlist_params.key,
+            parse_segment_profile_id=playlist_params.profile_id,
+        )
+    except DownloadError as e:
+        raise HTTPException(status_code=e.status_code, detail=f"Failed to download MPD: {e.message}")
     return await process_playlist(request, mpd_dict, playlist_params.profile_id, proxy_headers)
 
 
