@@ -60,38 +60,92 @@ Set the following environment variables:
 - `API_PASSWORD`: Required. Protects against unauthorized access and API network abuses.
 - `ENABLE_STREAMING_PROGRESS`: Optional. Enable streaming progress logging. Default is `false`.
 
-### Proxy Configuration Examples
+### Transport Configuration
 
-MediaFlow Proxy now supports advanced proxy routing using HTTPX's routing system. You can configure different proxy rules for different domains, protocols, and patterns. Here are some examples:
+MediaFlow Proxy now supports advanced transport configuration using HTTPX's routing system. You can configure proxy and SSL verification settings for different domains and protocols.
 
-1. Basic proxy configuration with a default proxy:
+#### Basic Configuration
+
+Enable proxy for all routes:
 ```env
-PROXY_DEFAULT_URL=http://default-proxy:8080
+PROXY_URL=http://proxy:8080
+ALL_PROXY=true
 ```
 
-2. Advanced routing with multiple rules:
+#### Advanced Routing Configuration
+
+Configure different proxy settings for specific patterns:
 ```env
-PROXY_ROUTES='{
-    "all://*.debrid.com": {
-        "proxy_url": "socks5://debrid-proxy:8080"
-    },
+PROXY_URL=http://proxy:8080
+TRANSPORT_ROUTES='{
     "https://internal.company.com": {
-        "proxy_url": null,
-        "verify_ssl": false
+        "proxy": false
     },
-    "all://api.external.com": {
-        "proxy_url": "http://api-proxy:8080",
+    "all://streaming.service.com": {
+        "proxy_url": "socks5://streaming-proxy:1080",
         "verify_ssl": false
     }
 }'
 ```
 
-Proxy routing supports various patterns:
+The routing system supports various patterns:
 - Domain routing: `"all://example.com"`
 - Subdomain routing: `"all://*.example.com"`
 - Protocol-specific routing: `"https://example.com"`
 - Port-specific routing: `"all://*:1234"`
 - Wildcard routing: `"all://"`
+
+#### Route Configuration Options
+
+Each route can have the following settings:
+- `proxy`: Boolean to enable/disable proxy for this route (default: true)
+- `proxy_url`: Optional specific proxy URL for this route (overrides primary proxy_url)
+- `verify_ssl`: Boolean to control SSL verification (default: true)
+
+#### Configuration Examples
+
+1. Simple proxy setup with SSL bypass for internal domain:
+```env
+PROXY_URL=http://main-proxy:8080
+TRANSPORT_ROUTES='{
+    "https://internal.domain.com": {
+        "proxy": false,
+        "verify_ssl": false
+    }
+}'
+```
+
+2. Different proxies for different services:
+```env
+PROXY_URL=http://default-proxy:8080
+TRANSPORT_ROUTES='{
+    "all://*.streaming.com": {
+        "proxy": true,
+        "proxy_url": "socks5://streaming-proxy:1080"
+    },
+    "all://*.internal.com": {
+        "proxy": false
+    },
+    "https://api.service.com": {
+        "proxy": true,
+        "verify_ssl": false
+    }
+}'
+```
+
+3. Global proxy with exceptions:
+```env
+PROXY_URL=http://main-proxy:8080
+ALL_PROXY=true
+TRANSPORT_ROUTES='{
+    "all://local.network": {
+        "proxy": false
+    },
+    "all://*.trusted-service.com": {
+        "proxy": false
+    }
+}'
+```
 
 ### Speed Test Feature
 

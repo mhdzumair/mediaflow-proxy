@@ -16,9 +16,9 @@ class ExtractorFactory:
     }
 
     @classmethod
-    def get_extractor(cls, host: str, proxy_enabled: bool, request_headers: dict) -> BaseExtractor:
+    def get_extractor(cls, host: str, request_headers: dict) -> BaseExtractor:
         """Get appropriate extractor instance for the given host."""
         extractor_class = cls._extractors.get(host)
         if not extractor_class:
             raise ValueError(f"Unsupported host: {host}")
-        return extractor_class(proxy_enabled, request_headers)
+        return extractor_class(request_headers)

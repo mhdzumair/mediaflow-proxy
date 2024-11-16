@@ -3,11 +3,8 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, Optional, Type
 
-from httpx import AsyncClient
-
-from mediaflow_proxy.configs import settings
-from mediaflow_proxy.utils.http_utils import Streamer
 from mediaflow_proxy.utils.cache_utils import get_cached_speedtest, set_cache_speedtest
+from mediaflow_proxy.utils.http_utils import Streamer, create_httpx_client
 from .models import SpeedTestTask, LocationResult, SpeedTestResult, SpeedTestProvider
 from .providers.all_debrid import AllDebridSpeedTest
 from .providers.base import BaseSpeedTestProvider
@@ -68,7 +65,7 @@ class SpeedTestService:
             provider_impl = self._get_provider(provider, api_key)
             config = await provider_impl.get_config()
 
-            async with AsyncClient(follow_redirects=True, timeout=10, proxy=settings.proxy_url) as client:
+            async with create_httpx_client() as client:
                 streamer = Streamer(client)
 
                 for location, url in config.test_urls.items():

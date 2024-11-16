@@ -5,14 +5,24 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
 
-class ProxyRoute(BaseModel):
+class RouteConfig(BaseModel):
+    """Configuration for a specific route"""
+
+    proxy: bool = True
     proxy_url: Optional[str] = None
     verify_ssl: bool = True
 
 
-class ProxyConfig(BaseSettings):
-    default_url: Optional[str] = None
-    routes: Dict[str, ProxyRoute] = Field(default_factory=dict)
+class TransportConfig(BaseSettings):
+    """Main proxy configuration"""
+
+    proxy_url: Optional[str] = Field(
+        None, description="Primary proxy URL. Example: socks5://user:pass@proxy:1080 or http://proxy:8080"
+    )
+    all_proxy: bool = Field(False, description="Enable proxy for all routes by default")
+    transport_routes: Dict[str, RouteConfig] = Field(
+        default_factory=dict, description="Pattern-based route configuration"
+    )
 
     def get_mounts(
         self, async_http: bool = True
@@ -23,25 +33,26 @@ class ProxyConfig(BaseSettings):
         mounts = {}
         transport_cls = httpx.AsyncHTTPTransport if async_http else httpx.HTTPTransport
 
-        # Add specific routes
-        for pattern, route in self.routes.items():
-            mounts[pattern] = transport_cls(proxy=route.proxy_url, verify=route.verify_ssl) if route.proxy_url else None
+        # Configure specific routes
+        for pattern, route in self.transport_routes.items():
+            mounts[pattern] = transport_cls(
+                verify=route.verify_ssl, proxy=route.proxy_url or self.proxy_url if route.proxy else None
+            )
 
-        # Set default proxy if specified
-        if self.default_url:
-            mounts["all://"] = transport_cls(proxy=self.default_url)
+        # Set default proxy for all routes if enabled
+        if self.all_proxy:
+            mounts["all://"] = transport_cls(proxy=self.proxy_url)
 
         return mounts
 
     class Config:
         env_file = ".env"
-        env_prefix = "PROXY_"
         extra = "ignore"
 
 
 class Settings(BaseSettings):
     api_password: str  # The password for accessing the API endpoints.
-    proxy_config: ProxyConfig = Field(default_factory=ProxyConfig)  # Configuration for proxying requests.
+    transport_config: TransportConfig = Field(default_factory=TransportConfig)  # Configuration for httpx transport.
     enable_streaming_progress: bool = False  # Whether to enable streaming progress tracking.
 
     user_agent: str = (

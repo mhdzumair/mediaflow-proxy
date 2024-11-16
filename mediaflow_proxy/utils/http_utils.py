@@ -32,7 +32,7 @@ class DownloadError(Exception):
 
 def create_httpx_client(follow_redirects: bool = True, timeout: float = 30.0, **kwargs) -> httpx.AsyncClient:
     """Creates an HTTPX client with configured proxy routing"""
-    mounts = settings.proxy_config.get_mounts()
+    mounts = settings.transport_config.get_mounts()
     client = httpx.AsyncClient(mounts=mounts, follow_redirects=follow_redirects, timeout=timeout, **kwargs)
     return client
 
