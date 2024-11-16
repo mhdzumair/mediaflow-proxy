@@ -24,9 +24,7 @@ async def extract_url(
 ):
     """Extract clean links from various video hosting services."""
     try:
-        extractor = ExtractorFactory.get_extractor(
-            extractor_params.host, extractor_params.use_request_proxy, proxy_headers.request
-        )
+        extractor = ExtractorFactory.get_extractor(extractor_params.host, proxy_headers.request)
         final_url, headers = await extractor.extract(extractor_params.destination)
 
         if extractor_params.redirect_stream:

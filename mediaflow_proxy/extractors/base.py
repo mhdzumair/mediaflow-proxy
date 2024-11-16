@@ -10,8 +10,7 @@ from mediaflow_proxy.utils.http_utils import create_httpx_client
 class BaseExtractor(ABC):
     """Base class for all URL extractors."""
 
-    def __init__(self, proxy_enabled: bool, request_headers: dict):
-        self.proxy_url = settings.proxy_url if proxy_enabled else None
+    def __init__(self, request_headers: dict):
         self.base_headers = {
             "user-agent": settings.user_agent,
             "accept-language": "en-US,en;q=0.5",
