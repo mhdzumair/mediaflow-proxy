@@ -1,13 +1,12 @@
 import re
 from typing import Dict
+from urllib.parse import urljoin
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
 
 class UqloadExtractor(BaseExtractor):
     """Uqload URL extractor."""
-
-    referer = "https://uqload.to/"
 
     async def extract(self, url: str, **kwargs) -> Dict[str, str]:
         """Extract Uqload URL."""
@@ -17,7 +16,7 @@ class UqloadExtractor(BaseExtractor):
         if not video_url_match:
             raise ExtractorError("Failed to extract video URL")
 
-        self.base_headers["referer"] = self.referer
+        self.base_headers["referer"] = urljoin(url, "/")
         return {
             "destination_url": video_url_match.group(1),
             "request_headers": self.base_headers,
