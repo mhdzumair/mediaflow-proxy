@@ -1,21 +1,21 @@
 import re
 import string
-from typing import Dict, Tuple
+from typing import Dict, Any
 
-from mediaflow_proxy.extractors.base import BaseExtractor
+from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
 
 class MixdropExtractor(BaseExtractor):
     """Mixdrop URL extractor."""
 
-    async def extract(self, url: str) -> Tuple[str, Dict[str, str]]:
+    async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         """Extract Mixdrop URL."""
-        response = await self._make_request(url)
+        response = await self._make_request(url, headers={"accept-language": "en-US,en;q=0.5"})
 
         # Extract and decode URL
-        match = re.search(r"\}\('(.+)',.+,'(.+)'\.split", response.text)
+        match = re.search(r"}\('(.+)',.+,'(.+)'\.split", response.text)
         if not match:
-            raise ValueError("Failed to extract URL components")
+            raise ExtractorError("Failed to extract URL components")
 
         s1, s2 = match.group(1, 2)
         schema = s1.split(";")[2][5:-1]
@@ -28,4 +28,9 @@ class MixdropExtractor(BaseExtractor):
         # Construct final URL
         final_url = "https:" + "".join(char_map.get(c, c) for c in schema)
 
-        return final_url, {"User-Agent": self.base_headers["User-Agent"]}
+        self.base_headers["referer"] = url
+        return {
+            "destination_url": final_url,
+            "request_headers": self.base_headers,
+            "mediaflow_endpoint": self.mediaflow_endpoint,
+        }

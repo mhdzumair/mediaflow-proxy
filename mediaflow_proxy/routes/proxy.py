@@ -24,7 +24,7 @@ proxy_router = APIRouter()
 
 @proxy_router.head("/hls/manifest.m3u8")
 @proxy_router.get("/hls/manifest.m3u8")
-async def hls_stream_proxy(
+async def hls_manifest_proxy(
     request: Request,
     hls_params: Annotated[HLSManifestParams, Query()],
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
@@ -70,7 +70,7 @@ async def proxy_stream_endpoint(
 
 
 @proxy_router.get("/mpd/manifest.m3u8")
-async def manifest_endpoint(
+async def mpd_manifest_proxy(
     request: Request,
     manifest_params: Annotated[MPDManifestParams, Query()],
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],

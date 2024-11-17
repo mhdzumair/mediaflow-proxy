@@ -16,7 +16,9 @@ class M3U8Processor:
         """
         self.request = request
         self.key_url = parse.urlparse(key_url) if key_url else None
-        self.mediaflow_proxy_url = str(request.url_for("hls_stream_proxy").replace(scheme=get_original_scheme(request)))
+        self.mediaflow_proxy_url = str(
+            request.url_for("hls_manifest_proxy").replace(scheme=get_original_scheme(request))
+        )
 
     async def process_m3u8(self, content: str, base_url: str) -> str:
         """

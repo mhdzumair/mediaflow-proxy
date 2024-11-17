@@ -23,8 +23,8 @@ include = ["LICENSE", "README.md", "mediaflow_proxy/static/*"]
 
 [tool.poetry.dependencies]
 python = ">=3.10"
-fastapi = "0.115.4"
-httpx = {extras = ["socks"], version = "^0.27.2"}
+fastapi = "0.115.5"
+httpx = {extras = ["socks", "zstd"], version = "^0.27.2"}
 tenacity = "^9.0.0"
 xmltodict = "^0.14.2"
 pydantic-settings = "^2.6.1"

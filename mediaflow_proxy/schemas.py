@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Dict, Any
 
 from pydantic import BaseModel, Field, IPvAnyAddress, ConfigDict
 
@@ -59,6 +59,12 @@ class MPDSegmentParams(GenericParams):
 
 
 class ExtractorURLParams(GenericParams):
-    host: Literal["Doodstream", "Mixdrop", "Uqload"] = Field(..., description="The host to extract the URL from.")
+    host: Literal["Doodstream", "Mixdrop", "Uqload", "LiveTV"] = Field(
+        ..., description="The host to extract the URL from."
+    )
     destination: str = Field(..., description="The URL of the stream.", alias="d")
     redirect_stream: bool = Field(False, description="Whether to redirect to the stream endpoint automatically.")
+    extra_params: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional parameters required for specific extractors (e.g., stream_title for LiveTV)",
+    )
