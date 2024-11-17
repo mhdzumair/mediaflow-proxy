@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mediaflow-proxy"
-version = "1.9.2"
+version = "1.9.3"
 description = "A high-performance proxy server for streaming media, supporting HTTP(S), HLS, and MPEG-DASH with real-time DRM decryption."
 authors = ["mhdzumair <mhdzumair@gmail.com>"]
 readme = "README.md"
