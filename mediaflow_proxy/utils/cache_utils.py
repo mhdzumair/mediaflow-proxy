@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -89,7 +90,7 @@ class AsyncLRUMemoryCache:
                 else:
                     # Remove expired entry
                     self._current_size -= entry.size
-                    del self._cache[key]
+                    self._cache.pop(key, None)
             return None
 
     def set(self, key: str, entry: CacheEntry) -> None:
@@ -121,12 +122,10 @@ class OptimizedHybridCache:
         cache_dir_name: str,
         ttl: int,
         max_memory_size: int = 100 * 1024 * 1024,  # 100MB default
-        file_shards: int = 256,  # Number of subdirectories for sharding
         executor_workers: int = 4,
     ):
         self.cache_dir = Path(tempfile.gettempdir()) / cache_dir_name
         self.ttl = ttl
-        self.file_shards = file_shards
         self.memory_cache = AsyncLRUMemoryCache(maxsize=max_memory_size)
         self.stats = CacheStats()
         self._executor = ThreadPoolExecutor(max_workers=executor_workers)
@@ -137,19 +136,15 @@ class OptimizedHybridCache:
 
     def _init_cache_dirs(self):
         """Initialize sharded cache directories."""
-        for i in range(self.file_shards):
-            shard_dir = self.cache_dir / f"shard_{i:03d}"
-            os.makedirs(shard_dir, exist_ok=True)
+        os.makedirs(self.cache_dir, exist_ok=True)
 
-    def _get_shard_path(self, key: str) -> Path:
-        """Get the appropriate shard directory for a key."""
-        shard_num = hash(key) % self.file_shards
-        return self.cache_dir / f"shard_{shard_num:03d}"
+    def _get_md5_hash(self, key: str) -> str:
+        """Get the MD5 hash of a cache key."""
+        return hashlib.md5(key.encode()).hexdigest()
 
     def _get_file_path(self, key: str) -> Path:
         """Get the file path for a cache key."""
-        safe_key = str(hash(key))
-        return self._get_shard_path(key) / safe_key
+        return self.cache_dir / key
 
     async def get(self, key: str, default: Any = None) -> Optional[bytes]:
         """
@@ -162,6 +157,7 @@ class OptimizedHybridCache:
         Returns:
             Cached value or default if not found
         """
+        key = self._get_md5_hash(key)
         # Try memory cache first
         entry = self.memory_cache.get(key)
         if entry is not None:
@@ -227,6 +223,7 @@ class OptimizedHybridCache:
         # Create cache entry
         entry = CacheEntry(data=data, expires_at=expires_at, access_count=0, last_access=time.time(), size=len(data))
 
+        key = self._get_md5_hash(key)
         # Update memory cache
         self.memory_cache.set(key, entry)
 
@@ -287,14 +284,12 @@ class OptimizedHybridCache:
                 logger.error(f"Error cleaning up file {file_path}: {e}")
 
         # Clean up each shard
-        for i in range(self.file_shards):
-            shard_dir = self.cache_dir / f"shard_{i:03d}"
-            try:
-                async for entry in aiofiles.os.scandir(shard_dir):
-                    if entry.is_file() and not entry.name.endswith(".tmp"):
-                        await check_and_clean_file(Path(entry.path))
-            except Exception as e:
-                logger.error(f"Error scanning shard directory {shard_dir}: {e}")
+        try:
+            async for entry in aiofiles.os.scandir(self.cache_dir):
+                if entry.is_file() and not entry.name.endswith(".tmp"):
+                    await check_and_clean_file(Path(entry.path))
+        except Exception as e:
+            logger.error(f"Error scanning shard directory {self.cache_dir}: {e}")
 
 
 # Create cache instances
@@ -302,21 +297,24 @@ INIT_SEGMENT_CACHE = OptimizedHybridCache(
     cache_dir_name="init_segment_cache",
     ttl=3600,  # 1 hour
     max_memory_size=500 * 1024 * 1024,  # 500MB for init segments
-    file_shards=512,  # More shards for better distribution
 )
 
 MPD_CACHE = OptimizedHybridCache(
     cache_dir_name="mpd_cache",
     ttl=300,  # 5 minutes
     max_memory_size=100 * 1024 * 1024,  # 100MB for MPD files
-    file_shards=128,
 )
 
 SPEEDTEST_CACHE = OptimizedHybridCache(
     cache_dir_name="speedtest_cache",
     ttl=3600,  # 1 hour
-    max_memory_size=50 * 1024 * 1024,  # 50MB for speed test results
-    file_shards=64,
+    max_memory_size=50 * 1024 * 1024,
+)
+
+EXTRACTOR_CACHE = OptimizedHybridCache(
+    cache_dir_name="extractor_cache",
+    ttl=5 * 60,  # 5 minutes
+    max_memory_size=50 * 1024 * 1024,
 )
 
 
@@ -390,4 +388,24 @@ async def set_cache_speedtest(task_id: str, task: SpeedTestTask) -> bool:
         return await SPEEDTEST_CACHE.set(task_id, task.model_dump_json().encode())
     except Exception as e:
         logger.error(f"Error caching speed test data: {e}")
+        return False
+
+
+async def get_cached_extractor_result(key: str) -> Optional[dict]:
+    """Get extractor result from cache."""
+    cached_data = await EXTRACTOR_CACHE.get(key)
+    if cached_data is not None:
+        try:
+            return json.loads(cached_data)
+        except json.JSONDecodeError:
+            await EXTRACTOR_CACHE.delete(key)
+    return None
+
+
+async def set_cache_extractor_result(key: str, result: dict) -> bool:
+    """Cache extractor result."""
+    try:
+        return await EXTRACTOR_CACHE.set(key, json.dumps(result).encode())
+    except Exception as e:
+        logger.error(f"Error caching extractor result: {e}")
         return False

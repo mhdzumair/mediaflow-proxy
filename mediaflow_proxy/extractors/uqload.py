@@ -1,18 +1,25 @@
 import re
-from typing import Dict, Tuple
+from typing import Dict
 
-from mediaflow_proxy.extractors.base import BaseExtractor
+from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
 
 class UqloadExtractor(BaseExtractor):
     """Uqload URL extractor."""
 
-    async def extract(self, url: str) -> Tuple[str, Dict[str, str]]:
+    referer = "https://uqload.to/"
+
+    async def extract(self, url: str, **kwargs) -> Dict[str, str]:
         """Extract Uqload URL."""
         response = await self._make_request(url)
 
-        video_url_match = re.search(r'sources: \["(.*?)"\]', response.text)
+        video_url_match = re.search(r'sources: \["(.*?)"]', response.text)
         if not video_url_match:
-            raise ValueError("Failed to extract video URL")
+            raise ExtractorError("Failed to extract video URL")
 
-        return video_url_match.group(1), {"Referer": "https://uqload.to/"}
+        self.base_headers["referer"] = self.referer
+        return {
+            "destination_url": video_url_match.group(1),
+            "request_headers": self.base_headers,
+            "mediaflow_endpoint": self.mediaflow_endpoint,
+        }

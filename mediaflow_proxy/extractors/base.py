@@ -1,10 +1,16 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Tuple, Optional
+from typing import Dict, Optional, Any
 
 import httpx
 
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.utils.http_utils import create_httpx_client
+
+
+class ExtractorError(Exception):
+    """Base exception for all extractors."""
+
+    pass
 
 
 class BaseExtractor(ABC):
@@ -13,17 +19,20 @@ class BaseExtractor(ABC):
     def __init__(self, request_headers: dict):
         self.base_headers = {
             "user-agent": settings.user_agent,
-            "accept-language": "en-US,en;q=0.5",
         }
+        self.mediaflow_endpoint = "proxy_stream_endpoint"
         self.base_headers.update(request_headers)
 
-    async def _make_request(self, url: str, headers: Optional[Dict] = None, **kwargs) -> httpx.Response:
+    async def _make_request(
+        self, url: str, method: str = "GET", headers: Optional[Dict] = None, **kwargs
+    ) -> httpx.Response:
         """Make HTTP request with error handling."""
         try:
             async with create_httpx_client() as client:
                 request_headers = self.base_headers
                 request_headers.update(headers or {})
-                response = await client.get(
+                response = await client.request(
+                    method,
                     url,
                     headers=request_headers,
                     **kwargs,
@@ -31,11 +40,11 @@ class BaseExtractor(ABC):
                 response.raise_for_status()
                 return response
         except httpx.HTTPError as e:
-            raise ValueError(f"HTTP request failed: {str(e)}")
+            raise ExtractorError(f"HTTP request failed: {str(e)}")
         except Exception as e:
-            raise ValueError(f"Request failed: {str(e)}")
+            raise ExtractorError(f"Request failed: {str(e)}")
 
     @abstractmethod
-    async def extract(self, url: str) -> Tuple[str, Dict[str, str]]:
+    async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         """Extract final URL and required headers."""
         pass

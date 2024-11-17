@@ -12,13 +12,6 @@ SUPPORTED_RESPONSE_HEADERS = [
 ]
 
 SUPPORTED_REQUEST_HEADERS = [
-    "accept",
-    "accept-encoding",
-    "accept-language",
-    "connection",
     "range",
     "if-range",
-    "user-agent",
-    "referer",
-    "origin",
 ]

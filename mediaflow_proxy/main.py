@@ -13,7 +13,7 @@ from mediaflow_proxy.schemas import GenerateUrlRequest
 from mediaflow_proxy.utils.crypto_utils import EncryptionHandler, EncryptionMiddleware
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=settings.log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 app = FastAPI()
 api_password_query = APIKeyQuery(name="api_password", auto_error=False)
 api_password_header = APIKeyHeader(name="api_password", auto_error=False)

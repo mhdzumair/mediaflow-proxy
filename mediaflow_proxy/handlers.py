@@ -6,7 +6,6 @@ import httpx
 from fastapi import Request, Response, HTTPException
 from starlette.background import BackgroundTask
 
-from .configs import settings
 from .const import SUPPORTED_RESPONSE_HEADERS
 from .mpd_processor import process_manifest, process_playlist, process_segment
 from .schemas import HLSManifestParams, ProxyStreamParams, MPDManifestParams, MPDPlaylistParams, MPDSegmentParams

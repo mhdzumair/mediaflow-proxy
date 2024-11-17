@@ -1,11 +1,13 @@
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Query, HTTPException, Request, Depends
 from fastapi.responses import RedirectResponse
 
-from mediaflow_proxy.configs import settings
+from mediaflow_proxy.extractors.base import ExtractorError
 from mediaflow_proxy.extractors.factory import ExtractorFactory
 from mediaflow_proxy.schemas import ExtractorURLParams
+from mediaflow_proxy.utils.cache_utils import get_cached_extractor_result, set_cache_extractor_result
 from mediaflow_proxy.utils.http_utils import (
     encode_mediaflow_proxy_url,
     get_original_scheme,
@@ -14,6 +16,7 @@ from mediaflow_proxy.utils.http_utils import (
 )
 
 extractor_router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @extractor_router.get("/video")
@@ -24,23 +27,32 @@ async def extract_url(
 ):
     """Extract clean links from various video hosting services."""
     try:
-        extractor = ExtractorFactory.get_extractor(extractor_params.host, proxy_headers.request)
-        final_url, headers = await extractor.extract(extractor_params.destination)
+        cache_key = f"{extractor_params.host}_{extractor_params.model_dump_json()}"
+        response = await get_cached_extractor_result(cache_key)
+        if not response:
+            extractor = ExtractorFactory.get_extractor(extractor_params.host, proxy_headers.request)
+            response = await extractor.extract(extractor_params.destination, **extractor_params.extra_params)
+            await set_cache_extractor_result(cache_key, response)
+
+        response["mediaflow_proxy_url"] = str(
+            request.url_for(response.pop("mediaflow_endpoint")).replace(scheme=get_original_scheme(request))
+        )
 
         if extractor_params.redirect_stream:
-            headers.update(proxy_headers.request)
+            response["query_params"] = response.get("query_params", {})
+            # Add API password to query params
+            response["query_params"]["api_password"] = request.query_params.get("api_password")
             stream_url = encode_mediaflow_proxy_url(
-                str(request.url_for("proxy_stream_endpoint").replace(scheme=get_original_scheme(request))),
-                destination_url=final_url,
-                query_params={"api_password": settings.api_password},
-                request_headers=headers,
+                **response,
                 response_headers=proxy_headers.response,
             )
-            return RedirectResponse(url=stream_url)
+            return RedirectResponse(url=stream_url, status_code=302)
 
-        return {"url": final_url, "headers": headers}
+        return response
 
-    except ValueError as e:
+    except ExtractorError as e:
+        logger.error(f"Extraction failed: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        logger.exception(f"Extraction failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
