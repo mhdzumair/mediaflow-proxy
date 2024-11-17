@@ -40,11 +40,11 @@ async def extract_url(
         response["mediaflow_proxy_url"] = str(
             request.url_for(response.pop("mediaflow_endpoint")).replace(scheme=get_original_scheme(request))
         )
+        response["query_params"] = response.get("query_params", {})
+        # Add API password to query params
+        response["query_params"]["api_password"] = request.query_params.get("api_password")
 
         if extractor_params.redirect_stream:
-            response["query_params"] = response.get("query_params", {})
-            # Add API password to query params
-            response["query_params"]["api_password"] = request.query_params.get("api_password")
             stream_url = encode_mediaflow_proxy_url(
                 **response,
                 response_headers=proxy_headers.response,
