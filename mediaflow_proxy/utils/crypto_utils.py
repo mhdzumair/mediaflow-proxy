@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 import time
+import traceback
 from urllib.parse import urlencode
 
 from Crypto.Cipher import AES
@@ -78,9 +79,13 @@ class EncryptionMiddleware(BaseHTTPMiddleware):
 
         try:
             response = await call_next(request)
-        except Exception as e:
-            logging.exception("An error occurred while processing the request")
-            return JSONResponse(content={"error": str(e)}, status_code=500)
+        except Exception:
+            exc = traceback.format_exc(chain=False)
+            logging.error("An error occurred while processing the request, error: %s", exc)
+            return JSONResponse(
+                content={"error": "An error occurred while processing the request, check the server for logs"},
+                status_code=500,
+            )
         return response
 
     @staticmethod
