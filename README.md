@@ -1,17 +1,3 @@
----
-title: MediaFlow Proxy
-emoji: 🎥
-colorFrom: blue
-colorTo: green
-sdk: docker
-app_port: 8888
-pinned: false
-license: mit
-thumbnail: >-
-  https://cdn.githubraw.com/mhdzumair/mediaflow-proxy/main/mediaflow_proxy/static/logo.png
----
-
-
 # MediaFlow Proxy
 
 <div style="text-align: center;">
@@ -251,13 +237,6 @@ Benefits:
 - No server maintenance required
 
 Ideal for users who want a reliable, plug-and-play solution without the technical overhead of self-hosting.
-
-### Option 3: Hugging Face Space Deployment
-
-1. Visit the HF Space: [mhdzumair/mediaflow-proxy](https://huggingface.co/spaces/mhdzumair/mediaflow-proxy)
-2. Click on three dots on the right side of the page and select "Duplicate Space"
-3. Set the `API_PASSWORD` secret value & Set Visibility to "Public"
-4. Click on "Duplicate Space" to deploy the API
 
 ## Usage
 
