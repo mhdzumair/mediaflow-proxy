@@ -81,26 +81,33 @@ async def handle_hls_stream_proxy(
                 streamer, hls_params.destination, proxy_headers, request, hls_params.key_url
             )
 
-        response = await streamer.head(hls_params.destination, proxy_headers.request)
-        if "mpegurl" in response.headers.get("content-type", "").lower():
+        # Create initial streaming response to check content type
+        await streamer.create_streaming_response(hls_params.destination, proxy_headers.request)
+
+        if "mpegurl" in streamer.response.headers.get("content-type", "").lower():
             return await fetch_and_process_m3u8(
                 streamer, hls_params.destination, proxy_headers, request, hls_params.key_url
             )
 
+        # Handle range requests
         content_range = proxy_headers.request.get("range", "bytes=0-")
         if "NaN" in content_range:
             # Handle invalid range requests "bytes=NaN-NaN"
             raise HTTPException(status_code=416, detail="Invalid Range Header")
         proxy_headers.request.update({"range": content_range})
-        response_headers = prepare_response_headers(response.headers, proxy_headers.response)
+
+        # Create new streaming response with updated headers
+        await streamer.create_streaming_response(hls_params.destination, proxy_headers.request)
+        response_headers = prepare_response_headers(streamer.response.headers, proxy_headers.response)
 
         return EnhancedStreamingResponse(
-            streamer.stream_content(hls_params.destination, proxy_headers.request),
-            status_code=response.status_code,
+            streamer.stream_content(),
+            status_code=streamer.response.status_code,
             headers=response_headers,
             background=BackgroundTask(streamer.close),
         )
     except Exception as e:
+        await streamer.close()
         return handle_exceptions(e)
 
 
@@ -120,26 +127,28 @@ async def handle_stream_request(
         proxy_headers (ProxyRequestHeaders): Headers to be used in the proxy request.
 
     Returns:
-        Union[Response, EnhancedStreamingResponse]: Either a HEAD response or a streaming response.
+        Union[Response, EnhancedStreamingResponse]: Either a HEAD response with headers or a streaming response.
     """
     client, streamer = await setup_client_and_streamer()
 
     try:
-        response = await streamer.head(video_url, proxy_headers.request)
-        response_headers = prepare_response_headers(response.headers, proxy_headers.response)
+        await streamer.create_streaming_response(video_url, proxy_headers.request)
+        response_headers = prepare_response_headers(streamer.response.headers, proxy_headers.response)
 
         if method == "HEAD":
+            # For HEAD requests, just return the headers without streaming content
             await streamer.close()
-            return Response(headers=response_headers, status_code=response.status_code)
+            return Response(headers=response_headers, status_code=streamer.response.status_code)
         else:
+            # For GET requests, return the streaming response
             return EnhancedStreamingResponse(
-                streamer.stream_content(video_url, proxy_headers.request),
+                streamer.stream_content(),
                 headers=response_headers,
-                status_code=response.status_code,
+                status_code=streamer.response.status_code,
                 background=BackgroundTask(streamer.close),
             )
     except Exception as e:
-        await client.aclose()
+        await streamer.close()
         return handle_exceptions(e)
 
 

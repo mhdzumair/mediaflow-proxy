@@ -69,9 +69,9 @@ async def fetch_with_retry(client, method, url, headers, follow_redirects=True, 
         raise DownloadError(409, f"Timeout while downloading {url}")
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error {e.response.status_code} while downloading {url}")
-        # if e.response.status_code == 404:
-        #     logger.error(f"Segment Resource not found: {url}")
-        #     raise e
+        if e.response.status_code == 404:
+            logger.error(f"Segment Resource not found: {url}")
+            raise e
         raise DownloadError(e.response.status_code, f"HTTP error {e.response.status_code} while downloading {url}")
     except Exception as e:
         logger.error(f"Error downloading {url}: {e}")
@@ -94,57 +94,61 @@ class Streamer:
         self.end_byte = 0
         self.total_size = 0
 
-    async def stream_content(self, url: str, headers: dict) -> typing.AsyncGenerator[bytes, None]:
+    async def create_streaming_response(self, url: str, headers: dict):
         """
-        Streams content from a URL.
+        Creates and sends a streaming request.
 
         Args:
-            url (str): The URL to stream content from.
+            url (str): The URL to stream from.
             headers (dict): The headers to include in the request.
 
-        Yields:
-            bytes: Chunks of the streamed content.
         """
-        try:
-            async with self.client.stream("GET", url, headers=headers, follow_redirects=True) as self.response:
-                self.response.raise_for_status()
-                self.parse_content_range()
+        request = self.client.build_request("GET", url, headers=headers)
+        self.response = await self.client.send(request, stream=True, follow_redirects=True)
+        self.response.raise_for_status()
 
-                if settings.enable_streaming_progress:
-                    with tqdm_asyncio(
-                        total=self.total_size,
-                        initial=self.start_byte,
-                        unit="B",
-                        unit_scale=True,
-                        unit_divisor=1024,
-                        desc="Streaming",
-                        ncols=100,
-                        mininterval=1,
-                    ) as self.progress_bar:
-                        async for chunk in self.response.aiter_bytes():
-                            yield chunk
-                            chunk_size = len(chunk)
-                            self.bytes_transferred += chunk_size
-                            self.progress_bar.set_postfix_str(
-                                f"📥 : {self.format_bytes(self.bytes_transferred)}", refresh=False
-                            )
-                            self.progress_bar.update(chunk_size)
-                else:
+    async def stream_content(self) -> typing.AsyncGenerator[bytes, None]:
+        """
+        Streams the content from the response.
+        """
+        if not self.response:
+            raise RuntimeError("No response available for streaming")
+
+        try:
+            self.parse_content_range()
+
+            if settings.enable_streaming_progress:
+                with tqdm_asyncio(
+                    total=self.total_size,
+                    initial=self.start_byte,
+                    unit="B",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                    desc="Streaming",
+                    ncols=100,
+                    mininterval=1,
+                ) as self.progress_bar:
                     async for chunk in self.response.aiter_bytes():
                         yield chunk
-                        self.bytes_transferred += len(chunk)
+                        chunk_size = len(chunk)
+                        self.bytes_transferred += chunk_size
+                        self.progress_bar.set_postfix_str(
+                            f"📥 : {self.format_bytes(self.bytes_transferred)}", refresh=False
+                        )
+                        self.progress_bar.update(chunk_size)
+            else:
+                async for chunk in self.response.aiter_bytes():
+                    yield chunk
+                    self.bytes_transferred += len(chunk)
+
         except httpx.TimeoutException:
-            logger.warning(f"Timeout while streaming {url}")
-            raise DownloadError(409, f"Timeout while streaming {url}")
+            logger.warning("Timeout while streaming")
+            raise DownloadError(409, "Timeout while streaming")
         except GeneratorExit:
             logger.info("Streaming session stopped by the user")
         except Exception as e:
             logger.error(f"Error streaming content: {e}")
-        finally:
-            if self.response:
-                await self.response.aclose()
-            if self.progress_bar:
-                self.progress_bar.close()
+            raise
 
     @staticmethod
     def format_bytes(size) -> str:
@@ -165,23 +169,6 @@ class Streamer:
             self.start_byte = 0
             self.total_size = int(self.response.headers.get("Content-Length", 0))
             self.end_byte = self.total_size - 1 if self.total_size > 0 else 0
-
-    async def head(self, url: str, headers: dict):
-        """
-        Sends a HEAD request to a URL.
-
-        Args:
-            url (str): The URL to send the HEAD request to.
-            headers (dict): The headers to include in the request.
-
-        Returns:
-            httpx.Response: The HTTP response.
-        """
-        try:
-            self.response = await fetch_with_retry(self.client, "HEAD", url, headers)
-        except tenacity.RetryError as e:
-            raise e.last_attempt.result()
-        return self.response
 
     async def get_text(self, url: str, headers: dict):
         """

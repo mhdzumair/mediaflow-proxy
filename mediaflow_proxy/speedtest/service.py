@@ -102,7 +102,9 @@ class SpeedTestService:
             start_time = time.time()
             total_bytes = 0
 
-            async for chunk in streamer.stream_content(url, headers={}):
+            await streamer.create_streaming_response(url, headers={})
+
+            async for chunk in streamer.stream_content():
                 if time.time() - start_time >= test_duration:
                     break
                 total_bytes += len(chunk)
