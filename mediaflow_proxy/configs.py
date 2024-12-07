@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 import httpx
 from pydantic import BaseModel, Field
@@ -26,7 +26,7 @@ class TransportConfig(BaseSettings):
 
     def get_mounts(
         self, async_http: bool = True
-    ) -> Dict[str, Optional[httpx.HTTPTransport | httpx.AsyncHTTPTransport]]:
+    ) -> Dict[str, Optional[Union[httpx.HTTPTransport, httpx.AsyncHTTPTransport]]]:
         """
         Get a dictionary of httpx mount points to transport instances.
         """

@@ -2,7 +2,7 @@ import logging
 import math
 import re
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict
+from typing import List, Dict, Optional, Union
 from urllib.parse import urljoin
 
 import xmltodict
@@ -10,12 +10,12 @@ import xmltodict
 logger = logging.getLogger(__name__)
 
 
-def parse_mpd(mpd_content: str | bytes) -> dict:
+def parse_mpd(mpd_content: Union[str, bytes]) -> dict:
     """
     Parses the MPD content into a dictionary.
 
     Args:
-        mpd_content (str | bytes): The MPD content to parse.
+        mpd_content (Union[str, bytes]): The MPD content to parse.
 
     Returns:
         dict: The parsed MPD content as a dictionary.
@@ -24,7 +24,7 @@ def parse_mpd(mpd_content: str | bytes) -> dict:
 
 
 def parse_mpd_dict(
-    mpd_dict: dict, mpd_url: str, parse_drm: bool = True, parse_segment_profile_id: str | None = None
+    mpd_dict: dict, mpd_url: str, parse_drm: bool = True, parse_segment_profile_id: Optional[str] = None
 ) -> dict:
     """
     Parses the MPD dictionary and extracts relevant information.
@@ -122,7 +122,7 @@ def extract_drm_info(periods: List[Dict], mpd_url: str) -> Dict:
     drm_info = {"isDrmProtected": False}
 
     for period in periods:
-        adaptation_sets: list[dict] | dict = period.get("AdaptationSet", [])
+        adaptation_sets: Union[list[dict], dict] = period.get("AdaptationSet", [])
         if not isinstance(adaptation_sets, list):
             adaptation_sets = [adaptation_sets]
 
@@ -131,7 +131,7 @@ def extract_drm_info(periods: List[Dict], mpd_url: str) -> Dict:
             process_content_protection(adaptation_set.get("ContentProtection", []), drm_info)
 
             # Check ContentProtection inside each Representation
-            representations: list[dict] | dict = adaptation_set.get("Representation", [])
+            representations: Union[list[dict], dict] = adaptation_set.get("Representation", [])
             if not isinstance(representations, list):
                 representations = [representations]
 
@@ -145,12 +145,12 @@ def extract_drm_info(periods: List[Dict], mpd_url: str) -> Dict:
     return drm_info
 
 
-def process_content_protection(content_protection: list[dict] | dict, drm_info: dict):
+def process_content_protection(content_protection: Union[list[dict], dict], drm_info: dict):
     """
     Processes the ContentProtection elements to extract DRM information.
 
     Args:
-        content_protection (list[dict] | dict): The ContentProtection elements.
+        content_protection (Union[list[dict], dict]): The ContentProtection elements.
         drm_info (dict): The dictionary to store DRM information.
 
     This function updates the drm_info dictionary with DRM system information found in the ContentProtection elements.
@@ -197,8 +197,8 @@ def parse_representation(
     adaptation: dict,
     source: str,
     media_presentation_duration: str,
-    parse_segment_profile_id: str | None,
-) -> dict | None:
+    parse_segment_profile_id: Optional[str],
+) -> Optional[dict]:
     """
     Parses a representation and extracts profile information.
 
@@ -211,7 +211,7 @@ def parse_representation(
         parse_segment_profile_id (str, optional): The profile ID to parse segments for. Defaults to None.
 
     Returns:
-        dict | None: The parsed profile information or None if not applicable.
+        Optional[dict]: The parsed profile information or None if not applicable.
     """
     mime_type = _get_key(adaptation, representation, "@mimeType") or (
         "video/mp4" if "avc" in representation["@codecs"] else "audio/mp4"
@@ -252,7 +252,7 @@ def parse_representation(
     return profile
 
 
-def _get_key(adaptation: dict, representation: dict, key: str) -> str | None:
+def _get_key(adaptation: dict, representation: dict, key: str) -> Optional[str]:
     """
     Retrieves a key from the representation or adaptation set.
 
@@ -262,7 +262,7 @@ def _get_key(adaptation: dict, representation: dict, key: str) -> str | None:
         key (str): The key to retrieve.
 
     Returns:
-        str | None: The value of the key or None if not found.
+        Optional[str]: The value of the key or None if not found.
     """
     return representation.get(key, adaptation.get(key, None))
 
@@ -454,7 +454,7 @@ def generate_vod_segments(profile: dict, duration: int, timescale: int, start_nu
     return [{"number": start_number + i, "duration": duration / timescale} for i in range(segment_count)]
 
 
-def create_segment_data(segment: Dict, item: dict, profile: dict, source: str, timescale: int | None = None) -> Dict:
+def create_segment_data(segment: Dict, item: dict, profile: dict, source: str, timescale: Optional[int] = None) -> Dict:
     """
     Creates segment data based on the segment information. This includes the segment URL and metadata.
 

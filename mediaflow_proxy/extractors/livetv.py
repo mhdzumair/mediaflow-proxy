@@ -1,5 +1,5 @@
 import re
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 from urllib.parse import urljoin, urlparse, unquote
 
 from httpx import Response
@@ -92,7 +92,7 @@ class LiveTVExtractor(BaseExtractor):
         except Exception as e:
             raise ExtractorError(f"Extraction failed: {str(e)}")
 
-    async def _extract_player_api_base(self, html_content: str) -> Tuple[str | None, str | None]:
+    async def _extract_player_api_base(self, html_content: str) -> Tuple[Optional[str], Optional[str]]:
         """Extract player API base URL and method."""
         admin_ajax_pattern = r'"player_api"\s*:\s*"([^"]+)".*?"play_method"\s*:\s*"([^"]+)"'
         match = re.search(admin_ajax_pattern, html_content)
