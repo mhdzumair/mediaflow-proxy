@@ -34,43 +34,8 @@ class CacheEntry:
     size: int = 0
 
 
-class CacheStats:
-    """Tracks cache performance metrics."""
-
-    def __init__(self):
-        self.hits = 0
-        self.misses = 0
-        self.memory_hits = 0
-        self.disk_hits = 0
-        self._lock = threading.Lock()
-
-    def record_hit(self, from_memory: bool):
-        with self._lock:
-            self.hits += 1
-            if from_memory:
-                self.memory_hits += 1
-            else:
-                self.disk_hits += 1
-
-    def record_miss(self):
-        with self._lock:
-            self.misses += 1
-
-    @property
-    def hit_rate(self) -> float:
-        total = self.hits + self.misses
-        return self.hits / total if total > 0 else 0.0
-
-    def __str__(self) -> str:
-        return (
-            f"Cache Stats: Hits={self.hits} (Memory: {self.memory_hits}, "
-            f"Disk: {self.disk_hits}), Misses={self.misses}, "
-            f"Hit Rate={self.hit_rate:.2%}"
-        )
-
-
-class AsyncLRUMemoryCache:
-    """Thread-safe LRU memory cache with async support."""
+class LRUMemoryCache:
+    """Thread-safe LRU memory cache with support."""
 
     def __init__(self, maxsize: int):
         self.maxsize = maxsize
@@ -114,7 +79,7 @@ class AsyncLRUMemoryCache:
                 self._current_size -= entry.size
 
 
-class OptimizedHybridCache:
+class HybridCache:
     """High-performance hybrid cache combining memory and file storage."""
 
     def __init__(
@@ -126,8 +91,7 @@ class OptimizedHybridCache:
     ):
         self.cache_dir = Path(tempfile.gettempdir()) / cache_dir_name
         self.ttl = ttl
-        self.memory_cache = AsyncLRUMemoryCache(maxsize=max_memory_size)
-        self.stats = CacheStats()
+        self.memory_cache = LRUMemoryCache(maxsize=max_memory_size)
         self._executor = ThreadPoolExecutor(max_workers=executor_workers)
         self._lock = asyncio.Lock()
 
@@ -161,7 +125,6 @@ class OptimizedHybridCache:
         # Try memory cache first
         entry = self.memory_cache.get(key)
         if entry is not None:
-            self.stats.record_hit(from_memory=True)
             return entry.data
 
         # Try file cache
@@ -176,7 +139,6 @@ class OptimizedHybridCache:
                 # Check expiration
                 if metadata["expires_at"] < time.time():
                     await self.delete(key)
-                    self.stats.record_miss()
                     return default
 
                 # Read data
@@ -192,15 +154,12 @@ class OptimizedHybridCache:
                 )
                 self.memory_cache.set(key, entry)
 
-                self.stats.record_hit(from_memory=False)
                 return data
 
         except FileNotFoundError:
-            self.stats.record_miss()
             return default
         except Exception as e:
             logger.error(f"Error reading from cache: {e}")
-            self.stats.record_miss()
             return default
 
     async def set(self, key: str, data: Union[bytes, bytearray, memoryview], ttl: Optional[int] = None) -> bool:
@@ -226,12 +185,11 @@ class OptimizedHybridCache:
         key = self._get_md5_hash(key)
         # Update memory cache
         self.memory_cache.set(key, entry)
+        file_path = self._get_file_path(key)
+        temp_path = file_path.with_suffix(".tmp")
 
         # Update file cache
         try:
-            file_path = self._get_file_path(key)
-            temp_path = file_path.with_suffix(".tmp")
-
             metadata = {"expires_at": expires_at, "access_count": 0, "last_access": time.time()}
             metadata_bytes = json.dumps(metadata).encode()
             metadata_size = len(metadata_bytes).to_bytes(8, "big")
@@ -266,52 +224,59 @@ class OptimizedHybridCache:
             logger.error(f"Error deleting from cache: {e}")
             return False
 
-    async def cleanup_expired(self):
-        """Clean up expired cache entries."""
-        current_time = time.time()
 
-        async def check_and_clean_file(file_path: Path):
-            try:
-                async with aiofiles.open(file_path, "rb") as f:
-                    metadata_size = await f.read(8)
-                    metadata_length = int.from_bytes(metadata_size, "big")
-                    metadata_bytes = await f.read(metadata_length)
-                    metadata = json.loads(metadata_bytes.decode())
+class AsyncMemoryCache:
+    """Async wrapper around LRUMemoryCache."""
 
-                    if metadata["expires_at"] < current_time:
-                        await aiofiles.os.remove(file_path)
-            except Exception as e:
-                logger.error(f"Error cleaning up file {file_path}: {e}")
+    def __init__(self, max_memory_size: int):
+        self.memory_cache = LRUMemoryCache(maxsize=max_memory_size)
 
-        # Clean up each shard
+    async def get(self, key: str, default: Any = None) -> Optional[bytes]:
+        """Get value from cache."""
+        entry = self.memory_cache.get(key)
+        return entry.data if entry is not None else default
+
+    async def set(self, key: str, data: Union[bytes, bytearray, memoryview], ttl: Optional[int] = None) -> bool:
+        """Set value in cache."""
         try:
-            async for entry in aiofiles.os.scandir(self.cache_dir):
-                if entry.is_file() and not entry.name.endswith(".tmp"):
-                    await check_and_clean_file(Path(entry.path))
+            expires_at = time.time() + (ttl or 3600)  # Default 1 hour TTL if not specified
+            entry = CacheEntry(
+                data=data, expires_at=expires_at, access_count=0, last_access=time.time(), size=len(data)
+            )
+            self.memory_cache.set(key, entry)
+            return True
         except Exception as e:
-            logger.error(f"Error scanning shard directory {self.cache_dir}: {e}")
+            logger.error(f"Error setting cache value: {e}")
+            return False
+
+    async def delete(self, key: str) -> bool:
+        """Delete item from cache."""
+        try:
+            self.memory_cache.remove(key)
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting from cache: {e}")
+            return False
 
 
 # Create cache instances
-INIT_SEGMENT_CACHE = OptimizedHybridCache(
+INIT_SEGMENT_CACHE = HybridCache(
     cache_dir_name="init_segment_cache",
     ttl=3600,  # 1 hour
     max_memory_size=500 * 1024 * 1024,  # 500MB for init segments
 )
 
-MPD_CACHE = OptimizedHybridCache(
-    cache_dir_name="mpd_cache",
-    ttl=300,  # 5 minutes
+MPD_CACHE = AsyncMemoryCache(
     max_memory_size=100 * 1024 * 1024,  # 100MB for MPD files
 )
 
-SPEEDTEST_CACHE = OptimizedHybridCache(
+SPEEDTEST_CACHE = HybridCache(
     cache_dir_name="speedtest_cache",
     ttl=3600,  # 1 hour
     max_memory_size=50 * 1024 * 1024,
 )
 
-EXTRACTOR_CACHE = OptimizedHybridCache(
+EXTRACTOR_CACHE = HybridCache(
     cache_dir_name="extractor_cache",
     ttl=5 * 60,  # 5 minutes
     max_memory_size=50 * 1024 * 1024,
@@ -360,13 +325,13 @@ async def get_cached_mpd(
         parsed_dict = parse_mpd_dict(mpd_dict, mpd_url, parse_drm, parse_segment_profile_id)
 
         # Cache the original MPD dict
-        await MPD_CACHE.set(mpd_url, json.dumps(mpd_dict).encode())
+        await MPD_CACHE.set(mpd_url, json.dumps(mpd_dict).encode(), ttl=parsed_dict["minimumUpdatePeriod"])
         return parsed_dict
     except DownloadError as error:
         logger.error(f"Error downloading MPD: {error}")
         raise error
     except Exception as error:
-        logger.exception(f"Error processing MPD: {e}")
+        logger.exception(f"Error processing MPD: {error}")
         raise error
 
 
