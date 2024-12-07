@@ -341,7 +341,7 @@ async def get_cached_mpd(
     mpd_url: str,
     headers: dict,
     parse_drm: bool,
-    parse_segment_profile_id: str | None = None,
+    parse_segment_profile_id: Optional[str] = None,
 ) -> dict:
     """Get MPD from cache or download and parse it."""
     # Try cache first

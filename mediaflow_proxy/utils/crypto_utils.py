@@ -3,6 +3,7 @@ import json
 import logging
 import time
 import traceback
+from typing import Optional
 from urllib.parse import urlencode
 
 from Crypto.Cipher import AES
@@ -89,7 +90,7 @@ class EncryptionMiddleware(BaseHTTPMiddleware):
         return response
 
     @staticmethod
-    def get_client_ip(request: Request) -> str | None:
+    def get_client_ip(request: Request) -> Optional[str]:
         """
         Extract the client's real IP address from the request headers or fallback to the client host.
         """

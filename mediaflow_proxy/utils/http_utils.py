@@ -250,11 +250,11 @@ async def request_with_retry(method: str, url: str, headers: dict, **kwargs) -> 
 
 def encode_mediaflow_proxy_url(
     mediaflow_proxy_url: str,
-    endpoint: str | None = None,
-    destination_url: str | None = None,
-    query_params: dict | None = None,
-    request_headers: dict | None = None,
-    response_headers: dict | None = None,
+    endpoint: typing.Optional[str] = None,
+    destination_url: typing.Optional[str] = None,
+    query_params: typing.Optional[dict] = None,
+    request_headers: typing.Optional[dict] = None,
+    response_headers: typing.Optional[dict] = None,
     encryption_handler: EncryptionHandler = None,
     expiration: int = None,
     ip: str = None,
@@ -416,10 +416,6 @@ class EnhancedStreamingResponse(Response):
             async def wrap(func: typing.Callable[[], typing.Awaitable[None]]) -> None:
                 try:
                     await func()
-                except ExceptionGroup as e:
-                    if not any(isinstance(exc, anyio.get_cancelled_exc_class()) for exc in e.exceptions):
-                        logger.exception("Error in streaming task")
-                    raise
                 except Exception as e:
                     if not isinstance(e, anyio.get_cancelled_exc_class()):
                         logger.exception("Error in streaming task")

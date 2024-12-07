@@ -1,6 +1,7 @@
 import argparse
 import struct
 import sys
+from typing import Optional, Union
 
 from Crypto.Cipher import AES
 from collections import namedtuple
@@ -17,14 +18,14 @@ class MP4Atom:
 
     __slots__ = ("atom_type", "size", "data")
 
-    def __init__(self, atom_type: bytes, size: int, data: memoryview | bytearray):
+    def __init__(self, atom_type: bytes, size: int, data: Union[memoryview, bytearray]):
         """
         Initializes an MP4Atom instance.
 
         Args:
             atom_type (bytes): The type of the atom.
             size (int): The size of the atom.
-            data (memoryview | bytearray): The data contained in the atom.
+            data (Union[memoryview, bytearray]): The data contained in the atom.
         """
         self.atom_type = atom_type
         self.size = size
@@ -58,12 +59,12 @@ class MP4Parser:
         self.data = data
         self.position = 0
 
-    def read_atom(self) -> MP4Atom | None:
+    def read_atom(self) -> Optional[MP4Atom]:
         """
         Reads the next atom from the data.
 
         Returns:
-            MP4Atom | None: MP4Atom object or None if no more atoms are available.
+            Optional[MP4Atom]: MP4Atom object or None if no more atoms are available.
         """
         pos = self.position
         if pos + 8 > len(self.data):
@@ -103,7 +104,7 @@ class MP4Parser:
         self.position = original_position
         return atoms
 
-    def _read_atom_at(self, pos: int, end: int) -> MP4Atom | None:
+    def _read_atom_at(self, pos: int, end: int) -> Optional[MP4Atom]:
         if pos + 8 > end:
             return None
 
@@ -169,7 +170,7 @@ class MP4Decrypter:
 
     Attributes:
         key_map (dict[bytes, bytes]): Mapping of track IDs to decryption keys.
-        current_key (bytes | None): Current decryption key.
+        current_key (Optional[bytes]): Current decryption key.
         trun_sample_sizes (array.array): Array of sample sizes from the 'trun' box.
         current_sample_info (list): List of sample information from the 'senc' box.
         encryption_overhead (int): Total size of encryption-related boxes.
@@ -230,17 +231,16 @@ class MP4Decrypter:
         Returns:
             MP4Atom: Processed atom.
         """
-        match atom_type:
-            case b"moov":
-                return self._process_moov(atom)
-            case b"moof":
-                return self._process_moof(atom)
-            case b"sidx":
-                return self._process_sidx(atom)
-            case b"mdat":
-                return self._decrypt_mdat(atom)
-            case _:
-                return atom
+        if atom_type == b"moov":
+            return self._process_moov(atom)
+        elif atom_type == b"moof":
+            return self._process_moof(atom)
+        elif atom_type == b"sidx":
+            return self._process_sidx(atom)
+        elif atom_type == b"mdat":
+            return self._decrypt_mdat(atom)
+        else:
+            return atom
 
     def _process_moov(self, moov: MP4Atom) -> MP4Atom:
         """
@@ -428,7 +428,7 @@ class MP4Decrypter:
     @staticmethod
     def _process_sample(
         sample: memoryview, sample_info: CENCSampleAuxiliaryDataFormat, key: bytes
-    ) -> memoryview | bytearray | bytes:
+    ) -> Union[memoryview, bytearray, bytes]:
         """
         Processes and decrypts a sample using the provided sample information and decryption key.
         This includes handling sub-sample encryption if present.
@@ -439,7 +439,7 @@ class MP4Decrypter:
             key (bytes): The decryption key.
 
         Returns:
-            memoryview | bytearray | bytes: The decrypted sample.
+            Union[memoryview, bytearray, bytes]: The decrypted sample.
         """
         if not sample_info.is_encrypted:
             return sample
@@ -701,7 +701,7 @@ class MP4Decrypter:
         new_type = codec_format if codec_format else entry.atom_type
         return MP4Atom(new_type, len(new_entry_data) + 8, new_entry_data)
 
-    def _extract_codec_format(self, sinf: MP4Atom) -> bytes | None:
+    def _extract_codec_format(self, sinf: MP4Atom) -> Optional[bytes]:
         """
         Extracts the codec format from the 'sinf' (Protection Scheme Information) atom.
         This includes information about the original format of the protected content.
@@ -710,7 +710,7 @@ class MP4Decrypter:
             sinf (MP4Atom): The 'sinf' atom to extract from.
 
         Returns:
-            bytes | None: The codec format or None if not found.
+            Optional[bytes]: The codec format or None if not found.
         """
         parser = MP4Parser(sinf.data)
         for atom in iter(parser.read_atom, None):

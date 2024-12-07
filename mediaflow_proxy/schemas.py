@@ -1,24 +1,28 @@
-from typing import Literal, Dict, Any
+from typing import Literal, Dict, Any, Optional
 
 from pydantic import BaseModel, Field, IPvAnyAddress, ConfigDict
 
 
 class GenerateUrlRequest(BaseModel):
     mediaflow_proxy_url: str = Field(..., description="The base URL for the mediaflow proxy.")
-    endpoint: str | None = Field(None, description="The specific endpoint to be appended to the base URL.")
-    destination_url: str | None = Field(None, description="The destination URL to which the request will be proxied.")
-    query_params: dict | None = Field(
+    endpoint: Optional[str] = Field(None, description="The specific endpoint to be appended to the base URL.")
+    destination_url: Optional[str] = Field(
+        None, description="The destination URL to which the request will be proxied."
+    )
+    query_params: Optional[dict] = Field(
         default_factory=dict, description="Query parameters to be included in the request."
     )
-    request_headers: dict | None = Field(default_factory=dict, description="Headers to be included in the request.")
-    response_headers: dict | None = Field(default_factory=dict, description="Headers to be included in the response.")
-    expiration: int | None = Field(
+    request_headers: Optional[dict] = Field(default_factory=dict, description="Headers to be included in the request.")
+    response_headers: Optional[dict] = Field(
+        default_factory=dict, description="Headers to be included in the response."
+    )
+    expiration: Optional[int] = Field(
         None, description="Expiration time for the URL in seconds. If not provided, the URL will not expire."
     )
-    api_password: str | None = Field(
+    api_password: Optional[str] = Field(
         None, description="API password for encryption. If not provided, the URL will only be encoded."
     )
-    ip: IPvAnyAddress | None = Field(None, description="The IP address to restrict the URL to.")
+    ip: Optional[IPvAnyAddress] = Field(None, description="The IP address to restrict the URL to.")
 
 
 class GenericParams(BaseModel):
@@ -27,7 +31,7 @@ class GenericParams(BaseModel):
 
 class HLSManifestParams(GenericParams):
     destination: str = Field(..., description="The URL of the HLS manifest.", alias="d")
-    key_url: str | None = Field(
+    key_url: Optional[str] = Field(
         None,
         description="The HLS Key URL to replace the original key URL. Defaults to None. (Useful for bypassing some sneaky protection)",
     )
@@ -39,23 +43,23 @@ class ProxyStreamParams(GenericParams):
 
 class MPDManifestParams(GenericParams):
     destination: str = Field(..., description="The URL of the MPD manifest.", alias="d")
-    key_id: str | None = Field(None, description="The DRM key ID (optional).")
-    key: str | None = Field(None, description="The DRM key (optional).")
+    key_id: Optional[str] = Field(None, description="The DRM key ID (optional).")
+    key: Optional[str] = Field(None, description="The DRM key (optional).")
 
 
 class MPDPlaylistParams(GenericParams):
     destination: str = Field(..., description="The URL of the MPD manifest.", alias="d")
     profile_id: str = Field(..., description="The profile ID to generate the playlist for.")
-    key_id: str | None = Field(None, description="The DRM key ID (optional).")
-    key: str | None = Field(None, description="The DRM key (optional).")
+    key_id: Optional[str] = Field(None, description="The DRM key ID (optional).")
+    key: Optional[str] = Field(None, description="The DRM key (optional).")
 
 
 class MPDSegmentParams(GenericParams):
     init_url: str = Field(..., description="The URL of the initialization segment.")
     segment_url: str = Field(..., description="The URL of the media segment.")
     mime_type: str = Field(..., description="The MIME type of the segment.")
-    key_id: str | None = Field(None, description="The DRM key ID (optional).")
-    key: str | None = Field(None, description="The DRM key (optional).")
+    key_id: Optional[str] = Field(None, description="The DRM key ID (optional).")
+    key: Optional[str] = Field(None, description="The DRM key (optional).")
 
 
 class ExtractorURLParams(GenericParams):
