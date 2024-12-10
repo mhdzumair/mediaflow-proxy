@@ -5,6 +5,10 @@ from mediaflow_proxy.extractors.doodstream import DoodStreamExtractor
 from mediaflow_proxy.extractors.livetv import LiveTVExtractor
 from mediaflow_proxy.extractors.mixdrop import MixdropExtractor
 from mediaflow_proxy.extractors.uqload import UqloadExtractor
+from mediaflow_proxy.extractors.streamtape import StreamtapeExtractor
+from mediaflow_proxy.extractors.supervideo import SupervideoExtractor
+
+
 
 
 class ExtractorFactory:
@@ -14,6 +18,8 @@ class ExtractorFactory:
         "Doodstream": DoodStreamExtractor,
         "Uqload": UqloadExtractor,
         "Mixdrop": MixdropExtractor,
+        "Streamtape": StreamtapeExtractor,
+        "Supervideo": SupervideoExtractor,
         "LiveTV": LiveTVExtractor,
     }
 
