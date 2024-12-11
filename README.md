@@ -43,7 +43,7 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 
 Set the following environment variables:
 
-- `API_PASSWORD`: Required. Protects against unauthorized access and API network abuses.
+- `API_PASSWORD`: Optional. Protects against unauthorized access and API network abuses.
 - `ENABLE_STREAMING_PROGRESS`: Optional. Enable streaming progress logging. Default is `false`.
 
 ### Transport Configuration
