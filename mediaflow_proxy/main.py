@@ -38,6 +38,9 @@ async def verify_api_key(api_key: str = Security(api_password_query), api_key_al
     Raises:
         HTTPException: If the API key is invalid.
     """
+    if not settings.api_password:
+        return
+
     if api_key == settings.api_password or api_key_alt == settings.api_password:
         return
 
