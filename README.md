@@ -238,6 +238,31 @@ Benefits:
 
 Ideal for users who want a reliable, plug-and-play solution without the technical overhead of self-hosting.
 
+### Option 3: Hugging Face Space Deployment (Sometimes it gets stuck in the building state)
+
+1. Signup or Login to Hugging Face https://huggingface.co/ 
+2. Create a new space with random name https://huggingface.co/new-space. Choose docker as SDK and blank template and public visibility.
+3. Goto "Settings" tab and create a new secret with name `API_PASSWORD` and set the value to your desired password.
+4. Goto "Files" tab and create a new file with name `Dockerfile` and paste the following content and click on "Commit" to save the changes.
+   ```dockerfile
+   FROM python:3.9
+
+   RUN useradd -m -u 1000 user
+   USER user
+   ENV PATH="/home/user/.local/bin:$PATH"
+
+   WORKDIR /app
+
+   RUN pip install mediaflow-proxy
+
+   EXPOSE 7860
+
+   CMD ["uvicorn", "mediaflow_proxy.main:app", "--host", "0.0.0.0", "--port", "7860", "--workers", "4"]
+   ```
+5. Wait until the space gets built and deployed. Sometimes the space gets stuck in the building state, I don't know why. You can wait for a few hours and try to create a new space and follow the steps again.
+6. If the space is deployed successfully, you can click on the three dots in the top right corner and click on "Embed this space" and copy "Direct URL".
+7. Use the above URL and API password on support addons like MediaFusion, Jackettio, etc.
+
 ## Usage
 
 ### Endpoints
