@@ -51,7 +51,7 @@ class TransportConfig(BaseSettings):
 
 
 class Settings(BaseSettings):
-    api_password: str  # The password for accessing the API endpoints.
+    api_password: str | None = None  # The password for protecting the API endpoints.
     log_level: str = "INFO"  # The logging level to use.
     transport_config: TransportConfig = Field(default_factory=TransportConfig)  # Configuration for httpx transport.
     enable_streaming_progress: bool = False  # Whether to enable streaming progress tracking.

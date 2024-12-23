@@ -61,7 +61,7 @@ class EncryptionMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         encrypted_token = request.query_params.get("token")
-        if encrypted_token:
+        if encrypted_token and self.encryption_handler:
             try:
                 client_ip = self.get_client_ip(request)
                 decrypted_data = self.encryption_handler.decrypt_data(encrypted_token, client_ip)
@@ -107,4 +107,4 @@ class EncryptionMiddleware(BaseHTTPMiddleware):
         return request.client.host if request.client else "127.0.0.1"
 
 
-encryption_handler = EncryptionHandler(settings.api_password)
+encryption_handler = EncryptionHandler(settings.api_password) if settings.api_password else None
