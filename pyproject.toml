@@ -34,6 +34,7 @@ pycryptodome = "^3.20.0"
 uvicorn = "^0.32.1"
 tqdm = "^4.67.1"
 aiofiles = "^24.1.0"
+beautifulsoup4 = ">=4.12.3"
 
 
 [tool.poetry.group.dev.dependencies]

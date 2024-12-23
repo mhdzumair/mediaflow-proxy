@@ -63,7 +63,7 @@ class MPDSegmentParams(GenericParams):
 
 
 class ExtractorURLParams(GenericParams):
-    host: Literal["Doodstream", "Mixdrop", "Uqload", "Streamtape", "Supervideo", "LiveTV"] = Field(
+    host: Literal["Doodstream", "Mixdrop", "Uqload", "Streamtape", "Supervideo", "VixCloud", "LiveTV"] = Field(
         ..., description="The host to extract the URL from."
     )
     destination: str = Field(..., description="The URL of the stream.", alias="d")
