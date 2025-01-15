@@ -26,8 +26,11 @@ class VixCloudExtractor(BaseExtractor):
         soup = BeautifulSoup(response.text, "lxml", parse_only=SoupStrainer("div", {"id": "app"}))
         if soup:
             # Extract version
-            version = json.loads(soup.find("div", {"id": "app"}).get("data-page"))["version"]
-            return version
+            try:
+                data = json.loads(soup.find("div", {"id": "app"}).get("data-page"))
+                return data["version"]
+            except (KeyError, json.JSONDecodeError, AttributeError) as e:
+                raise ExtractorError(f"Failed to parse version: {e}")
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         """Extract Vixcloud URL."""
@@ -47,15 +50,14 @@ class VixCloudExtractor(BaseExtractor):
             script = soup.find("body").find("script").text
             token = re.search(r"'token':\s*'(\w+)'", script).group(1)
             expires = re.search(r"'expires':\s*'(\d+)'", script).group(1)
-            quality = re.search(r'"quality":(\d+)', script).group(1)
             vixid = iframe.split("/embed/")[1].split("?")[0]
             base_url = iframe.split("://")[1].split("/")[0]
             final_url = f"https://{base_url}/playlist/{vixid}.m3u8?token={token}&expires={expires}"
             if "canPlayFHD" in query_params:
-                canPlayFHD = "h=1"
+                # canPlayFHD = "h=1"
                 final_url += "&h=1"
             if "b" in query_params:
-                b = "b=1"
+                # b = "b=1"
                 final_url += "&b=1"
             self.base_headers["referer"] = url
             return {
