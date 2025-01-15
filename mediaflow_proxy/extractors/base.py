@@ -31,7 +31,6 @@ class BaseExtractor(ABC):
             async with create_httpx_client() as client:
                 request_headers = self.base_headers
                 request_headers.update(headers or {})
-                print(request_headers)
                 response = await client.request(
                     method,
                     url,
