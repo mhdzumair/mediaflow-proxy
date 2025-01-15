@@ -9,6 +9,10 @@ from urllib.parse import urlparse, parse_qs
 class VixCloudExtractor(BaseExtractor):
     """VixCloud URL extractor."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.mediaflow_endpoint = "hls_manifest_proxy"
+
     async def version(self, domain: str) -> str:
         """Get version of VixCloud Parent Site."""
         DOMAIN = domain
