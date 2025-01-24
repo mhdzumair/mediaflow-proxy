@@ -10,6 +10,8 @@ class MixdropExtractor(BaseExtractor):
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         """Extract Mixdrop URL."""
+        if "club" in url:
+            url = url.replace("club", "ps").split("/2")[0]
         response = await self._make_request(url, headers={"accept-language": "en-US,en;q=0.5"})
 
         # Extract and decode URL
