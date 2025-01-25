@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup, SoupStrainer
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 import json
 from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs
 
 
 class VixCloudExtractor(BaseExtractor):

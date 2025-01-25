@@ -8,6 +8,8 @@ from mediaflow_proxy.extractors.uqload import UqloadExtractor
 from mediaflow_proxy.extractors.streamtape import StreamtapeExtractor
 from mediaflow_proxy.extractors.supervideo import SupervideoExtractor
 from mediaflow_proxy.extractors.vixcloud import VixCloudExtractor
+from mediaflow_proxy.extractors.okru import OkruExtractor
+from mediaflow_proxy.extractors.maxstream import MaxstreamExtractor
 
 
 
@@ -22,6 +24,8 @@ class ExtractorFactory:
         "Streamtape": StreamtapeExtractor,
         "Supervideo": SupervideoExtractor,
         "VixCloud": VixCloudExtractor,
+        "Okru": OkruExtractor,
+        "Maxstream": MaxstreamExtractor,
         "LiveTV": LiveTVExtractor,
     }
 
