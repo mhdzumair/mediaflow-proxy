@@ -238,14 +238,13 @@ Benefits:
 
 Ideal for users who want a reliable, plug-and-play solution without the technical overhead of self-hosting.
 
-### Option 3: Hugging Face Space Deployment (Unofficial)
+### Option 3: Hugging Face Space Deployment (Guide from a MediaFlow Contributor)
 1. Go to this repo and create a fork: https://github.com/UrloMythus/UnHided
-2. Signup or Login to Hugging Face https://huggingface.co/ 
-3. Create a new space with random name https://huggingface.co/new-space. Choose docker as SDK and blank template and public visibility.
-4. Goto "Settings" tab and create a new secret with name `API_PASSWORD` and set the value to your desired password.
-5. Goto "Files" tab and create a new file with name `Dockerfile` and paste the following content. After that replace ``` YourUsername/YourRepoName``` in the Dockerfile with your Username and the name of your fork. Finally click on "Commit" to save the changes. Remember your space might get banned if instead of using your fork you use the main repo. 
+2. Sign up or log in to Hugging Face: https://huggingface.co/
+3. Create a new space with a random name: https://huggingface.co/new-space. Choose Docker as SDK and blank template and public visibility.
+4. Go to the "Settings" tab and create a new secret with the name `API_PASSWORD` and set the value to your desired password.
+5. Go to the "Files" tab and create a new file with the name `Dockerfile` and paste the following content. After that, replace `YourUsername/YourRepoName` in the Dockerfile with your username and the name of your fork. Finally, click on "Commit" to save the changes. Remember, your space might get banned if instead of using your fork, you use the main repo.
     ```dockerfile
-
     FROM python:3.10-slim-buster
 
     WORKDIR /app
@@ -259,10 +258,10 @@ Ideal for users who want a reliable, plug-and-play solution without the technica
     EXPOSE 7860
     CMD ["uvicorn", "run:main_app", "--host", "0.0.0.0", "--port", "7860", "--workers", "4"]
     ```
-6. Wait until the space gets built and deployed. 
-7. If the space is deployed successfully, you can click on the three dots in the top right corner and click on "Embed this space" and copy "Direct URL".
-8. In order to update your proxy to newest release go to your Github Fork and click on Sync. After that hop on your Hugging Face Space -> Settings and click on Factory Rebuild.
-8. Use the above URL and API password on support addons like MediaFusion, MammaMia, Jackettio, etc.
+6. Wait until the space gets built and deployed.
+7. If the space is deployed successfully, you can click on the three dots in the top right corner and click on "Embed this space" and copy the "Direct URL".
+8. To update your proxy to the newest release, go to your GitHub fork and click on Sync. After that, hop on your Hugging Face Space -> Settings and click on Factory Rebuild.
+9. Use the above URL and API password on support addons like MediaFusion, MammaMia, Jackettio, etc.
 
 ## Usage
 

@@ -3,15 +3,13 @@ from typing import Dict, Type
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 from mediaflow_proxy.extractors.doodstream import DoodStreamExtractor
 from mediaflow_proxy.extractors.livetv import LiveTVExtractor
+from mediaflow_proxy.extractors.maxstream import MaxstreamExtractor
 from mediaflow_proxy.extractors.mixdrop import MixdropExtractor
-from mediaflow_proxy.extractors.uqload import UqloadExtractor
+from mediaflow_proxy.extractors.okru import OkruExtractor
 from mediaflow_proxy.extractors.streamtape import StreamtapeExtractor
 from mediaflow_proxy.extractors.supervideo import SupervideoExtractor
+from mediaflow_proxy.extractors.uqload import UqloadExtractor
 from mediaflow_proxy.extractors.vixcloud import VixCloudExtractor
-from mediaflow_proxy.extractors.okru import OkruExtractor
-from mediaflow_proxy.extractors.maxstream import MaxstreamExtractor
-
-
 
 
 class ExtractorFactory:
