@@ -1,10 +1,9 @@
-import re
-from bs4 import BeautifulSoup, SoupStrainer
 import json
-
 from typing import Dict, Any
 
-from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
+from bs4 import BeautifulSoup, SoupStrainer
+
+from mediaflow_proxy.extractors.base import BaseExtractor
 
 
 class OkruExtractor(BaseExtractor):

@@ -1,6 +1,6 @@
 import re
-import string
 from typing import Dict, Any
+
 from bs4 import BeautifulSoup
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError

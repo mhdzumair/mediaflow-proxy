@@ -1,7 +1,7 @@
 import re
 from typing import Dict, Any
 
-from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
+from mediaflow_proxy.extractors.base import BaseExtractor
 
 
 class SupervideoExtractor(BaseExtractor):

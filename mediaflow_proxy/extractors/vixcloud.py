@@ -1,10 +1,11 @@
+import json
 import re
 from typing import Dict, Any
+from urllib.parse import urlparse, parse_qs
+
 from bs4 import BeautifulSoup, SoupStrainer
+
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
-import json
-from urllib.parse import urlparse, parse_qs
-from urllib.parse import urlparse, parse_qs
 
 
 class VixCloudExtractor(BaseExtractor):
@@ -16,13 +17,12 @@ class VixCloudExtractor(BaseExtractor):
 
     async def version(self, domain: str) -> str:
         """Get version of VixCloud Parent Site."""
-        DOMAIN = domain
-        base_url = f"https://streamingcommunity.{DOMAIN}/richiedi-un-titolo"
+        base_url = f"https://streamingcommunity.{domain}/richiedi-un-titolo"
         response = await self._make_request(
             base_url,
             headers={
-                "Referer": f"https://streamingcommunity.{DOMAIN}/",
-                "Origin": f"https://streamingcommunity.{DOMAIN}",
+                "Referer": f"https://streamingcommunity.{domain}/",
+                "Origin": f"https://streamingcommunity.{domain}",
             },
         )
         if response.status_code != 200:
