@@ -1,0 +1,11 @@
+services:
+  mediaflow-proxy:
+    ports:
+      - '8888:8888'
+    environment:
+      - API_PASSWORD=your_password
+    restart: always
+    logging:
+      options:
+        max-size: 1g
+    image: mhdzumair/mediaflow-proxy
