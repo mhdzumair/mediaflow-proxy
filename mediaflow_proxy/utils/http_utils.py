@@ -33,9 +33,8 @@ class DownloadError(Exception):
 def create_httpx_client(follow_redirects: bool = True, **kwargs) -> httpx.AsyncClient:
     """Creates an HTTPX client with configured proxy routing"""
     mounts = settings.transport_config.get_mounts()
-    client = httpx.AsyncClient(
-        mounts=mounts, follow_redirects=follow_redirects, timeout=settings.transport_config.timeout, **kwargs
-    )
+    kwargs.setdefault("timeout", settings.transport_config.timeout)
+    client = httpx.AsyncClient(mounts=mounts, follow_redirects=follow_redirects, **kwargs)
     return client
 
 
@@ -125,9 +124,12 @@ class Streamer:
             raise DownloadError(
                 e.response.status_code, f"HTTP error {e.response.status_code} while creating streaming response"
             )
+        except httpx.RequestError as e:
+            logger.error(f"Error creating streaming response: {e}")
+            raise DownloadError(502, f"Error creating streaming response: {e}")
         except Exception as e:
             logger.error(f"Error creating streaming response: {e}")
-            raise
+            raise RuntimeError(f"Error creating streaming response: {e}")
 
     async def stream_content(self) -> typing.AsyncGenerator[bytes, None]:
         """

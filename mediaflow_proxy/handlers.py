@@ -3,6 +3,7 @@ import logging
 from urllib.parse import urlparse, parse_qs
 
 import httpx
+import tenacity
 from fastapi import Request, Response, HTTPException
 from starlette.background import BackgroundTask
 
@@ -52,6 +53,8 @@ def handle_exceptions(exception: Exception) -> Response:
     elif isinstance(exception, DownloadError):
         logger.error(f"Error downloading content: {exception}")
         return Response(status_code=exception.status_code, content=str(exception))
+    elif isinstance(exception, tenacity.RetryError):
+        return Response(status_code=502, content="Max retries exceeded while downloading content")
     else:
         logger.exception(f"Internal server error while handling request: {exception}")
         return Response(status_code=502, content=f"Internal server error: {exception}")
