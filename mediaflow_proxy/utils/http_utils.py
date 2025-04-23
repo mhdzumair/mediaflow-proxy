@@ -30,10 +30,12 @@ class DownloadError(Exception):
         super().__init__(message)
 
 
-def create_httpx_client(follow_redirects: bool = True, timeout: float = 30.0, **kwargs) -> httpx.AsyncClient:
+def create_httpx_client(follow_redirects: bool = True, **kwargs) -> httpx.AsyncClient:
     """Creates an HTTPX client with configured proxy routing"""
     mounts = settings.transport_config.get_mounts()
-    client = httpx.AsyncClient(mounts=mounts, follow_redirects=follow_redirects, timeout=timeout, **kwargs)
+    client = httpx.AsyncClient(
+        mounts=mounts, follow_redirects=follow_redirects, timeout=settings.transport_config.timeout, **kwargs
+    )
     return client
 
 
@@ -94,6 +96,11 @@ class Streamer:
         self.end_byte = 0
         self.total_size = 0
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception_type(DownloadError),
+    )
     async def create_streaming_response(self, url: str, headers: dict):
         """
         Creates and sends a streaming request.
@@ -103,9 +110,24 @@ class Streamer:
             headers (dict): The headers to include in the request.
 
         """
-        request = self.client.build_request("GET", url, headers=headers)
-        self.response = await self.client.send(request, stream=True, follow_redirects=True)
-        self.response.raise_for_status()
+        try:
+            request = self.client.build_request("GET", url, headers=headers)
+            self.response = await self.client.send(request, stream=True, follow_redirects=True)
+            self.response.raise_for_status()
+        except httpx.TimeoutException:
+            logger.warning("Timeout while creating streaming response")
+            raise DownloadError(409, "Timeout while creating streaming response")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error {e.response.status_code} while creating streaming response")
+            if e.response.status_code == 404:
+                logger.error(f"Segment Resource not found: {url}")
+                raise e
+            raise DownloadError(
+                e.response.status_code, f"HTTP error {e.response.status_code} while creating streaming response"
+            )
+        except Exception as e:
+            logger.error(f"Error creating streaming response: {e}")
+            raise
 
     async def stream_content(self) -> typing.AsyncGenerator[bytes, None]:
         """
