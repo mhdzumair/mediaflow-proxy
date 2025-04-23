@@ -1,4 +1,6 @@
+import codecs
 import re
+from typing import AsyncGenerator
 from urllib import parse
 
 from mediaflow_proxy.utils.crypto_utils import encryption_handler
@@ -41,6 +43,70 @@ class M3U8Processor:
             else:
                 processed_lines.append(line)
         return "\n".join(processed_lines)
+
+    async def process_m3u8_streaming(
+        self, content_iterator: AsyncGenerator[bytes, None], base_url: str
+    ) -> AsyncGenerator[str, None]:
+        """
+        Processes the m3u8 content on-the-fly, yielding processed lines as they are read.
+
+        Args:
+            content_iterator: An async iterator that yields chunks of the m3u8 content.
+            base_url (str): The base URL to resolve relative URLs.
+
+        Yields:
+            str: Processed lines of the m3u8 content.
+        """
+        buffer = ""  # String buffer for decoded content
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+
+        # Process the content chunk by chunk
+        async for chunk in content_iterator:
+            if isinstance(chunk, str):
+                chunk = chunk.encode("utf-8")
+
+            # Incrementally decode the chunk
+            decoded_chunk = decoder.decode(chunk)
+            buffer += decoded_chunk
+
+            # Process complete lines
+            lines = buffer.split("\n")
+            if len(lines) > 1:
+                # Process all complete lines except the last one
+                for line in lines[:-1]:
+                    if line:  # Skip empty lines
+                        processed_line = await self.process_line(line, base_url)
+                        yield processed_line + "\n"
+
+                # Keep the last line in the buffer (it might be incomplete)
+                buffer = lines[-1]
+
+        # Process any remaining data in the buffer plus final bytes
+        final_chunk = decoder.decode(b"", final=True)
+        if final_chunk:
+            buffer += final_chunk
+
+        if buffer:  # Process the last line if it's not empty
+            processed_line = await self.process_line(buffer, base_url)
+            yield processed_line
+
+    async def process_line(self, line: str, base_url: str) -> str:
+        """
+        Process a single line from the m3u8 content.
+
+        Args:
+            line (str): The line to process.
+            base_url (str): The base URL to resolve relative URLs.
+
+        Returns:
+            str: The processed line.
+        """
+        if "URI=" in line:
+            return await self.process_key_line(line, base_url)
+        elif not line.startswith("#") and line.strip():
+            return await self.proxy_url(line, base_url)
+        else:
+            return line
 
     async def process_key_line(self, line: str, base_url: str) -> str:
         """
