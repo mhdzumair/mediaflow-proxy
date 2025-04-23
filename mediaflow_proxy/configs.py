@@ -23,6 +23,7 @@ class TransportConfig(BaseSettings):
     transport_routes: Dict[str, RouteConfig] = Field(
         default_factory=dict, description="Pattern-based route configuration"
     )
+    timeout: int = Field(30, description="Timeout for HTTP requests in seconds")
 
     def get_mounts(
         self, async_http: bool = True
