@@ -1,4 +1,4 @@
-import logging
+import codecs
 import re
 from typing import AsyncGenerator
 from urllib import parse
@@ -57,54 +57,38 @@ class M3U8Processor:
         Yields:
             str: Processed lines of the m3u8 content.
         """
-        buffer = b""  # Use bytes buffer instead of str
+        buffer = ""  # String buffer for decoded content
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
         # Process the content chunk by chunk
         async for chunk in content_iterator:
             if isinstance(chunk, str):
                 chunk = chunk.encode("utf-8")
 
-            buffer += chunk
+            # Incrementally decode the chunk
+            decoded_chunk = decoder.decode(chunk)
+            buffer += decoded_chunk
 
-            try:
-                # Try to decode the current buffer with error handling
-                decoded_buffer = buffer.decode("utf-8", errors="replace")
-                lines = decoded_buffer.split("\n")
+            # Process complete lines
+            lines = buffer.split("\n")
+            if len(lines) > 1:
+                # Process all complete lines except the last one
+                for line in lines[:-1]:
+                    if line:  # Skip empty lines
+                        processed_line = await self.process_line(line, base_url)
+                        yield processed_line + "\n"
 
-                # If we have at least one line and the buffer ends with newline,
-                # we process all lines including the last one
-                if len(lines) > 1:
-                    # Process all complete lines except the last one
-                    for line in lines[:-1]:
-                        if line:  # Skip empty lines
-                            processed_line = await self.process_line(line, base_url)
-                            yield processed_line + "\n"
+                # Keep the last line in the buffer (it might be incomplete)
+                buffer = lines[-1]
 
-                    # If the buffer ended with a newline, the last line is also complete
-                    if decoded_buffer.endswith("\n"):
-                        if lines[-1]:  # Process the last line if it's not empty
-                            processed_line = await self.process_line(lines[-1], base_url)
-                            yield processed_line + "\n"
-                        buffer = b""  # Clear the buffer
-                    else:
-                        # Keep the last incomplete line in the buffer
-                        buffer = lines[-1].encode("utf-8")
-            except UnicodeDecodeError:
-                # If we can't decode the buffer, keep accumulating data
-                continue
+        # Process any remaining data in the buffer plus final bytes
+        final_chunk = decoder.decode(b"", final=True)
+        if final_chunk:
+            buffer += final_chunk
 
-        # Process any remaining data in the buffer
-        if buffer:
-            try:
-                # Final attempt to decode any remaining data
-                remaining = buffer.decode("utf-8", errors="replace")
-                if remaining:
-                    processed_line = await self.process_line(remaining, base_url)
-                    yield processed_line
-            except Exception as e:
-                logging.error(f"Error processing final buffer: {e}")
-                # Yield any remaining content with replacement characters
-                yield await self.process_line(buffer.decode("utf-8", errors="replace"), base_url)
+        if buffer:  # Process the last line if it's not empty
+            processed_line = await self.process_line(buffer, base_url)
+            yield processed_line
 
     async def process_line(self, line: str, base_url: str) -> str:
         """
