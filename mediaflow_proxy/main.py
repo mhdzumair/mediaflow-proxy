@@ -63,23 +63,34 @@ async def show_speedtest_page():
 
 
 @app.post("/generate_encrypted_or_encoded_url")
-async def generate_encrypted_or_encoded_url(request: GenerateUrlRequest):
-    if "api_password" not in request.query_params:
-        request.query_params["api_password"] = request.api_password
+async def generate_url(request: GenerateUrlRequest):
+    result = await generate_urls(request)
+    return {"encoded_url": result["urls"][0]}
 
-    encoded_url = encode_mediaflow_proxy_url(
-        request.mediaflow_proxy_url,
-        request.endpoint,
-        request.destination_url,
-        request.query_params,
-        request.request_headers,
-        request.response_headers,
-        EncryptionHandler(request.api_password) if request.api_password else None,
-        request.expiration,
-        str(request.ip) if request.ip else None,
-    )
-    return {"encoded_url": encoded_url}
+@app.post("/generate_urls")
+async def generate_urls(requests: GenerateUrlRequest | list[GenerateUrlRequest]):
+    if not isinstance(requests, list):
+        requests = [requests]
+    
+    encoded_urls = []
+    for request in requests:
+        if "api_password" not in request.query_params:
+            request.query_params["api_password"] = request.api_password
 
+        encoded_url = encode_mediaflow_proxy_url(
+            request.mediaflow_proxy_url,
+            request.endpoint,
+            request.destination_url,
+            request.query_params,
+            request.request_headers,
+            request.response_headers,
+            EncryptionHandler(request.api_password) if request.api_password else None,
+            request.expiration,
+            str(request.ip) if request.ip else None,
+        )
+        encoded_urls.append(encoded_url)
+
+    return {"urls": encoded_urls}
 
 app.include_router(proxy_router, prefix="/proxy", tags=["proxy"], dependencies=[Depends(verify_api_key)])
 app.include_router(extractor_router, prefix="/extractor", tags=["extractors"], dependencies=[Depends(verify_api_key)])
