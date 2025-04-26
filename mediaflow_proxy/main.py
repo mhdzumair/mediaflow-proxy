@@ -131,16 +131,16 @@ async def generate_urls(request: GenerateMultiUrlRequest):
         url_item: MultiUrlRequestItem,
     ) -> str:
         """Process a single URL item with common parameters and return the encoded URL."""
-        # Prepare query params, including api_password if provided
-        if "api_password" not in url_item.query_params and request.api_password:
-            url_item.query_params["api_password"] = request.api_password
+        query_params = url_item.query_params.copy()
+        if "api_password" not in query_params and request.api_password:
+            query_params["api_password"] = request.api_password
 
         # Generate the encoded URL
         return encode_mediaflow_proxy_url(
             mediaflow_proxy_url=request.mediaflow_proxy_url,
             endpoint=url_item.endpoint,
             destination_url=url_item.destination_url,
-            query_params=url_item.query_params,
+            query_params=query_params,
             request_headers=url_item.request_headers,
             response_headers=url_item.response_headers,
             encryption_handler=encryption_handler,
