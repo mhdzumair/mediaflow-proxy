@@ -45,10 +45,13 @@ async def hls_manifest_proxy(
 
 @proxy_router.head("/stream")
 @proxy_router.get("/stream")
+@proxy_router.head("/stream/{filename:path}")
+@proxy_router.get("/stream/{filename:path}")
 async def proxy_stream_endpoint(
     request: Request,
     stream_params: Annotated[ProxyStreamParams, Query()],
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+    filename: str | None = None,
 ):
     """
     Proxies stream requests to the given video URL.
@@ -57,6 +60,7 @@ async def proxy_stream_endpoint(
         request (Request): The incoming HTTP request.
         stream_params (ProxyStreamParams): The parameters for the stream request.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
+        filename (str | None): The filename to be used in the response headers.
 
     Returns:
         Response: The HTTP response with the streamed content.
@@ -66,6 +70,9 @@ async def proxy_stream_endpoint(
         # Handle invalid range requests "bytes=NaN-NaN"
         raise HTTPException(status_code=416, detail="Invalid Range Header")
     proxy_headers.request.update({"range": content_range})
+    if filename:
+        # If a filename is provided, set it in the headers
+        proxy_headers.response.update({"content-disposition": f'attachment; filename="{filename}"'})
     return await proxy_stream(request.method, stream_params, proxy_headers)
 
 
