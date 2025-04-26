@@ -153,6 +153,18 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
    ```
    docker run -p 8888:8888 -e API_PASSWORD=your_password mhdzumair/mediaflow-proxy
    ```
+### Using Docker Compose
+
+1. Set the `API_PASSWORD` and other environment variables in `.env`:
+
+   ```
+   echo "API_PASSWORD=your_password" > .env
+   ```
+2. Bring up the Docker Container:
+
+   ```
+   docker compose up --detach
+   ```
 
 #### Using pip
 
