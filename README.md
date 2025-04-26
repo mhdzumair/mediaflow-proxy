@@ -91,47 +91,47 @@ Each route can have the following settings:
 #### Configuration Examples
 
 1. Simple proxy setup with SSL bypass for internal domain:
-```env
-PROXY_URL=http://main-proxy:8080
-TRANSPORT_ROUTES='{
-    "https://internal.domain.com": {
-        "proxy": false,
-        "verify_ssl": false
-    }
-}'
-```
+    ```env
+    PROXY_URL=http://main-proxy:8080
+    TRANSPORT_ROUTES='{
+        "https://internal.domain.com": {
+            "proxy": false,
+            "verify_ssl": false
+        }
+    }'
+    ```
 
 2. Different proxies for different services:
-```env
-PROXY_URL=http://default-proxy:8080
-TRANSPORT_ROUTES='{
-    "all://*.streaming.com": {
-        "proxy": true,
-        "proxy_url": "socks5://streaming-proxy:1080"
-    },
-    "all://*.internal.com": {
-        "proxy": false
-    },
-    "https://api.service.com": {
-        "proxy": true,
-        "verify_ssl": false
-    }
-}'
-```
+    ```env
+    PROXY_URL=http://default-proxy:8080
+    TRANSPORT_ROUTES='{
+        "all://*.streaming.com": {
+            "proxy": true,
+            "proxy_url": "socks5://streaming-proxy:1080"
+        },
+        "all://*.internal.com": {
+            "proxy": false
+        },
+        "https://api.service.com": {
+            "proxy": true,
+            "verify_ssl": false
+        }
+    }'
+    ```
 
 3. Global proxy with exceptions:
-```env
-PROXY_URL=http://main-proxy:8080
-ALL_PROXY=true
-TRANSPORT_ROUTES='{
-    "all://local.network": {
-        "proxy": false
-    },
-    "all://*.trusted-service.com": {
-        "proxy": false
-    }
-}'
-```
+    ```env
+    PROXY_URL=http://main-proxy:8080
+    ALL_PROXY=true
+    TRANSPORT_ROUTES='{
+        "all://local.network": {
+            "proxy": false
+        },
+        "all://*.trusted-service.com": {
+            "proxy": false
+        }
+    }'
+    ```
 
 ### Speed Test Feature
 
@@ -361,37 +361,91 @@ This will output a properly encoded URL that can be used with players like VLC.
 vlc "http://127.0.0.1:8888/proxy/mpd/manifest.m3u8?key_id=nrQFDeRLSAKTLifXUIPiZg&key=FmY0xnWCPCNaSpRG-tUuTQ&api_password=dedsec&d=https%3A%2F%2Fmedia.axprod.net%2FTestVectors%2Fv7-MultiDRM-SingleKey%2FManifest_1080p_ClearKey.mpd"
 ```
 
-### Generating Encrypted URLs
+### Generating URLs
 
-To generate an encrypted URL with optional IP restriction and expiration, Use the `/generate_encrypted_or_encoded_url` endpoint via swagger UI or programmatically as shown below:
+MediaFlow Proxy provides endpoints to generate properly encoded or encrypted URLs for use with media players.
+- `/generate_url`: Generate a single encoded or encrypted URL
+- `/generate_urls`: Generate multiple URLs with shared common parameters
+
+
+#### Single URL Generation
+
+To generate a single encoded or encrypted URL:
+
 ```python
 import requests
 
-url = "http://localhost:8888/generate_encrypted_or_encoded_url"
+url = "http://localhost:8888/generate_url"
 data = {
     "mediaflow_proxy_url": "http://localhost:8888",
-    "endpoint": "/proxy/mpd/manifest.m3u8",
-    "destination_url": "https://media.axprod.net/TestVectors/v7-MultiDRM-SingleKey/Manifest_1080p_ClearKey.mpd",
+    "endpoint": "/proxy/stream",
+    "destination_url": "https://example.com/video.mp4",
     "query_params": {
-        "key_id": "nrQFDeRLSAKTLifXUIPiZg",
-        "key": "FmY0xnWCPCNaSpRG-tUuTQ"
+        "some_param": "value"
+        # Add "api_password" here for encoded (non-encrypted) URLs
+        # "api_password": "your_password"
     },
     "request_headers": {
-        "referer": "https://media.axprod.net/",
-        "origin": "https://media.axprod.net",
+        "referer": "https://example.com/",
+        "origin": "https://example.com",
     },
-    "expiration": 3600,  # URL will expire in 1 hour
-    "ip": "123.123.123.123",  # Optional: Restrict access to this IP
-    "api_password": "your_password"
+    "expiration": 3600,  # URL will expire in 1 hour (only for encrypted URLs)
+    "ip": "123.123.123.123",  # Optional: Restrict access to this IP (only for encrypted URLs)
+    "api_password": "your_password",  # Add here for encrypted URLs
+    "filename": "movie.mp4"  # Optional: Preserve filename for media players (only for /proxy/stream endpoint)
 }
 
 response = requests.post(url, json=data)
-encrypted_url = response.json()["encoded_url"]
-print(encrypted_url)
+encoded_url = response.json()["url"]
+print(encoded_url)
 ```
 
-You can then use the `encoded_url` in your player or application to access the media stream.
+> **Important Notes:**
+> - If you add `api_password` at the root level of the request, the URL will be **encrypted**.
+> - If you add `api_password` inside the `query_params` object, the URL will only be **encoded** (not encrypted).
+> - The `filename` parameter is optional and should only be used with the `/proxy/stream` endpoint, not with MPD or HLS proxy endpoints.
+> - The legacy endpoint `/generate_encrypted_or_encoded_url` is still available but deprecated. It's recommended to use `/generate_url` instead.
 
+#### Multiple URLs Generation
+
+To generate multiple URLs with shared common parameters:
+
+```python
+import requests
+
+url = "http://localhost:8888/generate_urls"
+data = {
+    "mediaflow_proxy_url": "http://localhost:8888",
+    "api_password": "your_password",
+    "expiration": 3600,  # URLs will expire in 1 hour (only for encrypted URLs)
+    "ip": "123.123.123.123",  # Optional: Restrict access to this IP (only for encrypted URLs)
+    "urls": [
+        {
+            "destination_url": "https://example.com/video1.mp4",
+            "request_headers": {"referer": "https://example.com"},
+            "filename": "movie1.mp4",
+            "endpoint": "/proxy/stream"
+        },
+        {
+            "destination_url": "https://example.com/video2.mp4",
+            "request_headers": {"referer": "https://example.com"},
+            "filename": "movie2.mp4",
+            "endpoint": "/proxy/stream"
+        }
+    ]
+}
+
+response = requests.post(url, json=data)
+encoded_urls = response.json()["urls"]
+for url in encoded_urls:
+    print(url)
+```
+
+#### Filename Preservation for Media Players
+
+MediaFlow Proxy now supports preserving filenames in URLs, which is particularly useful for media players like Infuse that use the filename to fetch metadata. When you include a `filename` parameter in your request, the proxy will ensure this information is preserved and properly passed to the media player.
+
+This feature helps media players display the correct title and fetch appropriate metadata instead of showing generic names like "Stream".
 
 ### Using MediaFlow Proxy with Debrid Services and Stremio Addons
 

@@ -282,6 +282,7 @@ def encode_mediaflow_proxy_url(
     encryption_handler: EncryptionHandler = None,
     expiration: int = None,
     ip: str = None,
+    filename: typing.Optional[str] = None,
 ) -> str:
     """
     Encodes & Encrypt (Optional) a MediaFlow proxy URL with query parameters and headers.
@@ -296,6 +297,7 @@ def encode_mediaflow_proxy_url(
         encryption_handler (EncryptionHandler, optional): The encryption handler to use. Defaults to None.
         expiration (int, optional): The expiration time for the encrypted token. Defaults to None.
         ip (str, optional): The public IP address to include in the query parameters. Defaults to None.
+        filename (str, optional): Filename to be preserved for media players like Infuse. Defaults to None.
 
     Returns:
         str: The encoded MediaFlow proxy URL.
@@ -320,11 +322,19 @@ def encode_mediaflow_proxy_url(
     else:
         encoded_params = urlencode(query_params)
 
-    # Construct the full URL
+    # Construct the base URL
     if endpoint is None:
-        return f"{mediaflow_proxy_url}?{encoded_params}"
+        base_url = mediaflow_proxy_url
+    else:
+        base_url = parse.urljoin(mediaflow_proxy_url, endpoint)
 
-    base_url = parse.urljoin(mediaflow_proxy_url, endpoint)
+    # Add filename if provided
+    if filename:
+        if not base_url.endswith("/"):
+            base_url += "/"
+        base_url += parse.quote(filename)
+
+    # Return the complete URL with query parameters
     return f"{base_url}?{encoded_params}"
 
 
