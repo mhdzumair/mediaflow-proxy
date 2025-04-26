@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import Request, Depends, APIRouter, Query, HTTPException
+from fastapi import Request, Depends, APIRouter, Query, HTTPException, Path
 
 from mediaflow_proxy.handlers import (
     handle_hls_stream_proxy,
@@ -14,7 +14,6 @@ from mediaflow_proxy.schemas import (
     MPDSegmentParams,
     MPDPlaylistParams,
     HLSManifestParams,
-    ProxyStreamParams,
     MPDManifestParams,
 )
 from mediaflow_proxy.utils.http_utils import get_proxy_headers, ProxyRequestHeaders
@@ -49,17 +48,17 @@ async def hls_manifest_proxy(
 @proxy_router.get("/stream/{filename:path}")
 async def proxy_stream_endpoint(
     request: Request,
-    stream_params: Annotated[ProxyStreamParams, Query()],
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+    destination: str = Query(..., description="The URL of the stream.", alias="d"),
     filename: str | None = None,
 ):
     """
-    Proxies stream requests to the given video URL.
+    Proxify stream requests to the given video URL.
 
     Args:
         request (Request): The incoming HTTP request.
-        stream_params (ProxyStreamParams): The parameters for the stream request.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
+        destination (str): The URL of the stream to be proxied.
         filename (str | None): The filename to be used in the response headers.
 
     Returns:
@@ -73,7 +72,7 @@ async def proxy_stream_endpoint(
     if filename:
         # If a filename is provided, set it in the headers
         proxy_headers.response.update({"content-disposition": f'attachment; filename="{filename}"'})
-    return await proxy_stream(request.method, stream_params, proxy_headers)
+    return await proxy_stream(request.method, destination, proxy_headers)
 
 
 @proxy_router.get("/mpd/manifest.m3u8")

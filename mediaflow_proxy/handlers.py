@@ -9,7 +9,7 @@ from starlette.background import BackgroundTask
 
 from .const import SUPPORTED_RESPONSE_HEADERS
 from .mpd_processor import process_manifest, process_playlist, process_segment
-from .schemas import HLSManifestParams, ProxyStreamParams, MPDManifestParams, MPDPlaylistParams, MPDSegmentParams
+from .schemas import HLSManifestParams, MPDManifestParams, MPDPlaylistParams, MPDSegmentParams
 from .utils.cache_utils import get_cached_mpd, get_cached_init_segment
 from .utils.http_utils import (
     Streamer,
@@ -174,19 +174,19 @@ def prepare_response_headers(original_headers, proxy_response_headers) -> dict:
     return response_headers
 
 
-async def proxy_stream(method: str, stream_params: ProxyStreamParams, proxy_headers: ProxyRequestHeaders):
+async def proxy_stream(method: str, destination: str, proxy_headers: ProxyRequestHeaders):
     """
     Proxies the stream request to the given video URL.
 
     Args:
         method (str): The HTTP method (e.g., GET, HEAD).
-        stream_params (ProxyStreamParams): The parameters for the stream request.
+        destination (str): The URL of the stream to be proxied.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
 
     Returns:
         Response: The HTTP response with the streamed content.
     """
-    return await handle_stream_request(method, stream_params.destination, proxy_headers)
+    return await handle_stream_request(method, destination, proxy_headers)
 
 
 async def fetch_and_process_m3u8(
