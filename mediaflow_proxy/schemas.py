@@ -65,10 +65,6 @@ class HLSManifestParams(GenericParams):
     )
 
 
-class ProxyStreamParams(GenericParams):
-    destination: str = Field(..., description="The URL of the stream.", alias="d")
-
-
 class MPDManifestParams(GenericParams):
     destination: str = Field(..., description="The URL of the MPD manifest.", alias="d")
     key_id: Optional[str] = Field(None, description="The DRM key ID (optional).")
