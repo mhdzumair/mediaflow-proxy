@@ -1,4 +1,5 @@
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import Request, Depends, APIRouter, Query, HTTPException, Path
 
@@ -70,8 +71,18 @@ async def proxy_stream_endpoint(
         raise HTTPException(status_code=416, detail="Invalid Range Header")
     proxy_headers.request.update({"range": content_range})
     if filename:
-        # If a filename is provided, set it in the headers
-        proxy_headers.response.update({"content-disposition": f'attachment; filename="{filename}"'})
+        # If a filename is provided, set it in the headers using RFC 6266 format
+        try:
+            # Try to encode with latin-1 first (simple case)
+            filename.encode("latin-1")
+            content_disposition = f'attachment; filename="{filename}"'
+        except UnicodeEncodeError:
+            # For filenames with non-latin-1 characters, use RFC 6266 format with UTF-8
+            encoded_filename = quote(filename.encode("utf-8"))
+            content_disposition = f"attachment; filename*=UTF-8''{encoded_filename}"
+
+        proxy_headers.response.update({"content-disposition": content_disposition})
+
     return await proxy_stream(request.method, destination, proxy_headers)
 
 
