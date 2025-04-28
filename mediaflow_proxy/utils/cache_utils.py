@@ -325,7 +325,7 @@ async def get_cached_mpd(
         parsed_dict = parse_mpd_dict(mpd_dict, mpd_url, parse_drm, parse_segment_profile_id)
 
         # Cache the original MPD dict
-        await MPD_CACHE.set(mpd_url, json.dumps(mpd_dict).encode(), ttl=parsed_dict["minimumUpdatePeriod"])
+        await MPD_CACHE.set(mpd_url, json.dumps(mpd_dict).encode(), ttl=parsed_dict.get("minimumUpdatePeriod"))
         return parsed_dict
     except DownloadError as error:
         logger.error(f"Error downloading MPD: {error}")
