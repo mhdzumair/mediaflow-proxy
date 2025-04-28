@@ -317,7 +317,7 @@ def parse_segment_timeline(parsed_dict: dict, item: dict, profile: dict, source:
     """
     timelines = item["SegmentTimeline"]["S"]
     timelines = timelines if isinstance(timelines, list) else [timelines]
-    period_start = parsed_dict["availabilityStartTime"] + timedelta(seconds=parsed_dict.get("PeriodStart", 0))
+    period_start = parsed_dict.get("availabilityStartTime", datetime.fromtimestamp(0, tz=timezone.utc)) + timedelta(seconds=parsed_dict.get("PeriodStart", 0))
     presentation_time_offset = int(item.get("@presentationTimeOffset", 0))
     start_number = int(item.get("@startNumber", 1))
 
