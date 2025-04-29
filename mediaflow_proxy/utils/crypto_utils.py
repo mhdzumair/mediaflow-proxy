@@ -67,30 +67,24 @@ class EncryptionMiddleware(BaseHTTPMiddleware):
         encrypted_token = None
 
         # Check for token in path
-        if token_marker in path and self.encryption_handler:
+        if path.startswith(token_marker) and self.encryption_handler:
             try:
-                # Extract token from path
-                token_start = path.find(token_marker) + len(token_marker)
+                # Extract token from the beginning of the path
+                token_start = len(token_marker)
                 token_end = path.find("/", token_start)
 
-                if token_end == -1:  # No trailing slash (no filename after token)
-                    token_end = len(path)
-                    filename_part = ""
+                if token_end == -1:  # No trailing slash
+                    encrypted_token = path[token_start:]
+                    remaining_path = ""
                 else:
-                    # There's something after the token (likely a filename)
-                    filename_part = path[token_end:]
+                    encrypted_token = path[token_start:token_end]
+                    remaining_path = path[token_end:]
 
-                # Get the encrypted token
-                encrypted_token = path[token_start:token_end]
-
-                # Modify the path to remove the token part but preserve the filename
-                original_path = path[: path.find(token_marker)]
-                original_path += filename_part  # Add back the filename part
-
-                request.scope["path"] = original_path
+                # Modify the path to remove the token part
+                request.scope["path"] = remaining_path
 
                 # Update the raw path as well
-                request.scope["raw_path"] = original_path.encode()
+                request.scope["raw_path"] = remaining_path.encode()
 
             except Exception as e:
                 logging.error(f"Error processing token in path: {str(e)}")
