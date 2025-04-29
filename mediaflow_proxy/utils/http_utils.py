@@ -302,6 +302,7 @@ def encode_mediaflow_proxy_url(
     Returns:
         str: The encoded MediaFlow proxy URL.
     """
+    # Prepare query parameters
     query_params = query_params or {}
     if destination_url is not None:
         query_params["d"] = destination_url
@@ -316,26 +317,37 @@ def encode_mediaflow_proxy_url(
             {key if key.startswith("r_") else f"r_{key}": value for key, value in response_headers.items()}
         )
 
-    if encryption_handler:
-        encrypted_token = encryption_handler.encrypt_data(query_params, expiration, ip)
-        encoded_params = urlencode({"token": encrypted_token})
-    else:
-        encoded_params = urlencode(query_params)
-
     # Construct the base URL
     if endpoint is None:
         base_url = mediaflow_proxy_url
     else:
         base_url = parse.urljoin(mediaflow_proxy_url, endpoint)
 
-    # Add filename if provided
-    if filename:
-        if not base_url.endswith("/"):
-            base_url += "/"
-        base_url += parse.quote(filename)
+    # Ensure base_url doesn't end with a slash for consistent handling
+    if base_url.endswith("/"):
+        base_url = base_url[:-1]
 
-    # Return the complete URL with query parameters
-    return f"{base_url}?{encoded_params}"
+    # Handle encryption if needed
+    if encryption_handler:
+        encrypted_token = encryption_handler.encrypt_data(query_params, expiration, ip)
+        # Build the URL with token in path
+        path_parts = [base_url, f"_token_{encrypted_token}"]
+
+        # Add filename at the end if provided
+        if filename:
+            path_parts.append(parse.quote(filename))
+
+        return "/".join(path_parts)
+
+    else:
+        # No encryption, use regular query parameters
+        url = base_url
+        if filename:
+            url = f"{url}/{parse.quote(filename)}"
+
+        if query_params:
+            return f"{url}?{urlencode(query_params)}"
+        return url
 
 
 def get_original_scheme(request: Request) -> str:
