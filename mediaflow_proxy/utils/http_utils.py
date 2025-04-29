@@ -7,7 +7,6 @@ from urllib.parse import urlencode
 
 import anyio
 import httpx
-import requests
 import tenacity
 from fastapi import Response
 from starlette.background import BackgroundTask
@@ -63,14 +62,6 @@ async def fetch_with_retry(client, method, url, headers, follow_redirects=True, 
         DownloadError: If the request fails after retries.
     """
     try:
-        response = requests.get(
-            url,
-            headers=headers,
-            allow_redirects=follow_redirects,
-            proxies={"https": "socks5://127.0.0.1:10808", "http": "socks5://127.0.0.1:10808"},
-        )
-        response.raise_for_status()
-        return response
         response = await client.request(method, url, headers=headers, follow_redirects=follow_redirects, **kwargs)
         response.raise_for_status()
         return response
