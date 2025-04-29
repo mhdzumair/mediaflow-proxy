@@ -1,7 +1,7 @@
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import Request, Depends, APIRouter, Query, HTTPException, Path
+from fastapi import Request, Depends, APIRouter, Query, HTTPException
 
 from mediaflow_proxy.handlers import (
     handle_hls_stream_proxy,
