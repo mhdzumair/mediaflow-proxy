@@ -37,6 +37,7 @@ tqdm = "^4.67.1"
 aiofiles = "^24.1.0"
 beautifulsoup4 = ">=4.13.4"
 lxml = "^5.4.0"
+requests = "^2.32.3"
 
 
 [tool.poetry.group.dev.dependencies]
