@@ -233,8 +233,21 @@ def parse_representation(
         profile["audioSamplingRate"] = representation.get("@audioSamplingRate") or adaptation.get("@audioSamplingRate")
         profile["channels"] = representation.get("AudioChannelConfiguration", {}).get("@value", "2")
     else:
-        profile["width"] = int(representation["@width"])
-        profile["height"] = int(representation["@height"])
+        # Handle video-specific attributes, making them optional with sensible defaults
+        if "@width" in representation:
+            profile["width"] = int(representation["@width"])
+        elif "@width" in adaptation:
+            profile["width"] = int(adaptation["@width"])
+        else:
+            profile["width"] = 0  # Default if width is missing
+
+        if "@height" in representation:
+            profile["height"] = int(representation["@height"])
+        elif "@height" in adaptation:
+            profile["height"] = int(adaptation["@height"])
+        else:
+            profile["height"] = 0  # Default if height is missing
+
         frame_rate = representation.get("@frameRate") or adaptation.get("@maxFrameRate") or "30000/1001"
         frame_rate = frame_rate if "/" in frame_rate else f"{frame_rate}/1"
         profile["frameRate"] = round(int(frame_rate.split("/")[0]) / int(frame_rate.split("/")[1]), 3)
@@ -317,7 +330,9 @@ def parse_segment_timeline(parsed_dict: dict, item: dict, profile: dict, source:
     """
     timelines = item["SegmentTimeline"]["S"]
     timelines = timelines if isinstance(timelines, list) else [timelines]
-    period_start = parsed_dict.get("availabilityStartTime", datetime.fromtimestamp(0, tz=timezone.utc)) + timedelta(seconds=parsed_dict.get("PeriodStart", 0))
+    period_start = parsed_dict.get("availabilityStartTime", datetime.fromtimestamp(0, tz=timezone.utc)) + timedelta(
+        seconds=parsed_dict.get("PeriodStart", 0)
+    )
     presentation_time_offset = int(item.get("@presentationTimeOffset", 0))
     start_number = int(item.get("@startNumber", 1))
 
@@ -354,13 +369,14 @@ def preprocess_timeline(
         for _ in range(repeat + 1):
             segment_start_time = period_start + timedelta(seconds=(start_time - presentation_time_offset) / timescale)
             segment_end_time = segment_start_time + timedelta(seconds=duration / timescale)
+            presentation_time = start_time - presentation_time_offset
             processed_data.append(
                 {
                     "number": start_number,
                     "start_time": segment_start_time,
                     "end_time": segment_end_time,
                     "duration": duration,
-                    "time": start_time,
+                    "time": presentation_time,
                 }
             )
             start_time += duration
@@ -475,7 +491,7 @@ def create_segment_data(segment: Dict, item: dict, profile: dict, source: str, t
     media = media.replace("$Bandwidth$", str(profile["bandwidth"]))
 
     if "time" in segment and timescale is not None:
-        media = media.replace("$Time$", str(int(segment["time"] * timescale)))
+        media = media.replace("$Time$", str(int(segment["time"])))
 
     if not media.startswith("http"):
         media = f"{source}/{media}"
@@ -496,16 +512,20 @@ def create_segment_data(segment: Dict, item: dict, profile: dict, source: str, t
             }
         )
     elif "start_time" in segment and "duration" in segment:
-        duration = segment["duration"]
+        duration_seconds = segment["duration"] / timescale
         segment_data.update(
             {
                 "start_time": segment["start_time"],
-                "end_time": segment["start_time"] + timedelta(seconds=duration),
-                "extinf": duration,
+                "end_time": segment["start_time"] + timedelta(seconds=duration_seconds),
+                "extinf": duration_seconds,
                 "program_date_time": segment["start_time"].isoformat() + "Z",
             }
         )
+    elif "duration" in segment and timescale is not None:
+        # Convert duration from timescale units to seconds
+        segment_data["extinf"] = segment["duration"] / timescale
     elif "duration" in segment:
+        # If no timescale is provided, assume duration is already in seconds
         segment_data["extinf"] = segment["duration"]
 
     return segment_data

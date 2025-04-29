@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 
 import anyio
 import httpx
+import requests
 import tenacity
 from fastapi import Response
 from starlette.background import BackgroundTask
@@ -62,6 +63,14 @@ async def fetch_with_retry(client, method, url, headers, follow_redirects=True, 
         DownloadError: If the request fails after retries.
     """
     try:
+        response = requests.get(
+            url,
+            headers=headers,
+            allow_redirects=follow_redirects,
+            proxies={"https": "socks5://127.0.0.1:10808", "http": "socks5://127.0.0.1:10808"},
+        )
+        response.raise_for_status()
+        return response
         response = await client.request(method, url, headers=headers, follow_redirects=follow_redirects, **kwargs)
         response.raise_for_status()
         return response
@@ -330,15 +339,25 @@ def encode_mediaflow_proxy_url(
     # Handle encryption if needed
     if encryption_handler:
         encrypted_token = encryption_handler.encrypt_data(query_params, expiration, ip)
-        # Build the URL with token in path
-        path_parts = [base_url, f"_token_{encrypted_token}"]
+
+        # Parse the base URL to get its components
+        parsed_url = parse.urlparse(base_url)
+
+        # Insert the token at the beginning of the path
+        new_path = f"/_token_{encrypted_token}{parsed_url.path}"
+
+        # Reconstruct the URL with the token at the beginning of the path
+        url_parts = list(parsed_url)
+        url_parts[2] = new_path  # Update the path component
+
+        # Build the URL
+        url = parse.urlunparse(url_parts)
 
         # Add filename at the end if provided
         if filename:
-            path_parts.append(parse.quote(filename))
+            url = f"{url}/{parse.quote(filename)}"
 
-        return "/".join(path_parts)
-
+        return url
     else:
         # No encryption, use regular query parameters
         url = base_url
