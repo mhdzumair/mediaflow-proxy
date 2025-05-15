@@ -143,11 +143,13 @@ class M3U8Processor:
         full_url = parse.urljoin(base_url, url)
         query_params = dict(self.request.query_params)
         has_encrypted = query_params.pop("has_encrypted", False)
+        # Remove the response headers from the query params to avoid it being added to the consecutive requests
+        [query_params.pop(key, None) for key in list(query_params.keys()) if key.startswith("r_")]
 
         return encode_mediaflow_proxy_url(
             self.mediaflow_proxy_url,
             "",
             full_url,
-            query_params=dict(self.request.query_params),
+            query_params=query_params,
             encryption_handler=encryption_handler if has_encrypted else None,
         )
