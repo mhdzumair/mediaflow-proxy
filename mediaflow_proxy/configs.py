@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"  # The logging level to use.
     transport_config: TransportConfig = Field(default_factory=TransportConfig)  # Configuration for httpx transport.
     enable_streaming_progress: bool = False  # Whether to enable streaming progress tracking.
+    disable_home_page: bool = False  # Whether to disable the home page UI.
+    disable_docs: bool = False  # Whether to disable the API documentation (Swagger UI).
+    disable_speedtest: bool = False  # Whether to disable the speedtest UI.
 
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"  # The user agent to use for HTTP requests.
