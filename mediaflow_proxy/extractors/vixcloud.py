@@ -15,18 +15,18 @@ class VixCloudExtractor(BaseExtractor):
         super().__init__(*args, **kwargs)
         self.mediaflow_endpoint = "hls_manifest_proxy"
 
-    async def version(self, domain: str) -> str:
+    async def version(self, site_url: str) -> str:
         """Get version of VixCloud Parent Site."""
-        base_url = f"https://streamingcommunity.{domain}/richiedi-un-titolo"
+        base_url = f"{site_url}/richiedi-un-titolo"
         response = await self._make_request(
             base_url,
             headers={
-                "Referer": f"https://streamingcommunity.{domain}/",
-                "Origin": f"https://streamingcommunity.{domain}",
+                "Referer": f"{site_url}/",
+                "Origin": f"{site_url}",
             },
         )
         if response.status_code != 200:
-            raise ExtractorError("Outdated Domain")
+            raise ExtractorError("Outdated Url")
         # Soup the response
         soup = BeautifulSoup(response.text, "lxml", parse_only=SoupStrainer("div", {"id": "app"}))
         if soup:
@@ -39,8 +39,8 @@ class VixCloudExtractor(BaseExtractor):
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         """Extract Vixcloud URL."""
-        domain = url.split("://")[1].split("/")[0].split(".")[1]
-        version = await self.version(domain)
+        site_url = url.split("/iframe")[0]
+        version = await self.version(site_url)
         response = await self._make_request(url, headers={"x-inertia": "true", "x-inertia-version": version})
         soup = BeautifulSoup(response.text, "lxml", parse_only=SoupStrainer("iframe"))
         iframe = soup.find("iframe").get("src")
