@@ -45,6 +45,9 @@ Set the following environment variables:
 
 - `API_PASSWORD`: Optional. Protects against unauthorized access and API network abuses.
 - `ENABLE_STREAMING_PROGRESS`: Optional. Enable streaming progress logging. Default is `false`.
+- `DISABLE_HOME_PAGE`: Optional. Disables the home page UI. Returns 404 for the root path and direct access to index.html. Default is `false`.
+- `DISABLE_DOCS`: Optional. Disables the API documentation (Swagger UI). Returns 404 for the /docs path. Default is `false`.
+- `DISABLE_SPEEDTEST`: Optional. Disables the speedtest UI. Returns 404 for the /speedtest path and direct access to speedtest.html. Default is `false`.
 
 ### Transport Configuration
 
@@ -168,7 +171,7 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
 
 #### Using pip
 
-> [!IMPORTANT]  
+> [!IMPORTANT]
 > Ensure that you have Python 3.10 or higher installed.
 
 1. Install the package:
@@ -195,7 +198,7 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
 
 #### Using git & poetry
 
-> [!IMPORTANT]  
+> [!IMPORTANT]
 > Ensure that you have Python 3.10 or higher installed.
 
 

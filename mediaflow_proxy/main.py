@@ -9,6 +9,7 @@ from starlette.responses import RedirectResponse
 from starlette.staticfiles import StaticFiles
 
 from mediaflow_proxy.configs import settings
+from mediaflow_proxy.middleware import UIAccessControlMiddleware
 from mediaflow_proxy.routes import proxy_router, extractor_router, speedtest_router
 from mediaflow_proxy.schemas import GenerateUrlRequest, GenerateMultiUrlRequest, MultiUrlRequestItem
 from mediaflow_proxy.utils.crypto_utils import EncryptionHandler, EncryptionMiddleware
@@ -26,6 +27,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(EncryptionMiddleware)
+app.add_middleware(UIAccessControlMiddleware)
 
 
 async def verify_api_key(api_key: str = Security(api_password_query), api_key_alt: str = Security(api_password_header)):
