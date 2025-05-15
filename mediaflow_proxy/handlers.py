@@ -76,10 +76,10 @@ async def handle_hls_stream_proxy(
     Returns:
         Union[Response, EnhancedStreamingResponse]: Either a processed m3u8 playlist or a streaming response.
     """
-    client, streamer = await setup_client_and_streamer()
+    _, streamer = await setup_client_and_streamer()
     # Handle range requests
     content_range = proxy_headers.request.get("range", "bytes=0-")
-    if "NaN" in content_range:
+    if "nan" in content_range.casefold():
         # Handle invalid range requests "bytes=NaN-NaN"
         raise HTTPException(status_code=416, detail="Invalid Range Header")
     proxy_headers.request.update({"range": content_range})
@@ -213,9 +213,9 @@ async def fetch_and_process_m3u8(
         # Initialize processor and response headers
         processor = M3U8Processor(request, key_url)
         response_headers = {
-            "Content-Disposition": "inline",
-            "Accept-Ranges": "none",
-            "Content-Type": "application/vnd.apple.mpegurl",
+            "content-disposition": "inline",
+            "accept-ranges": "none",
+            "content-type": "application/vnd.apple.mpegurl",
         }
         response_headers.update(proxy_headers.response)
 
