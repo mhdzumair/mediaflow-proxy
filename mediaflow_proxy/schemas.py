@@ -1,6 +1,7 @@
+import json
 from typing import Literal, Dict, Any, Optional
 
-from pydantic import BaseModel, Field, IPvAnyAddress, ConfigDict
+from pydantic import BaseModel, Field, IPvAnyAddress, ConfigDict, field_validator
 
 
 class GenerateUrlRequest(BaseModel):
@@ -88,7 +89,7 @@ class MPDSegmentParams(GenericParams):
 
 class ExtractorURLParams(GenericParams):
     host: Literal[
-        "Doodstream", "Mixdrop", "Uqload", "Streamtape", "Supervideo", "VixCloud", "Okru", "Maxstream", "LiveTV"
+        "Doodstream", "Mixdrop", "Uqload", "Streamtape", "Supervideo", "VixCloud", "Okru", "Maxstream", "LiveTV", "DLHD"
     ] = Field(..., description="The host to extract the URL from.")
     destination: str = Field(..., description="The URL of the stream.", alias="d")
     redirect_stream: bool = Field(False, description="Whether to redirect to the stream endpoint automatically.")
@@ -96,3 +97,10 @@ class ExtractorURLParams(GenericParams):
         default_factory=dict,
         description="Additional parameters required for specific extractors (e.g., stream_title for LiveTV)",
     )
+
+
+    @field_validator("extra_params", mode="before")
+    def validate_extra_params(cls, value: Any):
+        if isinstance(value, str):
+            return json.loads(value)
+        return value
