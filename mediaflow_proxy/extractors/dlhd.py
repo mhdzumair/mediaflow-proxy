@@ -1,5 +1,5 @@
 import re
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 from urllib.parse import urlparse, quote
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
@@ -51,6 +51,10 @@ class DLHDExtractor(BaseExtractor):
 
                 if not player_url:
                     raise ExtractorError("Could not extract player URL from channel page")
+
+            # Check if this is a vecloud URL
+            if "vecloud" in player_url:
+                return await self._handle_vecloud(player_url, player_origin + "/")
 
             # Get player page to extract authentication information
             player_headers = {
@@ -129,6 +133,73 @@ class DLHDExtractor(BaseExtractor):
         except Exception as e:
             raise ExtractorError(f"Extraction failed: {str(e)}")
 
+    async def _handle_vecloud(self, player_url: str, channel_referer: str) -> Dict[str, Any]:
+        """Handle vecloud URLs with their specific API.
+
+        Args:
+            player_url: The vecloud player URL
+            channel_referer: The referer of the channel page
+        Returns:
+            Dict containing stream URL and required headers
+        """
+        try:
+            # Extract stream ID from vecloud URL
+            stream_id_match = re.search(r'/stream/([a-zA-Z0-9-]+)', player_url)
+            if not stream_id_match:
+                raise ExtractorError("Could not extract stream ID from vecloud URL")
+
+            stream_id = stream_id_match.group(1)
+
+            # Construct API URL
+            player_parsed = urlparse(player_url)
+            player_domain = player_parsed.netloc
+            player_origin = f"{player_parsed.scheme}://{player_parsed.netloc}"
+            api_url = f"{player_origin}/api/source/{stream_id}?type=live"
+
+            # Set up headers for API request
+            api_headers = {
+                "referer": player_url,
+                "origin": player_origin,
+                "user-agent": self.base_headers["user-agent"],
+                "content-type": "application/json"
+            }
+
+            api_data = {
+                "r": channel_referer,
+                "d": player_domain
+            }
+
+            # Make API request
+            api_response = await self._make_request(api_url, method="POST", headers=api_headers, json=api_data)
+            api_data = api_response.json()
+
+            # Check if request was successful
+            if not api_data.get("success"):
+                raise ExtractorError("Vecloud API request failed")
+
+            # Extract stream URL from response
+            stream_url = api_data.get("player", {}).get("source_file")
+
+            if not stream_url:
+                raise ExtractorError("Could not find stream URL in vecloud response")
+
+            # Set up stream headers
+            stream_headers = {
+                "referer": player_origin + "/",
+                "origin": player_origin,
+                "user-agent": self.base_headers["user-agent"]
+            }
+
+            # Return the stream URL with headers
+            return {
+                "destination_url": stream_url,
+                "request_headers": stream_headers,
+                "mediaflow_endpoint": self.mediaflow_endpoint,
+            }
+
+        except Exception as e:
+            raise ExtractorError(f"Vecloud extraction failed: {str(e)}")
+
     def _extract_player_url(self, html_content: str) -> Optional[str]:
         """Extract player iframe URL from channel page HTML."""
         try:
@@ -142,7 +213,7 @@ class DLHDExtractor(BaseExtractor):
             if not iframe_match:
                 # Try alternative pattern without requiring allowfullscreen
                 iframe_match = re.search(
-                    r'<iframe[^>]*src=["\']([^"\']+(?:premiumtv|daddylivehd)[^"\']*)["\']',
+                    r'<iframe[^>]*src=["\']([^"\']+(?:premiumtv|daddylivehd|vecloud)[^"\']*)["\']',
                     html_content,
                     re.IGNORECASE
                 )
