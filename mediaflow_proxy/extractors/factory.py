@@ -1,6 +1,7 @@
 from typing import Dict, Type
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
+from mediaflow_proxy.extractors.dlhd import DLHDExtractor
 from mediaflow_proxy.extractors.doodstream import DoodStreamExtractor
 from mediaflow_proxy.extractors.livetv import LiveTVExtractor
 from mediaflow_proxy.extractors.maxstream import MaxstreamExtractor
@@ -25,6 +26,7 @@ class ExtractorFactory:
         "Okru": OkruExtractor,
         "Maxstream": MaxstreamExtractor,
         "LiveTV": LiveTVExtractor,
+        "DLHD": DLHDExtractor,
     }
 
     @classmethod
