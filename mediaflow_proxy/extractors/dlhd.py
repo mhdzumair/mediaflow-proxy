@@ -52,9 +52,10 @@ class DLHDExtractor(BaseExtractor):
                 if not player_url:
                     raise ExtractorError("Could not extract player URL from channel page")
 
-            # Check if this is a vecloud URL
-            if "vecloud" in player_url:
+            try:
                 return await self._handle_vecloud(player_url, player_origin + "/")
+            except Exception as e:
+                pass
 
             # Get player page to extract authentication information
             player_headers = {
@@ -149,6 +150,9 @@ class DLHDExtractor(BaseExtractor):
                 raise ExtractorError("Could not extract stream ID from vecloud URL")
 
             stream_id = stream_id_match.group(1)
+
+            response = await self._make_request(player_url, headers={"referer": channel_referer, "user-agent": self.base_headers["user-agent"]})
+            player_url = str(response.url)
 
             # Construct API URL
             player_parsed = urlparse(player_url)
