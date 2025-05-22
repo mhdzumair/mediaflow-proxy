@@ -1,0 +1,11 @@
+services:
+  mediaflow-proxy:
+    ports:
+      - "8888:8888"
+    env_file:
+      - .env
+    restart: always
+    logging:
+      options:
+        max-size: 1g
+    image: mhdzumair/mediaflow-proxy:latest
