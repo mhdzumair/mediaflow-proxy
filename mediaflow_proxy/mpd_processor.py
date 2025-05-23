@@ -162,7 +162,7 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
     added_segments = 0
 
     proxy_url = request.url_for("segment_endpoint")
-    proxy_url = str(proxy_url.replace(scheme=get_original_scheme(request)))
+    segment_proxy_endpoint_url = str(proxy_url.replace(scheme=get_original_scheme(request)))
 
     for index, profile in enumerate(profiles):
         segments = profile["segments"]
@@ -171,10 +171,26 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
             continue
 
         # Add headers for only the first profile
-        if index == 0:
-            sequence = segments[0]["number"]
-            extinf_values = [f["extinf"] for f in segments if "extinf" in f]
-            target_duration = math.ceil(max(extinf_values)) if extinf_values else 3
+        if index == 0: # Headers for the first profile
+            if not segments: # Check if segments list is empty
+                logger.warning(f"Profile {profile['id']} has no segments to build HLS playlist.")
+                # Potresti voler sollevare un'eccezione o ritornare una playlist HLS vuota/errore
+                # Invece di continuare e fallire con un KeyError sotto.
+                # Per ora, lasciamo che fallisca se non ci sono segmenti e si tenta di accedervi.
+                # Oppure, imposta valori di default:
+                sequence = 0
+                target_duration = 5 # Default target duration
+            else:
+                # Usa hls_media_sequence_num se esiste, altrimenti fallback a "number"
+                sequence = segments[0].get("hls_media_sequence_num", segments[0].get("number", 0))
+                
+                extinf_values = [f["extinf"] for f in segments if "extinf" in f and isinstance(f["extinf"], (float, int))]
+                if not extinf_values: # Handle case where no valid extinf found
+                    logger.warning(f"No valid extinf values found for profile {profile['id']}. Using default target duration.")
+                    target_duration = 5 # Default target duration
+                else:
+                    target_duration = math.ceil(max(extinf_values)) if extinf_values else 5 # Default if list becomes empty
+
             hls.extend(
                 [
                     f"#EXT-X-TARGETDURATION:{target_duration}",
@@ -194,18 +210,41 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
         has_encrypted = query_params.pop("has_encrypted", False)
 
         for segment in segments:
+            # Add PROGRAM-DATE-TIME tag if available and it's a live stream
+            if mpd_dict.get("isLive", False) and segment.get("program_date_time"):
+                hls.append(f'#EXT-X-PROGRAM-DATE-TIME:{segment["program_date_time"]}')
+            
             hls.append(f'#EXTINF:{segment["extinf"]:.3f},')
-            query_params.update(
-                {"init_url": init_url, "segment_url": segment["media"], "mime_type": profile["mimeType"]}
-            )
+            
+            # Prepare query parameters specifically for this segment's URL
+            # Carry forward key_id, key, and api_password from the original playlist request's query parameters
+            segment_url_query_params = {
+                "init_url": init_url,
+                "segment_url": segment["media"],
+                "mime_type": profile["mimeType"],
+                "key_id": request.query_params.get("key_id"),
+                "key": request.query_params.get("key"),
+                "api_password": request.query_params.get("api_password")
+            }
+            # Filter out None values to keep the URL clean and avoid empty params
+            segment_url_query_params = {k: v for k, v in segment_url_query_params.items() if v is not None}
+
+            # Determine if the segment URL itself should be generated as an encrypted tokenized URL
+            # The 'has_encrypted' flag should pertain to whether the incoming playlist URL was encrypted,
+            # and if so, subsequent generated URLs (like segment URLs) should also be.
+            # This depends on how `has_encrypted` is set and intended to be used by `encode_mediaflow_proxy_url`.
+            # Assuming `has_encrypted` was correctly determined from the playlist request:
+            current_has_encrypted_flag = request.query_params.get("has_encrypted", False) # Re-fetch from original request for clarity if needed
+
             hls.append(
                 encode_mediaflow_proxy_url(
-                    proxy_url,
-                    query_params=query_params,
-                    encryption_handler=encryption_handler if has_encrypted else None,
+                    proxy_url, # This is the base URL for the segment_endpoint (e.g., http://.../proxy/mpd/segment.mp4)
+                    query_params=segment_url_query_params,
+                    encryption_handler=encryption_handler if current_has_encrypted_flag else None,
                 )
             )
             added_segments += 1
+
 
     if not mpd_dict["isLive"]:
         hls.append("#EXT-X-ENDLIST")

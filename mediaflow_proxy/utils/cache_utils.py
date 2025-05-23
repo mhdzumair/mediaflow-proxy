@@ -313,25 +313,53 @@ async def get_cached_mpd(
     cached_data = await MPD_CACHE.get(mpd_url)
     if cached_data is not None:
         try:
-            mpd_dict = json.loads(cached_data)
-            return parse_mpd_dict(mpd_dict, mpd_url, parse_drm, parse_segment_profile_id)
+            mpd_dict_from_cache = json.loads(cached_data)
+            # Re-process the cached MPD dictionary. This is important because
+            # parse_segment_profile_id might be different, or for live streams,
+            # the segment list needs to be regenerated based on current time.
+            return parse_mpd_dict(mpd_dict_from_cache, mpd_url, parse_drm, parse_segment_profile_id)
         except json.JSONDecodeError:
+            logger.warning(f"Failed to decode cached MPD for {mpd_url}. Deleting and refetching.")
+            await MPD_CACHE.delete(mpd_url)
+        except Exception as e:
+            logger.error(f"Error processing cached MPD for {mpd_url}: {e}. Refetching.")
+            # Potentially delete if the error is persistent with cached data
             await MPD_CACHE.delete(mpd_url)
 
-    # Download and parse if not cached
+
+    # Download and parse if not cached or if cached version was problematic
     try:
         mpd_content = await download_file_with_retry(mpd_url, headers)
-        mpd_dict = parse_mpd(mpd_content)
-        parsed_dict = parse_mpd_dict(mpd_dict, mpd_url, parse_drm, parse_segment_profile_id)
+        mpd_dict_fresh = parse_mpd(mpd_content) # This is the raw dict from xmltodict
+        
+        # This processes mpd_dict_fresh and adds keys like 'isLive', 'minimumUpdatePeriod', etc.
+        # and generates segment lists if parse_segment_profile_id is provided.
+        parsed_dict_fresh = parse_mpd_dict(mpd_dict_fresh, mpd_url, parse_drm, parse_segment_profile_id)
 
-        # Cache the original MPD dict
-        await MPD_CACHE.set(mpd_url, json.dumps(mpd_dict).encode(), ttl=parsed_dict.get("minimumUpdatePeriod"))
-        return parsed_dict
+        # Determine effective TTL for caching the raw manifest text (mpd_dict_fresh)
+        mup = parsed_dict_fresh.get("minimumUpdatePeriod") # float (e.g., 5.0 or 0.0) or None for VOD
+
+        cache_ttl: Optional[float]
+        if mup is not None and mup > 0: # Live stream with a specific MUP
+            cache_ttl = mup
+        elif mup is not None and mup <= 0: # Live stream with MUP <= 0 (e.g., "PT0S" from MPD)
+            cache_ttl = 1.0 # Cache for a very short period (1 second) to force frequent updates
+        else: # mup is None (typically for VOD content where MUP is not applicable)
+            cache_ttl = 3600.0 # Default to 1 hour for VOD or if MUP is unexpectedly None
+
+        # Cache the raw mpd_dict_fresh (output of xmltodict) as a JSON string
+        await MPD_CACHE.set(mpd_url, json.dumps(mpd_dict_fresh).encode(), ttl=cache_ttl)
+        
+        # Return the fully processed dictionary (parsed_dict_fresh), which might include
+        # dynamically generated segment lists for live streams based on the fresh MPD.
+        return parsed_dict_fresh
     except DownloadError as error:
-        logger.error(f"Error downloading MPD: {error}")
-        raise error
+        logger.error(f"Error downloading MPD from {mpd_url}: {error}")
+        raise error # Re-raise to be handled by the caller in handlers.py
     except Exception as error:
-        logger.exception(f"Error processing MPD: {error}")
+        logger.exception(f"Error processing MPD from {mpd_url}: {error}")
+        # Consider not raising for general errors to allow graceful fallback if possible,
+        # or re-raise if the error is critical. For now, re-raising.
         raise error
 
 

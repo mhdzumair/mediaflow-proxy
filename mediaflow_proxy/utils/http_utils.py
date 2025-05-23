@@ -333,10 +333,11 @@ def encode_mediaflow_proxy_url(
         )
 
     # Construct the base URL
-    if endpoint is None:
+    if isinstance(mediaflow_proxy_url, str):
         base_url = mediaflow_proxy_url
     else:
-        base_url = parse.urljoin(mediaflow_proxy_url, endpoint)
+        # If it's not a string (e.g., starlette.datastructures.URL), convert it.
+        base_url = str(mediaflow_proxy_url)
 
     # Ensure base_url doesn't end with a slash for consistent handling
     if base_url.endswith("/"):
