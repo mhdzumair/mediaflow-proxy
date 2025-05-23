@@ -175,7 +175,9 @@ class Streamer:
                 logger.warning(f"Remote server closed connection prematurely: {e}")
                 # If we've received some data, just log the warning and return normally
                 if self.bytes_transferred > 0:
-                    logger.info(f"Partial content received ({self.bytes_transferred} bytes). Continuing with available data.")
+                    logger.info(
+                        f"Partial content received ({self.bytes_transferred} bytes). Continuing with available data."
+                    )
                     return
                 else:
                     # If we haven't received any data, raise an error
@@ -333,10 +335,11 @@ def encode_mediaflow_proxy_url(
         )
 
     # Construct the base URL
-    if endpoint is None:
+    if isinstance(mediaflow_proxy_url, str):
         base_url = mediaflow_proxy_url
     else:
-        base_url = parse.urljoin(mediaflow_proxy_url, endpoint)
+        # If it's not a string (e.g., starlette.datastructures.URL), convert it.
+        base_url = str(mediaflow_proxy_url)
 
     # Ensure base_url doesn't end with a slash for consistent handling
     if base_url.endswith("/"):
@@ -509,7 +512,9 @@ class EnhancedStreamingResponse(Response):
                     logger.warning(f"Remote protocol error after partial streaming: {e}")
                     try:
                         await send({"type": "http.response.body", "body": b"", "more_body": False})
-                        logger.info(f"Response finalized after partial content ({self.actual_content_length} bytes transferred)")
+                        logger.info(
+                            f"Response finalized after partial content ({self.actual_content_length} bytes transferred)"
+                        )
                     except Exception as close_err:
                         logger.warning(f"Could not finalize response after remote error: {close_err}")
                 else:

@@ -53,7 +53,7 @@ class TransportConfig(BaseSettings):
 
 class Settings(BaseSettings):
     api_password: str | None = None  # The password for protecting the API endpoints.
-    log_level: str = "INFO"  # The logging level to use.
+    log_level: str = Field(default="DEBUG", validation_alias="LOG_LEVEL")
     transport_config: TransportConfig = Field(default_factory=TransportConfig)  # Configuration for httpx transport.
     enable_streaming_progress: bool = False  # Whether to enable streaming progress tracking.
     disable_home_page: bool = False  # Whether to disable the home page UI.
