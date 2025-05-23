@@ -210,43 +210,40 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
         has_encrypted = query_params.pop("has_encrypted", False)
 
         for segment in segments:
-            if "extinf" not in segment or segment["extinf"] is None:
-                logger.warning(f"Segment is missing 'extinf', skipping: {segment.get('media', 'N/A')}")
-                continue # Salta questo segmento se non ha extinf
-            if "media" not in segment or segment["media"] is None:
-                logger.warning(f"Segment is missing 'media' URL, skipping.")
-                continue
-
-            hls.append(f'#EXTINF:{segment["extinf"]:.3f},')
-            # Aggiungi #EXT-X-PROGRAM-DATE-TIME se presente
-            if "program_date_time" in segment and segment["program_date_time"]:
+            # Add PROGRAM-DATE-TIME tag if available and it's a live stream
+            if mpd_dict.get("isLive", False) and segment.get("program_date_time"):
                 hls.append(f'#EXT-X-PROGRAM-DATE-TIME:{segment["program_date_time"]}')
             
-            # ... (costruzione URL segmento)
-            query_params_seg = dict(request.query_params) # Ricrea per ogni segmento
-            query_params_seg.pop("profile_id", None)
-            query_params_seg.pop("d", None) # 'd' (destination) non serve per i segmenti
-            has_encrypted_seg = query_params_seg.pop("has_encrypted", False)
-
-            # Aggiungi i parametri necessari per /mpd/segment.mp4
-            # init_url, segment_url (che è segment['media']), mime_type, key_id, key
-            hls_segment_query_params = {
-                "init_url": profile["initUrl"], # initUrl è a livello di profilo
-                "segment_url": segment["media"], # URL del segmento DASH effettivo
+            hls.append(f'#EXTINF:{segment["extinf"]:.3f},')
+            
+            # Prepare query parameters specifically for this segment's URL
+            # Carry forward key_id, key, and api_password from the original playlist request's query parameters
+            segment_url_query_params = {
+                "init_url": init_url,
+                "segment_url": segment["media"],
                 "mime_type": profile["mimeType"],
-                "key_id": query_params_seg.get("key_id"), # Prendi da quelli della richiesta originale
-                "key": query_params_seg.get("key")
+                "key_id": request.query_params.get("key_id"),
+                "key": request.query_params.get("key"),
+                "api_password": request.query_params.get("api_password")
             }
-            # Rimuovi key_id e key da query_params_seg se sono None per non passarli come stringhe "None"
-            if hls_segment_query_params["key_id"] is None: del hls_segment_query_params["key_id"]
-            if hls_segment_query_params["key"] is None: del hls_segment_query_params["key"]
+            # Filter out None values to keep the URL clean and avoid empty params
+            segment_url_query_params = {k: v for k, v in segment_url_query_params.items() if v is not None}
 
-            final_seg_url = encode_mediaflow_proxy_url(
-                segment_proxy_endpoint_url, # proxy_url per /mpd/segment.mp4
-                query_params=hls_segment_query_params,
-                encryption_handler=encryption_handler if has_encrypted_seg else None,
+            # Determine if the segment URL itself should be generated as an encrypted tokenized URL
+            # The 'has_encrypted' flag should pertain to whether the incoming playlist URL was encrypted,
+            # and if so, subsequent generated URLs (like segment URLs) should also be.
+            # This depends on how `has_encrypted` is set and intended to be used by `encode_mediaflow_proxy_url`.
+            # Assuming `has_encrypted` was correctly determined from the playlist request:
+            current_has_encrypted_flag = request.query_params.get("has_encrypted", False) # Re-fetch from original request for clarity if needed
+
+            hls.append(
+                encode_mediaflow_proxy_url(
+                    proxy_url, # This is the base URL for the segment_endpoint (e.g., http://.../proxy/mpd/segment.mp4)
+                    query_params=segment_url_query_params,
+                    encryption_handler=encryption_handler if current_has_encrypted_flag else None,
+                )
             )
-            hls.append(final_seg_url)
+            added_segments += 1
 
 
     if not mpd_dict["isLive"]:
