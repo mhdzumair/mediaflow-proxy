@@ -49,6 +49,10 @@ class DLHDExtractor(BaseExtractor):
                 channel_response = await self._make_request(channel_url, headers=channel_headers)
                 player_url = self._extract_player_url(channel_response.text)
 
+                if player_url.count("thedaddy") > 0:
+                    channel_response = await self._make_request(player_url, headers=channel_headers)
+                    player_url = self._extract_player_url(channel_response.text)
+
                 if not player_url:
                     raise ExtractorError("Could not extract player URL from channel page")
 
@@ -207,12 +211,20 @@ class DLHDExtractor(BaseExtractor):
     def _extract_player_url(self, html_content: str) -> Optional[str]:
         """Extract player iframe URL from channel page HTML."""
         try:
-            # Look for iframe with allowfullscreen attribute
+            # Look for thedaddy.to iframe
             iframe_match = re.search(
-                r'<iframe[^>]*src=["\']([^"\']+)["\'][^>]*allowfullscreen',
+                r'<iframe[^>]*src=["\']([^"\']+(?:thedaddy\.to)[^"\']*)["\']',
                 html_content,
                 re.IGNORECASE
             )
+
+            # Look for iframe with allowfullscreen attribute
+            if not iframe_match:
+                iframe_match = re.search(
+                    r'<iframe[^>]*src=["\']([^"\']+)["\'][^>]*allowfullscreen',
+                    html_content,
+                    re.IGNORECASE
+                )
 
             if not iframe_match:
                 # Try alternative pattern without requiring allowfullscreen
