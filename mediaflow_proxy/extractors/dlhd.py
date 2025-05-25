@@ -1,8 +1,11 @@
 import re
 from typing import Dict, Any, Optional
 from urllib.parse import urlparse, quote
+import logging
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
+
+logger = logging.getLogger(__name__)
 
 
 class DLHDExtractor(BaseExtractor):
@@ -49,9 +52,24 @@ class DLHDExtractor(BaseExtractor):
                 channel_response = await self._make_request(channel_url, headers=channel_headers)
                 player_url = self._extract_player_url(channel_response.text)
 
-                if player_url.count("thedaddy") > 0:
-                    channel_response = await self._make_request(player_url, headers=channel_headers)
-                    player_url = self._extract_player_url(channel_response.text)
+                if "thedaddy.to" in player_url:
+                    try:
+                        # Set up headers for the thedaddy redirect request
+                        redirect_headers = {
+                            "referer": channel_url,
+                            "user-agent": self.base_headers["user-agent"]
+                        }
+                        redirect_response = await self._make_request(player_url, headers=redirect_headers)
+                        new_player_url = self._extract_player_url(redirect_response.text)
+                        
+                        # Only update player_url if we got a valid new URL
+                        if new_player_url and new_player_url != player_url:
+                            logger.debug(f"Updated player URL from thedaddy.to redirect: {new_player_url}")
+                            player_url = new_player_url
+                    except ExtractorError as e:
+                        logger.debug(f"Failed to extract player URL from thedaddy.to redirect: {str(e)}")
+                    except Exception as e:
+                        logger.error(f"Unexpected error processing thedaddy.to redirect: {str(e)}")
 
                 if not player_url:
                     raise ExtractorError("Could not extract player URL from channel page")
