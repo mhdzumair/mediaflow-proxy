@@ -87,7 +87,7 @@ class HybridCache:
         cache_dir_name: str,
         ttl: int,
         max_memory_size: int = 100 * 1024 * 1024,  # 100MB default
-        executor_workers: int = 4,
+        executor_workers: int = 6,
     ):
         self.cache_dir = Path(tempfile.gettempdir()) / cache_dir_name
         self.ttl = ttl
@@ -310,57 +310,61 @@ async def get_cached_mpd(
 ) -> dict:
     """Get MPD from cache or download and parse it."""
     # Try cache first
+    # La chiave per MPD_CACHE è l'URL base dell'MPD, senza il cache buster.
     cached_data = await MPD_CACHE.get(mpd_url)
     if cached_data is not None:
         try:
-            mpd_dict_from_cache = json.loads(cached_data)
-            # Re-process the cached MPD dictionary. This is important because
-            # parse_segment_profile_id might be different, or for live streams,
-            # the segment list needs to be regenerated based on current time.
-            return parse_mpd_dict(mpd_dict_from_cache, mpd_url, parse_drm, parse_segment_profile_id)
+            # mpd_dict_from_xml è il dizionario grezzo dall'XML, come era stato cachato.
+            mpd_dict_from_xml = json.loads(cached_data.decode())
+            # Ora parsa questo dizionario grezzo nella struttura che ti serve,
+            # passando l'mpd_url originale per la risoluzione dei path relativi.
+            # parse_mpd_dict è la funzione da input_file_2.py (mpd_utils.py)
+            return parse_mpd_dict(mpd_dict_from_xml, mpd_url, parse_drm, parse_segment_profile_id)
         except json.JSONDecodeError:
-            logger.warning(f"Failed to decode cached MPD for {mpd_url}. Deleting and refetching.")
+            logger.warning(f"Failed to decode cached MPD JSON for {mpd_url}. Deleting cache entry.")
             await MPD_CACHE.delete(mpd_url)
-        except Exception as e:
-            logger.error(f"Error processing cached MPD for {mpd_url}: {e}. Refetching.")
-            # Potentially delete if the error is persistent with cached data
+        except Exception as e: # Cattura eccezioni più generiche durante il parsing del dizionario cachato
+            logger.error(f"Error parsing cached MPD dict for {mpd_url}: {e}. Deleting cache entry.")
             await MPD_CACHE.delete(mpd_url)
 
 
-    # Download and parse if not cached or if cached version was problematic
+    # Download and parse if not cached
     try:
-        mpd_content = await download_file_with_retry(mpd_url, headers)
-        mpd_dict_fresh = parse_mpd(mpd_content) # This is the raw dict from xmltodict
+        # --- MODIFICA PER CACHE BUSTING ---
+        # Aggiungi un parametro timestamp per cercare di evitare cache CDN stantie per l'MPD
+        cache_bust_url = f"{mpd_url}{'&' if '?' in mpd_url else '?'}mfpbust={int(time.time())}"
+        logger.info(f"Fetching MPD from origin with cache bust: {cache_bust_url}") # Log per debug
         
-        # This processes mpd_dict_fresh and adds keys like 'isLive', 'minimumUpdatePeriod', etc.
-        # and generates segment lists if parse_segment_profile_id is provided.
-        parsed_dict_fresh = parse_mpd_dict(mpd_dict_fresh, mpd_url, parse_drm, parse_segment_profile_id)
+        mpd_content_bytes = await download_file_with_retry(cache_bust_url, headers) # Usa cache_bust_url
+        if not mpd_content_bytes:
+            raise DownloadError(f"MPD download returned empty content from {cache_bust_url}")
+        # --- FINE MODIFICA ---
 
-        # Determine effective TTL for caching the raw manifest text (mpd_dict_fresh)
-        mup = parsed_dict_fresh.get("minimumUpdatePeriod") # float (e.g., 5.0 or 0.0) or None for VOD
-
-        cache_ttl: Optional[float]
-        if mup is not None and mup > 0: # Live stream with a specific MUP
-            cache_ttl = mup
-        elif mup is not None and mup <= 0: # Live stream with MUP <= 0 (e.g., "PT0S" from MPD)
-            cache_ttl = 1.0 # Cache for a very short period (1 second) to force frequent updates
-        else: # mup is None (typically for VOD content where MUP is not applicable)
-            cache_ttl = 3600.0 # Default to 1 hour for VOD or if MUP is unexpectedly None
-
-        # Cache the raw mpd_dict_fresh (output of xmltodict) as a JSON string
-        await MPD_CACHE.set(mpd_url, json.dumps(mpd_dict_fresh).encode(), ttl=cache_ttl)
+        # parse_mpd converte l'XML in dizionario (da input_file_2.py)
+        mpd_dict_from_xml = parse_mpd(mpd_content_bytes) 
         
-        # Return the fully processed dictionary (parsed_dict_fresh), which might include
-        # dynamically generated segment lists for live streams based on the fresh MPD.
-        return parsed_dict_fresh
+        # parse_mpd_dict elabora ulteriormente il dizionario (da input_file_2.py)
+        # Passa l'mpd_url originale qui, perché parse_mpd_dict potrebbe usarlo per risolvere URL relativi interni all'MPD.
+        parsed_dict_processed = parse_mpd_dict(mpd_dict_from_xml, mpd_url, parse_drm, parse_segment_profile_id)
+
+        # Metti in cache il dizionario *grezzo* (mpd_dict_from_xml) per evitare di ri-parsare l'XML ogni volta dalla cache.
+        # Usa l'mpd_url originale come chiave.
+        # Il TTL è basato sul minimumUpdatePeriod del dizionario processato.
+        ttl_seconds = parsed_dict_processed.get("minimumUpdatePeriod")
+        if ttl_seconds is not None and ttl_seconds > 0:
+             await MPD_CACHE.set(mpd_url, json.dumps(mpd_dict_from_xml).encode(), ttl=int(ttl_seconds))
+        else:
+            # Fallback TTL se non specificato o invalido, es. 5 secondi
+            await MPD_CACHE.set(mpd_url, json.dumps(mpd_dict_from_xml).encode(), ttl=5)
+
+        return parsed_dict_processed
+        
     except DownloadError as error:
-        logger.error(f"Error downloading MPD from {mpd_url}: {error}")
-        raise error # Re-raise to be handled by the caller in handlers.py
-    except Exception as error:
-        logger.exception(f"Error processing MPD from {mpd_url}: {error}")
-        # Consider not raising for general errors to allow graceful fallback if possible,
-        # or re-raise if the error is critical. For now, re-raising.
-        raise error
+        logger.error(f"Error downloading MPD: {error}")
+        raise # Rilancia l'eccezione per essere gestita più a monte
+    except Exception as error: # Inclusi errori da parse_mpd o parse_mpd_dict
+        logger.exception(f"Error processing MPD (url: {mpd_url}): {error}")
+        raise # Rilancia l'eccezione
 
 
 async def get_cached_speedtest(task_id: str) -> Optional[SpeedTestTask]:
