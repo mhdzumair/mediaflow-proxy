@@ -48,6 +48,8 @@ Set the following environment variables:
 - `DISABLE_HOME_PAGE`: Optional. Disables the home page UI. Returns 404 for the root path and direct access to index.html. Default is `false`.
 - `DISABLE_DOCS`: Optional. Disables the API documentation (Swagger UI). Returns 404 for the /docs path. Default is `false`.
 - `DISABLE_SPEEDTEST`: Optional. Disables the speedtest UI. Returns 404 for the /speedtest path and direct access to speedtest.html. Default is `false`.
+- `STREMIO_PROXY_URL`: Optional. Stremio server URL for alternative content proxying. Example: `http://127.0.0.1:11470`.
+- `M3U8_CONTENT_ROUTING`: Optional. Routing strategy for M3U8 content URLs: `mediaflow` (default), `stremio`, or `direct`.
 
 ### Transport Configuration
 
@@ -465,6 +467,24 @@ Here's how to utilize MediaFlow Proxy in this scenario:
 2. If MediaFlow Proxy is set up locally:
    - Stremio addons can directly use the client's IP address.
 
+### Using Stremio Server for M3U8 Content Proxy
+
+MediaFlow Proxy supports routing video segments through Stremio server for better performance while keeping playlists through MediaFlow for access control.
+
+#### Configuration
+
+```bash
+# Set Stremio server URL
+STREMIO_PROXY_URL=http://127.0.0.1:11470
+
+# Choose routing strategy
+M3U8_CONTENT_ROUTING=stremio  # or "mediaflow" (default) or "direct"
+```
+
+**Routing Options:**
+- `mediaflow` (default): All content through MediaFlow
+- `stremio`: Video segments through Stremio, playlists through MediaFlow
+- `direct`: Video segments served directly, playlists through MediaFlow
 
 ## Future Development
 

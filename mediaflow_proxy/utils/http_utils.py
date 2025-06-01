@@ -375,6 +375,70 @@ def encode_mediaflow_proxy_url(
         return url
 
 
+def encode_stremio_proxy_url(
+    stremio_proxy_url: str,
+    destination_url: str,
+    request_headers: typing.Optional[dict] = None,
+    response_headers: typing.Optional[dict] = None,
+) -> str:
+    """
+    Encodes a Stremio proxy URL with destination URL and headers.
+
+    Format: http://127.0.0.1:11470/proxy/d=<encoded_origin>&h=<headers>&r=<response_headers>/<path><query>
+
+    Args:
+        stremio_proxy_url (str): The base Stremio proxy URL.
+        destination_url (str): The destination URL to proxy.
+        request_headers (dict, optional): Headers to include as query parameters. Defaults to None.
+        response_headers (dict, optional): Response headers to include as query parameters. Defaults to None.
+
+    Returns:
+        str: The encoded Stremio proxy URL.
+    """
+    # Parse the destination URL to separate origin, path, and query
+    parsed_dest = parse.urlparse(destination_url)
+    dest_origin = f"{parsed_dest.scheme}://{parsed_dest.netloc}"
+    dest_path = parsed_dest.path.lstrip('/')
+    dest_query = parsed_dest.query
+
+    # Prepare query parameters list for proper handling of multiple headers
+    query_parts = []
+
+    # Add destination origin (scheme + netloc only) with proper encoding
+    query_parts.append(f"d={parse.quote_plus(dest_origin)}")
+
+    # Add request headers
+    if request_headers:
+        for key, value in request_headers.items():
+            header_string = f"{key}:{value}"
+            query_parts.append(f"h={parse.quote_plus(header_string)}")
+
+    # Add response headers
+    if response_headers:
+        for key, value in response_headers.items():
+            header_string = f"{key}:{value}"
+            query_parts.append(f"r={parse.quote_plus(header_string)}")
+
+    # Ensure base_url doesn't end with a slash for consistent handling
+    base_url = stremio_proxy_url.rstrip("/")
+
+    # Construct the URL path with query string
+    query_string = "&".join(query_parts)
+
+    # Build the final URL: /proxy/{opts}/{pathname}{search}
+    url_path = f"/proxy/{query_string}"
+
+    # Append the path from destination URL
+    if dest_path:
+        url_path = f"{url_path}/{dest_path}"
+
+    # Append the query string from destination URL
+    if dest_query:
+        url_path = f"{url_path}?{dest_query}"
+
+    return f"{base_url}{url_path}"
+
+
 def get_original_scheme(request: Request) -> str:
     """
     Determines the original scheme (http or https) of the request.

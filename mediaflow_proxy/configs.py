@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Union
+from typing import Dict, Literal, Optional, Union
 
 import httpx
 from pydantic import BaseModel, Field
@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     disable_home_page: bool = False  # Whether to disable the home page UI.
     disable_docs: bool = False  # Whether to disable the API documentation (Swagger UI).
     disable_speedtest: bool = False  # Whether to disable the speedtest UI.
+    stremio_proxy_url: str | None = None  # The Stremio server URL for alternative content proxying.
+    m3u8_content_routing: Literal["mediaflow", "stremio", "direct"] = "mediaflow"  # Routing strategy for M3U8 content URLs: "mediaflow", "stremio", or "direct"
 
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"  # The user agent to use for HTTP requests.
