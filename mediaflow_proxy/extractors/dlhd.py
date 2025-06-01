@@ -52,6 +52,11 @@ class DLHDExtractor(BaseExtractor):
                 if not player_url:
                     raise ExtractorError("Could not extract player URL from channel page")
 
+                if not re.search(r'/stream/([a-zA-Z0-9-]+)', player_url):
+                    iframe_player_url = await self._handle_playnow(player_url, player_origin)
+                    player_origin = self._get_origin(player_url)
+                    player_url = iframe_player_url
+
             try:
                 return await self._handle_vecloud(player_url, player_origin + "/")
             except Exception as e:
@@ -203,6 +208,21 @@ class DLHDExtractor(BaseExtractor):
 
         except Exception as e:
             raise ExtractorError(f"Vecloud extraction failed: {str(e)}")
+
+    async def _handle_playnow(self, player_iframe: str, channel_origin: str) -> str:
+        """Handle playnow URLs."""
+        # Set up headers for the playnow request
+        playnow_headers = {
+            "referer": channel_origin + "/",
+            "user-agent": self.base_headers["user-agent"]
+        }
+
+        # Make the playnow request
+        playnow_response = await self._make_request(player_iframe, headers=playnow_headers)
+        player_url = self._extract_player_url(playnow_response.text)
+        if not player_url:
+            raise ExtractorError("Could not extract player URL from playnow response")
+        return player_url
 
     def _extract_player_url(self, html_content: str) -> Optional[str]:
         """Extract player iframe URL from channel page HTML."""
