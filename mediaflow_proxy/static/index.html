@@ -43,6 +43,44 @@
             margin-bottom: 10px;
         }
 
+        .speed-test-section {
+            background-color: #e8f4fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+
+        .speed-test-links {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .speed-test-link {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #2196f3;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+
+        .speed-test-link:hover {
+            background-color: #1976d2;
+            color: white;
+        }
+
+        .speed-test-link.browser {
+            background-color: #4caf50;
+        }
+
+        .speed-test-link.browser:hover {
+            background-color: #388e3c;
+        }
+
         a {
             color: #3498db;
         }
@@ -62,6 +100,17 @@
 <div class="feature">Proxy HTTP/HTTPS links with custom headers</div>
 <div class="feature">Proxy and modify HLS (M3U8) streams in real-time with custom headers and key URL modifications for bypassing some sneaky restrictions.</div>
 <div class="feature">Protect against unauthorized access and network bandwidth abuses</div>
+
+<div class="speed-test-section">
+    <h3>🚀 Speed Test Tool</h3>
+    <p>Test your connection speed with debrid services to optimize your streaming experience:</p>
+    <div class="speed-test-links">
+        <a href="/speedtest" class="speed-test-link browser">Browser Speed Test</a>
+    </div>
+    <p style="margin-top: 10px; font-size: 14px; color: #666;">
+        <strong>Browser Speed Test:</strong> Tests your actual connection speed through MediaFlow proxy vs direct connection with support for multiple servers, interactive charts, and comprehensive analytics.
+    </p>
+</div>
 
 <h2>Getting Started</h2>
 <p>Visit the <a href="https://github.com/mhdzumair/mediaflow-proxy">GitHub repository</a> for installation instructions and documentation.</p>
