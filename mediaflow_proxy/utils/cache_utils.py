@@ -14,9 +14,7 @@ from typing import Optional, Union, Any
 
 import aiofiles
 import aiofiles.os
-from pydantic import ValidationError
 
-from mediaflow_proxy.speedtest.models import SpeedTestTask
 from mediaflow_proxy.utils.http_utils import download_file_with_retry, DownloadError
 from mediaflow_proxy.utils.mpd_utils import parse_mpd, parse_mpd_dict
 
@@ -270,12 +268,6 @@ MPD_CACHE = AsyncMemoryCache(
     max_memory_size=100 * 1024 * 1024,  # 100MB for MPD files
 )
 
-SPEEDTEST_CACHE = HybridCache(
-    cache_dir_name="speedtest_cache",
-    ttl=3600,  # 1 hour
-    max_memory_size=50 * 1024 * 1024,
-)
-
 EXTRACTOR_CACHE = HybridCache(
     cache_dir_name="extractor_cache",
     ttl=5 * 60,  # 5 minutes
@@ -333,27 +325,6 @@ async def get_cached_mpd(
     except Exception as error:
         logger.exception(f"Error processing MPD: {error}")
         raise error
-
-
-async def get_cached_speedtest(task_id: str) -> Optional[SpeedTestTask]:
-    """Get speed test results from cache."""
-    cached_data = await SPEEDTEST_CACHE.get(task_id)
-    if cached_data is not None:
-        try:
-            return SpeedTestTask.model_validate_json(cached_data.decode())
-        except ValidationError as e:
-            logger.error(f"Error parsing cached speed test data: {e}")
-            await SPEEDTEST_CACHE.delete(task_id)
-    return None
-
-
-async def set_cache_speedtest(task_id: str, task: SpeedTestTask) -> bool:
-    """Cache speed test results."""
-    try:
-        return await SPEEDTEST_CACHE.set(task_id, task.model_dump_json().encode())
-    except Exception as e:
-        logger.error(f"Error caching speed test data: {e}")
-        return False
 
 
 async def get_cached_extractor_result(key: str) -> Optional[dict]:
