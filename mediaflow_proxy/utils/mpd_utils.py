@@ -259,23 +259,21 @@ def parse_representation(
         try:
             profile["segment_template_start_number"] = int(segment_template_data.get("@startNumber"))
         except (ValueError, TypeError):
-            profile["segment_template_start_number"] = None # O un valore default come 1 se più appropriato
+            profile["segment_template_start_number"] = None  # O un valore default come 1 se più appropriato
     else:
-        profile["segment_template_start_number"] = None # Nessun SegmentTemplate
+        profile["segment_template_start_number"] = None  # Nessun SegmentTemplate
     # --- FINE NUOVA MODIFICA ---
 
-
     if parse_segment_profile_id is None or profile["id"] != parse_segment_profile_id:
-        return profile # Restituisce il profilo con segment_template_start_number, ma senza segmenti parsati
+        return profile  # Restituisce il profilo con segment_template_start_number, ma senza segmenti parsati
 
     # item = adaptation.get("SegmentTemplate") or representation.get("SegmentTemplate") # Già ottenuto come segment_template_data
-    if segment_template_data: # Usa la variabile già definita
+    if segment_template_data:  # Usa la variabile già definita
         profile["segments"] = parse_segment_template(parsed_dict, segment_template_data, profile, source)
     else:
         # ... (logica per parse_segment_base se necessario, o log warning se manca template)
         logger.warning(f"Profile {profile.get('id')}: No SegmentTemplate or SegmentBase found for parsing segments.")
         profile["segments"] = []
-
 
     return profile
 
@@ -497,8 +495,8 @@ def create_segment_data(segment: Dict, item: dict, profile: dict, source: str, t
 
     # Il campo 'time' in 'segment' è il valore $Time$ che va nel template dell'URL
     # Questo è il valore 'presentation_time' calcolato in preprocess_timeline
-    if "time" in segment: # Assicurati che 'time' esista in segment
-        media = media.replace("$Time$", str(int(segment['time'])))
+    if "time" in segment:  # Assicurati che 'time' esista in segment
+        media = media.replace("$Time$", str(int(segment["time"])))
     # Altrimenti, se $Time$ non è usato nel template media, non è un problema qui.
 
     if not media.startswith("http"):
@@ -507,16 +505,16 @@ def create_segment_data(segment: Dict, item: dict, profile: dict, source: str, t
     segment_data = {
         "type": "segment",
         "media": media,
-        "number": segment["number"], # Numero progressivo calcolato
+        "number": segment["number"],  # Numero progressivo calcolato
     }
 
     # --- MODIFICA CHIAVE: Aggiungi 'time' e 'duration' (in unità MPD timescale) ---
     if "time" in segment:
-        segment_data["time"] = segment["time"] # Questo è S@t (o suo derivato) in unità timescale MPD
-    
+        segment_data["time"] = segment["time"]  # Questo è S@t (o suo derivato) in unità timescale MPD
+
     if "duration" in segment:
         # 'duration' in 'segment' è S@d in unità timescale MPD
-        segment_data["duration_mpd_timescale"] = segment["duration"] 
+        segment_data["duration_mpd_timescale"] = segment["duration"]
     # Ho rinominato "duration" in "duration_mpd_timescale" in segment_data
     # per evitare confusione con "extinf" che è in secondi.
     # Dovrai aggiustare mpd_processor.py per usare "duration_mpd_timescale".
@@ -524,17 +522,18 @@ def create_segment_data(segment: Dict, item: dict, profile: dict, source: str, t
     # Per ora, usiamo "duration_mpd_timescale" per chiarezza.
     # --- FINE MODIFICA CHIAVE ---
 
-
-    if "start_time" in segment and "end_time" in segment: # Questi sono datetime objects
+    if "start_time" in segment and "end_time" in segment:  # Questi sono datetime objects
         segment_data.update(
             {
                 "start_time": segment["start_time"],
                 "end_time": segment["end_time"],
-                "extinf": (segment["end_time"] - segment["start_time"]).total_seconds(), # Durata in secondi
-                "program_date_time": segment["start_time"].isoformat().replace("+00:00", "Z"), # Assicura formato corretto
+                "extinf": (segment["end_time"] - segment["start_time"]).total_seconds(),  # Durata in secondi
+                "program_date_time": segment["start_time"]
+                .isoformat()
+                .replace("+00:00", "Z"),  # Assicura formato corretto
             }
         )
-    elif "start_time" in segment and "duration" in segment and timescale is not None: # 'duration' qui è S@d
+    elif "start_time" in segment and "duration" in segment and timescale is not None:  # 'duration' qui è S@d
         duration_seconds = segment["duration"] / timescale
         segment_data.update(
             {
@@ -544,7 +543,7 @@ def create_segment_data(segment: Dict, item: dict, profile: dict, source: str, t
                 "program_date_time": segment["start_time"].isoformat().replace("+00:00", "Z"),
             }
         )
-    elif "duration" in segment: # 'duration' qui è S@d
+    elif "duration" in segment:  # 'duration' qui è S@d
         # Se timescale non è disponibile qui ma 'duration' (S@d) lo è,
         # potremmo non essere in grado di calcolare extinf correttamente qui.
         # extinf dovrebbe essere sempre in secondi.
@@ -552,11 +551,12 @@ def create_segment_data(segment: Dict, item: dict, profile: dict, source: str, t
         # Per ora, assumiamo che 'duration' (S@d) sia presente e la logica precedente
         # per extinf sia sufficiente. L'importante è aver aggiunto segment_data["duration_mpd_timescale"].
         if timescale and timescale > 0:
-             segment_data["extinf"] = segment["duration"] / timescale
+            segment_data["extinf"] = segment["duration"] / timescale
         else:
-             # Non possiamo calcolare extinf se manca timescale e abbiamo solo la durata in unità MPD
-             logger.warning(f"Cannot calculate 'extinf' for segment {segment.get('number')} as timescale is missing or invalid.")
-
+            # Non possiamo calcolare extinf se manca timescale e abbiamo solo la durata in unità MPD
+            logger.warning(
+                f"Cannot calculate 'extinf' for segment {segment.get('number')} as timescale is missing or invalid."
+            )
 
     return segment_data
 

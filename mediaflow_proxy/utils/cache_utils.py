@@ -315,26 +315,25 @@ async def get_cached_mpd(
         except json.JSONDecodeError:
             logger.warning(f"Failed to decode cached MPD JSON for {mpd_url}. Deleting cache entry.")
             await MPD_CACHE.delete(mpd_url)
-        except Exception as e: # Cattura eccezioni più generiche durante il parsing del dizionario cachato
+        except Exception as e:  # Cattura eccezioni più generiche durante il parsing del dizionario cachato
             logger.error(f"Error parsing cached MPD dict for {mpd_url}: {e}. Deleting cache entry.")
             await MPD_CACHE.delete(mpd_url)
-
 
     # Download and parse if not cached
     try:
         # --- MODIFICA PER CACHE BUSTING ---
         # Aggiungi un parametro timestamp per cercare di evitare cache CDN stantie per l'MPD
         cache_bust_url = f"{mpd_url}{'&' if '?' in mpd_url else '?'}mfpbust={int(time.time())}"
-        logger.info(f"Fetching MPD from origin with cache bust: {cache_bust_url}") # Log per debug
-        
-        mpd_content_bytes = await download_file_with_retry(cache_bust_url, headers) # Usa cache_bust_url
+        logger.info(f"Fetching MPD from origin with cache bust: {cache_bust_url}")  # Log per debug
+
+        mpd_content_bytes = await download_file_with_retry(cache_bust_url, headers)  # Usa cache_bust_url
         if not mpd_content_bytes:
             raise DownloadError(f"MPD download returned empty content from {cache_bust_url}")
         # --- FINE MODIFICA ---
 
         # parse_mpd converte l'XML in dizionario (da input_file_2.py)
-        mpd_dict_from_xml = parse_mpd(mpd_content_bytes) 
-        
+        mpd_dict_from_xml = parse_mpd(mpd_content_bytes)
+
         # parse_mpd_dict elabora ulteriormente il dizionario (da input_file_2.py)
         # Passa l'mpd_url originale qui, perché parse_mpd_dict potrebbe usarlo per risolvere URL relativi interni all'MPD.
         parsed_dict_processed = parse_mpd_dict(mpd_dict_from_xml, mpd_url, parse_drm, parse_segment_profile_id)
@@ -344,19 +343,19 @@ async def get_cached_mpd(
         # Il TTL è basato sul minimumUpdatePeriod del dizionario processato.
         ttl_seconds = parsed_dict_processed.get("minimumUpdatePeriod")
         if ttl_seconds is not None and ttl_seconds > 0:
-             await MPD_CACHE.set(mpd_url, json.dumps(mpd_dict_from_xml).encode(), ttl=int(ttl_seconds))
+            await MPD_CACHE.set(mpd_url, json.dumps(mpd_dict_from_xml).encode(), ttl=int(ttl_seconds))
         else:
             # Fallback TTL se non specificato o invalido, es. 5 secondi
             await MPD_CACHE.set(mpd_url, json.dumps(mpd_dict_from_xml).encode(), ttl=5)
 
         return parsed_dict_processed
-        
+
     except DownloadError as error:
         logger.error(f"Error downloading MPD: {error}")
-        raise # Rilancia l'eccezione per essere gestita più a monte
-    except Exception as error: # Inclusi errori da parse_mpd o parse_mpd_dict
+        raise  # Rilancia l'eccezione per essere gestita più a monte
+    except Exception as error:  # Inclusi errori da parse_mpd o parse_mpd_dict
         logger.exception(f"Error processing MPD (url: {mpd_url}): {error}")
-        raise # Rilancia l'eccezione
+        raise  # Rilancia l'eccezione
 
 
 async def get_cached_extractor_result(key: str) -> Optional[dict]:

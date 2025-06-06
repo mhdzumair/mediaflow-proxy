@@ -23,4 +23,3 @@ class UIAccessControlMiddleware(BaseHTTPMiddleware):
             return Response(status_code=403, content="Forbidden")
 
         return await call_next(request)
-

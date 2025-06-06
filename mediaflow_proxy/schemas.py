@@ -98,7 +98,6 @@ class ExtractorURLParams(GenericParams):
         description="Additional parameters required for specific extractors (e.g., stream_title for LiveTV)",
     )
 
-
     @field_validator("extra_params", mode="before")
     def validate_extra_params(cls, value: Any):
         if isinstance(value, str):

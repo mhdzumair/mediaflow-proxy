@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 
 import anyio
 import h11
-import httpx # Ensure httpx is imported for type hints and exception handling
+import httpx  # Ensure httpx is imported for type hints and exception handling
 import tenacity
 from fastapi import Response
 from starlette.background import BackgroundTask
@@ -126,21 +126,23 @@ class Streamer:
             logger.warning(f"Timeout while creating streaming response for {url}: {e}")
             raise DownloadError(409, f"Timeout while creating streaming response for {url}: {e}")
         except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error {e.response.status_code} while creating streaming response for {url} (Request URL: {e.request.url})")
+            logger.error(
+                f"HTTP error {e.response.status_code} while creating streaming response for {url} (Request URL: {e.request.url})"
+            )
             if e.response.status_code == 404:
                 logger.error(f"Resource not found for streaming: {url}")
-                raise e # Do not wrap 404
+                raise e  # Do not wrap 404
             raise DownloadError(
-                e.response.status_code, f"HTTP error {e.response.status_code} while creating streaming response for {url}: {e}"
+                e.response.status_code,
+                f"HTTP error {e.response.status_code} while creating streaming response for {url}: {e}",
             )
         except httpx.RequestError as e:
             logger.error(f"Request error creating streaming response for {url}: {e}")
             raise DownloadError(502, f"Request error creating streaming response for {url}: {e}")
-        except Exception as e: # Generic fallback
+        except Exception as e:  # Generic fallback
             logger.error(f"Unexpected error creating streaming response for {url}: {e}", exc_info=True)
             # Runtime Error might be too generic, consider if this should be a DownloadError or a more specific custom error
             raise RuntimeError(f"Unexpected error creating streaming response for {url}: {e}")
-
 
     async def stream_content(self) -> typing.AsyncGenerator[bytes, None]:
         """
@@ -178,32 +180,41 @@ class Streamer:
                     yield chunk
                     self.bytes_transferred += len(chunk)
 
-        except httpx.TimeoutException as e: # Timeout during streaming
+        except httpx.TimeoutException as e:  # Timeout during streaming
             logger.warning(f"Timeout while streaming content from {self.response.url}: {e}")
             raise DownloadError(409, f"Timeout while streaming content: {e}")
         except httpx.RemoteProtocolError as e:
             logger.warning(f"Remote protocol error while streaming content from {self.response.url}: {e}")
             if "peer closed connection without sending complete message body" in str(e):
                 if self.bytes_transferred > 0:
-                    logger.info(f"Partial content received ({self.bytes_transferred} bytes) due to premature close. Continuing with available data.")
+                    logger.info(
+                        f"Partial content received ({self.bytes_transferred} bytes) due to premature close. Continuing with available data."
+                    )
                     # The generator will simply stop yielding, effectively ending the stream.
                     # The client will receive what has been transferred so far.
                     return
                 else:
-                    logger.error(f"Remote server closed connection without sending any data from {self.response.url}: {e}")
+                    logger.error(
+                        f"Remote server closed connection without sending any data from {self.response.url}: {e}"
+                    )
                     raise DownloadError(502, f"Remote server closed connection without sending any data: {e}")
             else:
                 # Other types of RemoteProtocolError
                 raise DownloadError(502, f"Protocol error while streaming: {e}")
-        except httpx.ReadError as e: # General read error during streaming
+        except httpx.ReadError as e:  # General read error during streaming
             logger.warning(f"Read error while streaming content from {self.response.url}: {e}")
             raise DownloadError(502, f"Read error while streaming content: {e}")
         except GeneratorExit:
-            logger.info(f"Streaming session stopped by the client for {self.response.url if self.response else 'unknown URL'}")
-        except Exception as e: # Fallback for other errors during streaming
-            logger.error(f"Unexpected error streaming content from {self.response.url if self.response else 'unknown URL'}: {e}", exc_info=True)
+            logger.info(
+                f"Streaming session stopped by the client for {self.response.url if self.response else 'unknown URL'}"
+            )
+        except Exception as e:  # Fallback for other errors during streaming
+            logger.error(
+                f"Unexpected error streaming content from {self.response.url if self.response else 'unknown URL'}: {e}",
+                exc_info=True,
+            )
             # Depending on the nature of 'e', this might need to be a DownloadError or re-raised
-            raise # Re-raise the original unknown error
+            raise  # Re-raise the original unknown error
 
     @staticmethod
     def format_bytes(size) -> str:
@@ -224,7 +235,9 @@ class Streamer:
                 self.start_byte, self.end_byte = map(int, range_part.split("-"))
                 self.total_size = int(total_part)
             except ValueError as e:
-                logger.warning(f"Could not parse Content-Range header '{content_range}': {e}. Falling back to Content-Length.")
+                logger.warning(
+                    f"Could not parse Content-Range header '{content_range}': {e}. Falling back to Content-Length."
+                )
                 self.start_byte = 0
                 self.total_size = int(self.response.headers.get("Content-Length", 0))
                 self.end_byte = self.total_size - 1 if self.total_size > 0 else 0
@@ -232,7 +245,6 @@ class Streamer:
             self.start_byte = 0
             self.total_size = int(self.response.headers.get("Content-Length", 0))
             self.end_byte = self.total_size - 1 if self.total_size > 0 else 0
-
 
     async def get_text(self, url: str, headers: dict):
         """
@@ -254,8 +266,7 @@ class Streamer:
             # The last attempt's exception (which would be a DownloadError or unhandled httpx.HTTPStatusError for 404)
             # is available in e.last_attempt.result()
             logger.error(f"Failed to get text from {url} after multiple retries: {e.last_attempt.exception()}")
-            raise e.last_attempt.exception() # Raise the underlying error from the last attempt
-
+            raise e.last_attempt.exception()  # Raise the underlying error from the last attempt
 
     async def close(self):
         """
@@ -268,6 +279,7 @@ class Streamer:
         # Client is typically managed externally (e.g., via context manager)
         # If Streamer owns the client, it should close it here.
         # await self.client.aclose() # Assuming client is passed and managed outside, or via 'async with'
+
 
 async def download_file_with_retry(url: str, headers: dict):
     """
@@ -294,7 +306,7 @@ async def download_file_with_retry(url: str, headers: dict):
         except tenacity.RetryError as e:
             # Log the final failure and re-raise the core exception from the last attempt
             logger.error(f"Failed to download file {url} after multiple retries: {e.last_attempt.exception()}")
-            raise e.last_attempt.exception() # This will be DownloadError or unhandled HTTPStatusError(404)
+            raise e.last_attempt.exception()  # This will be DownloadError or unhandled HTTPStatusError(404)
         # Specific exceptions like DownloadError or HTTPStatusError(404) from the first attempt (if not retried)
         # or from the last attempt of a retry sequence will propagate directly if not caught by tenacity.RetryError
 
@@ -317,7 +329,7 @@ async def request_with_retry(method: str, url: str, headers: dict, **kwargs) -> 
         httpx.HTTPStatusError: If a 404 error occurs and is not retried.
         tenacity.RetryError: If all retries fail.
     """
-    async with create_httpx_client(**kwargs.pop("client_kwargs", {})) as client: # Allow passing client kwargs
+    async with create_httpx_client(**kwargs.pop("client_kwargs", {})) as client:  # Allow passing client kwargs
         try:
             response = await fetch_with_retry(client, method, url, headers, **kwargs)
             return response
@@ -437,7 +449,7 @@ def encode_stremio_proxy_url(
     # Parse the destination URL to separate origin, path, and query
     parsed_dest = parse.urlparse(destination_url)
     dest_origin = f"{parsed_dest.scheme}://{parsed_dest.netloc}"
-    dest_path = parsed_dest.path.lstrip('/')
+    dest_path = parsed_dest.path.lstrip("/")
     dest_query = parsed_dest.query
 
     # Prepare query parameters list for proper handling of multiple headers
@@ -491,18 +503,18 @@ def get_original_scheme(request: Request) -> str:
     # Check the X-Forwarded-Proto header first
     forwarded_proto = request.headers.get("X-Forwarded-Proto")
     if forwarded_proto:
-        return forwarded_proto.lower() # Normalize to lowercase
+        return forwarded_proto.lower()  # Normalize to lowercase
 
     # Check if the request is secure (based on Starlette/Uvicorn interpretation)
     if request.url.scheme == "https":
         return "https"
-    
+
     # Fallback for other common headers, ensure consistent checking
     if (
         request.headers.get("X-Forwarded-Ssl", "").lower() == "on"
         or request.headers.get("X-Forwarded-Protocol", "").lower() == "https"
         or request.headers.get("X-Url-Scheme", "").lower() == "https"
-        or request.headers.get("Front-End-Https", "").lower() == "on" # Another common one
+        or request.headers.get("Front-End-Https", "").lower() == "on"  # Another common one
     ):
         return "https"
 
@@ -527,9 +539,7 @@ def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
         ProxyRequestHeaders: A dataclass containing the request headers and response headers.
     """
     # Start with supported headers from the original request
-    request_headers = {
-        k.lower(): v for k, v in request.headers.items() if k.lower() in SUPPORTED_REQUEST_HEADERS
-    }
+    request_headers = {k.lower(): v for k, v in request.headers.items() if k.lower() in SUPPORTED_REQUEST_HEADERS}
     # Override or add with headers from query parameters (h_ prefix)
     request_headers.update(
         {k[2:].lower().replace("_", "-"): v for k, v in request.query_params.items() if k.startswith("h_")}
@@ -560,7 +570,7 @@ class EnhancedStreamingResponse(Response):
         self.media_type = self.media_type if media_type is None else media_type
         self.background = background
         self.init_headers(headers)
-        self.actual_content_length = 0 # To track bytes sent to client
+        self.actual_content_length = 0  # To track bytes sent to client
 
     @staticmethod
     async def listen_for_disconnect(receive: Receive) -> None:
@@ -612,16 +622,16 @@ class EnhancedStreamingResponse(Response):
             async for chunk in self.body_iterator:
                 if not isinstance(chunk, bytes):
                     chunk = chunk.encode(self.charset)
-                
+
                 # Guard against sending empty initial chunks if upstream provides them,
                 # unless it's the *only* chunk (empty body).
                 # This is more relevant if `more_body` logic is complex.
                 # For now, send what we get.
-                
+
                 self.actual_content_length += len(chunk)
                 await send({"type": "http.response.body", "body": chunk, "more_body": True})
                 data_sent_to_client = True
-            
+
             # After the loop, send the final empty chunk.
             await send({"type": "http.response.body", "body": b"", "more_body": False})
             logger.debug(f"Successfully streamed {self.actual_content_length} bytes to client.")
@@ -632,13 +642,13 @@ class EnhancedStreamingResponse(Response):
             # This is not an error on our side; the client just left.
             # The `listen_for_disconnect` task_group.cancel_scope.cancel() will handle cleanup.
             # No need to try sending further messages.
-            raise # Re-raise to be caught by the __call__ method's task group handling
+            raise  # Re-raise to be caught by the __call__ method's task group handling
 
         except Exception as e:
             # This catches errors from self.body_iterator (e.g., upstream errors propagated by Streamer)
             # or errors during send().
             logger.error(f"Error during response streaming: {type(e).__name__} - {e}", exc_info=True)
-            
+
             # If we haven't started the response to the client, we might be able to send a 500.
             # But `http.response.start` is already sent.
             # If data has been sent, we can't change the status code.
@@ -646,15 +656,14 @@ class EnhancedStreamingResponse(Response):
             # If no data was sent, it's still tricky. Starlette's default error handling might take over
             # if this exception propagates out of __call__, but here we are in a task.
             # For now, just re-raise. The task group will handle cancellation.
-            raise # Re-raise to be caught by the __call__ method's task group handling
-
+            raise  # Re-raise to be caught by the __call__ method's task group handling
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """
         ASGI application call. Manages streaming content and listening for client disconnects.
         """
         async with anyio.create_task_group() as task_group:
-            
+
             # Flag to indicate if streaming completed successfully or was intentionally stopped
             # (e.g., by client disconnect handled gracefully by stream_response).
             self.streaming_flow_completed = False
@@ -662,7 +671,7 @@ class EnhancedStreamingResponse(Response):
             async def stream_task_wrapper():
                 try:
                     await self.stream_response(send)
-                    self.streaming_flow_completed = True # Mark as completed normally
+                    self.streaming_flow_completed = True  # Mark as completed normally
                 except (anyio.BrokenResourceError, ConnectionResetError):
                     # Client disconnected, this is expected to be handled by listen_task_wrapper's cancellation.
                     logger.info("Stream task: Client disconnected. Stream_response was interrupted.")
@@ -673,12 +682,11 @@ class EnhancedStreamingResponse(Response):
                     # Let listen_task_wrapper trigger cancellation if client is still there,
                     # or this might propagate if listen_task_wrapper already exited.
                     # This ensures the task group is aware of the failure.
-                    raise # Re-raise to make the task group aware of the failure.
+                    raise  # Re-raise to make the task group aware of the failure.
                 finally:
                     # This finally block might not be strictly necessary if cancellations are handled well.
                     if not task_group.cancel_scope.cancel_called:
-                         task_group.cancel_scope.cancel()
-
+                        task_group.cancel_scope.cancel()
 
             async def listen_task_wrapper():
                 try:
@@ -693,7 +701,7 @@ class EnhancedStreamingResponse(Response):
                     # If this task finishes (e.g., client disconnected), cancel the other tasks.
                     if not task_group.cancel_scope.cancel_called:
                         task_group.cancel_scope.cancel()
-            
+
             task_group.start_soon(stream_task_wrapper)
             task_group.start_soon(listen_task_wrapper)
 
