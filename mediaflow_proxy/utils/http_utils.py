@@ -175,7 +175,9 @@ class Streamer:
                 logger.warning(f"Remote server closed connection prematurely: {e}")
                 # If we've received some data, just log the warning and return normally
                 if self.bytes_transferred > 0:
-                    logger.info(f"Partial content received ({self.bytes_transferred} bytes). Continuing with available data.")
+                    logger.info(
+                        f"Partial content received ({self.bytes_transferred} bytes). Continuing with available data."
+                    )
                     return
                 else:
                     # If we haven't received any data, raise an error
@@ -398,7 +400,7 @@ def encode_stremio_proxy_url(
     # Parse the destination URL to separate origin, path, and query
     parsed_dest = parse.urlparse(destination_url)
     dest_origin = f"{parsed_dest.scheme}://{parsed_dest.netloc}"
-    dest_path = parsed_dest.path.lstrip('/')
+    dest_path = parsed_dest.path.lstrip("/")
     dest_query = parsed_dest.query
 
     # Prepare query parameters list for proper handling of multiple headers
@@ -573,7 +575,9 @@ class EnhancedStreamingResponse(Response):
                     logger.warning(f"Remote protocol error after partial streaming: {e}")
                     try:
                         await send({"type": "http.response.body", "body": b"", "more_body": False})
-                        logger.info(f"Response finalized after partial content ({self.actual_content_length} bytes transferred)")
+                        logger.info(
+                            f"Response finalized after partial content ({self.actual_content_length} bytes transferred)"
+                        )
                     except Exception as close_err:
                         logger.warning(f"Could not finalize response after remote error: {close_err}")
                 else:
