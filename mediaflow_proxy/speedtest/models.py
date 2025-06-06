@@ -30,7 +30,7 @@ class BrowserSpeedTestConfig(BaseModel):
     provider: SpeedTestProvider
     test_urls: Dict[str, str]
     test_duration: int = 10
-    user_info: Optional[dict] = None
+    user_info: Optional[UserInfo] = None
 
 
 class BrowserSpeedTestRequest(BaseModel):

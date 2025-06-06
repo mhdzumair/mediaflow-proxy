@@ -35,7 +35,7 @@ async def get_browser_speedtest_config(
             provider=test_request.provider,
             test_urls=test_urls,
             test_duration=config.test_duration,
-            user_info=user_info.model_dump() if user_info else None,
+            user_info=user_info,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

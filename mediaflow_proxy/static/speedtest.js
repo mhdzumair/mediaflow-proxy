@@ -1044,6 +1044,11 @@ class MediaFlowSpeedTest {
         const canvas = document.getElementById('serverChart');
         const ctx = canvas.getContext('2d');
 
+        if (!ctx) {
+            console.error('Failed to get canvas context');
+            return;
+        }
+
         if (this.charts.serverChart) {
             this.charts.serverChart.destroy();
         }
