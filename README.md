@@ -194,7 +194,7 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
 
 4. To run the server with uvicorn options: (Optional)
    ```
-   uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888 --workers 4
+   uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888 --workers 6
    ```
 
 
@@ -222,7 +222,7 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
 
 4. Run the FastAPI server:
    ```
-   poetry run uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888 --workers 4
+   poetry run uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888 --workers 6
    ```
 
 
@@ -273,7 +273,7 @@ Ideal for users who want a reliable, plug-and-play solution without the technica
     RUN pip install --no-cache-dir -r requirements.txt
 
     EXPOSE 7860
-    CMD ["uvicorn", "run:main_app", "--host", "0.0.0.0", "--port", "7860", "--workers", "4"]
+    CMD ["uvicorn", "run:main_app", "--host", "0.0.0.0", "--port", "7860", "--workers", "6"]
     ```
 6. Wait until the space gets built and deployed.
 7. If the space is deployed successfully, you can click on the three dots in the top right corner and click on "Embed this space" and copy the "Direct URL".

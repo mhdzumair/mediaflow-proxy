@@ -85,7 +85,7 @@ class HybridCache:
         cache_dir_name: str,
         ttl: int,
         max_memory_size: int = 100 * 1024 * 1024,  # 100MB default
-        executor_workers: int = 4,
+        executor_workers: int = 6,
     ):
         self.cache_dir = Path(tempfile.gettempdir()) / cache_dir_name
         self.ttl = ttl
@@ -302,29 +302,61 @@ async def get_cached_mpd(
 ) -> dict:
     """Get MPD from cache or download and parse it."""
     # Try cache first
+    # La chiave per MPD_CACHE è l'URL base dell'MPD, senza il cache buster.
     cached_data = await MPD_CACHE.get(mpd_url)
     if cached_data is not None:
         try:
-            mpd_dict = json.loads(cached_data)
-            return parse_mpd_dict(mpd_dict, mpd_url, parse_drm, parse_segment_profile_id)
+            # mpd_dict_from_xml è il dizionario grezzo dall'XML, come era stato cachato.
+            mpd_dict_from_xml = json.loads(cached_data.decode())
+            # Ora parsa questo dizionario grezzo nella struttura che ti serve,
+            # passando l'mpd_url originale per la risoluzione dei path relativi.
+            # parse_mpd_dict è la funzione da input_file_2.py (mpd_utils.py)
+            return parse_mpd_dict(mpd_dict_from_xml, mpd_url, parse_drm, parse_segment_profile_id)
         except json.JSONDecodeError:
+            logger.warning(f"Failed to decode cached MPD JSON for {mpd_url}. Deleting cache entry.")
             await MPD_CACHE.delete(mpd_url)
+        except Exception as e: # Cattura eccezioni più generiche durante il parsing del dizionario cachato
+            logger.error(f"Error parsing cached MPD dict for {mpd_url}: {e}. Deleting cache entry.")
+            await MPD_CACHE.delete(mpd_url)
+
 
     # Download and parse if not cached
     try:
-        mpd_content = await download_file_with_retry(mpd_url, headers)
-        mpd_dict = parse_mpd(mpd_content)
-        parsed_dict = parse_mpd_dict(mpd_dict, mpd_url, parse_drm, parse_segment_profile_id)
+        # --- MODIFICA PER CACHE BUSTING ---
+        # Aggiungi un parametro timestamp per cercare di evitare cache CDN stantie per l'MPD
+        cache_bust_url = f"{mpd_url}{'&' if '?' in mpd_url else '?'}mfpbust={int(time.time())}"
+        logger.info(f"Fetching MPD from origin with cache bust: {cache_bust_url}") # Log per debug
+        
+        mpd_content_bytes = await download_file_with_retry(cache_bust_url, headers) # Usa cache_bust_url
+        if not mpd_content_bytes:
+            raise DownloadError(f"MPD download returned empty content from {cache_bust_url}")
+        # --- FINE MODIFICA ---
 
-        # Cache the original MPD dict
-        await MPD_CACHE.set(mpd_url, json.dumps(mpd_dict).encode(), ttl=parsed_dict.get("minimumUpdatePeriod"))
-        return parsed_dict
+        # parse_mpd converte l'XML in dizionario (da input_file_2.py)
+        mpd_dict_from_xml = parse_mpd(mpd_content_bytes) 
+        
+        # parse_mpd_dict elabora ulteriormente il dizionario (da input_file_2.py)
+        # Passa l'mpd_url originale qui, perché parse_mpd_dict potrebbe usarlo per risolvere URL relativi interni all'MPD.
+        parsed_dict_processed = parse_mpd_dict(mpd_dict_from_xml, mpd_url, parse_drm, parse_segment_profile_id)
+
+        # Metti in cache il dizionario *grezzo* (mpd_dict_from_xml) per evitare di ri-parsare l'XML ogni volta dalla cache.
+        # Usa l'mpd_url originale come chiave.
+        # Il TTL è basato sul minimumUpdatePeriod del dizionario processato.
+        ttl_seconds = parsed_dict_processed.get("minimumUpdatePeriod")
+        if ttl_seconds is not None and ttl_seconds > 0:
+             await MPD_CACHE.set(mpd_url, json.dumps(mpd_dict_from_xml).encode(), ttl=int(ttl_seconds))
+        else:
+            # Fallback TTL se non specificato o invalido, es. 5 secondi
+            await MPD_CACHE.set(mpd_url, json.dumps(mpd_dict_from_xml).encode(), ttl=5)
+
+        return parsed_dict_processed
+        
     except DownloadError as error:
         logger.error(f"Error downloading MPD: {error}")
-        raise error
-    except Exception as error:
-        logger.exception(f"Error processing MPD: {error}")
-        raise error
+        raise # Rilancia l'eccezione per essere gestita più a monte
+    except Exception as error: # Inclusi errori da parse_mpd o parse_mpd_dict
+        logger.exception(f"Error processing MPD (url: {mpd_url}): {error}")
+        raise # Rilancia l'eccezione
 
 
 async def get_cached_extractor_result(key: str) -> Optional[dict]:
