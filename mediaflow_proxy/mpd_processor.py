@@ -1,6 +1,7 @@
 import logging
 import math
 import time
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Request, Response, HTTPException
 
@@ -151,64 +152,231 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
 
     Args:
         mpd_dict (dict): The MPD manifest data.
-        profiles (list[dict]): The profiles to include in the playlist.
+        profiles (list[dict]): List of profiles to include in the playlist.
         request (Request): The incoming HTTP request.
 
     Returns:
         str: The HLS playlist as a string.
     """
     hls = ["#EXTM3U", "#EXT-X-VERSION:6"]
-
     added_segments = 0
 
     proxy_url = request.url_for("segment_endpoint")
     proxy_url = str(proxy_url.replace(scheme=get_original_scheme(request)))
 
+    # Constants for live stream processing
+    TARGET_HLS_LIVE_SEGMENT_COUNT = 6
+    MIN_HLS_LIVE_SEGMENTS = 3
+    LIVE_EDGE_TOLERANCE_SECONDS = 10
+    SIGNIFICANT_START_NUMBER_THRESHOLD = 1000
+
     for index, profile in enumerate(profiles):
-        segments = profile["segments"]
-        if not segments:
+        all_available_segments_from_mpd = profile.get("segments", [])
+
+        if not all_available_segments_from_mpd:
             logger.warning(f"No segments found for profile {profile['id']}")
             continue
 
-        # Add headers for only the first profile
-        if index == 0:
-            sequence = segments[0]["number"]
-            extinf_values = [f["extinf"] for f in segments if "extinf" in f]
-            target_duration = math.ceil(max(extinf_values)) if extinf_values else 3
-            hls.extend(
-                [
-                    f"#EXT-X-TARGETDURATION:{target_duration}",
-                    f"#EXT-X-MEDIA-SEQUENCE:{sequence}",
-                ]
-            )
-            if mpd_dict["isLive"]:
-                hls.append("#EXT-X-PLAYLIST-TYPE:EVENT")
+        segments_for_this_hls_playlist = []
+
+        if mpd_dict.get("isLive", False):
+            # Process live streams
+            mpd_publish_time = mpd_dict.get("publishTime")
+
+            if not mpd_publish_time:
+                logger.warning(
+                    f"Profile {profile['id']}: MPD publishTime is missing. Using current time as live edge approximation."
+                )
+                live_cutoff_time = datetime.now(timezone.utc)
             else:
-                hls.append("#EXT-X-PLAYLIST-TYPE:VOD")
+                live_cutoff_time = mpd_publish_time
 
-        init_url = profile["initUrl"]
+            # Calculate effective live edge to include recently available segments
+            effective_live_edge = live_cutoff_time + timedelta(seconds=LIVE_EDGE_TOLERANCE_SECONDS)
 
+            logger.info(f"Profile {profile['id']}: Live stream processing.")
+            logger.info(
+                f"Profile {profile['id']}: MPD publishTime: {mpd_publish_time}, Calculated live_cutoff_time: {live_cutoff_time}, Effective live_edge: {effective_live_edge}"
+            )
+
+            if all_available_segments_from_mpd:
+                logger.info(
+                    f"Profile {profile['id']}: Total available segments from MPD: {len(all_available_segments_from_mpd)}. First segment time: {all_available_segments_from_mpd[0].get('start_time')}, Last segment time: {all_available_segments_from_mpd[-1].get('start_time')}"
+                )
+
+            # Filter segments that are available based on live edge
+            candidate_live_segments = [
+                s
+                for s in all_available_segments_from_mpd
+                if "start_time" in s and s["start_time"] < effective_live_edge
+            ]
+
+            logger.info(
+                f"Profile {profile['id']}: Number of candidate segments (start_time < effective_live_edge): {len(candidate_live_segments)}"
+            )
+
+            if candidate_live_segments:
+                logger.info(
+                    f"Profile {profile['id']}: Last candidate segment start_time: {candidate_live_segments[-1].get('start_time')}, number: {candidate_live_segments[-1].get('number')}"
+                )
+
+            if not candidate_live_segments:
+                logger.warning(
+                    f"Profile {profile['id']}: No candidate segments found before effective_live_edge. Using last {TARGET_HLS_LIVE_SEGMENT_COUNT} from all available."
+                )
+                segments_for_this_hls_playlist = all_available_segments_from_mpd[-TARGET_HLS_LIVE_SEGMENT_COUNT:]
+            else:
+                # Take the most recent segments from candidates
+                segments_for_this_hls_playlist = candidate_live_segments[-TARGET_HLS_LIVE_SEGMENT_COUNT:]
+
+                if (
+                    len(segments_for_this_hls_playlist) < MIN_HLS_LIVE_SEGMENTS
+                    and len(candidate_live_segments) >= MIN_HLS_LIVE_SEGMENTS
+                ):
+                    logger.info(
+                        f"Profile {profile['id']}: HLS window too small ({len(segments_for_this_hls_playlist)}), expanding to {MIN_HLS_LIVE_SEGMENTS} from candidates."
+                    )
+                    segments_for_this_hls_playlist = candidate_live_segments[-MIN_HLS_LIVE_SEGMENTS:]
+
+            # Final fallback for empty segments
+            if not segments_for_this_hls_playlist and all_available_segments_from_mpd:
+                logger.warning(
+                    f"Profile {profile['id']}: Still no segments for HLS playlist, using absolute last {MIN_HLS_LIVE_SEGMENTS} from MPD."
+                )
+                segments_for_this_hls_playlist = all_available_segments_from_mpd[-MIN_HLS_LIVE_SEGMENTS:]
+        else:
+            # For VOD streams, use all segments
+            segments_for_this_hls_playlist = all_available_segments_from_mpd
+
+        if not segments_for_this_hls_playlist:
+            logger.warning(f"HLS Playlist: No segments to include for profile {profile['id']} after processing.")
+            continue
+
+        # Calculate target duration from segment extinf values
+        extinf_values = [s.get("extinf", 0.0) for s in segments_for_this_hls_playlist if "extinf" in s]
+        if not extinf_values:
+            logger.warning(
+                f"Profile {profile['id']}: No extinf values found for segments in HLS window. Defaulting target_duration to 3."
+            )
+            target_duration = 3.0
+        else:
+            target_duration = math.ceil(max(extinf_values))
+        target_duration = max(1, int(target_duration))
+
+        first_segment_in_window = segments_for_this_hls_playlist[0]
+
+        # Calculate HLS Media Sequence using adaptive logic
+        mpd_segment_template_start_number = profile.get("segment_template_start_number")
+        calculated_segment_number = first_segment_in_window.get("number")
+
+        # Determine sequence number based on MPD type
+        if (
+            mpd_segment_template_start_number is not None
+            and mpd_segment_template_start_number >= SIGNIFICANT_START_NUMBER_THRESHOLD
+        ):
+            # Large startNumber indicates absolute segment numbering (Amazon-style)
+            sequence_number = calculated_segment_number
+            if sequence_number is None:
+                logger.error(
+                    f"Profile {profile['id']} (Amazon-style): 'number' attribute missing for first segment. Cannot set MEDIA-SEQUENCE."
+                )
+                continue
+            logger.info(f"Profile {profile['id']}: Using MPD segment number for HLS MEDIA-SEQUENCE (Amazon-style).")
+        else:
+            # Small or missing startNumber indicates time-based sequence (Sky-style)
+            sequence_number_base_val = first_segment_in_window.get("time")
+            segment_duration_timescale_units = first_segment_in_window.get("duration_mpd_timescale")
+
+            if (
+                sequence_number_base_val is not None
+                and segment_duration_timescale_units
+                and segment_duration_timescale_units > 0
+            ):
+                sequence_number = math.floor(sequence_number_base_val / segment_duration_timescale_units)
+            else:
+                logger.warning(
+                    f"Profile {profile['id']} (Sky-style): Could not calculate MEDIA-SEQUENCE from time/duration. Falling back to segment 'number'. Time: {sequence_number_base_val}, Duration: {segment_duration_timescale_units}"
+                )
+                sequence_number = calculated_segment_number
+                if sequence_number is None:
+                    logger.error(
+                        f"Profile {profile['id']} (Sky-style fallback): 'number' attribute missing. Cannot set MEDIA-SEQUENCE."
+                    )
+                    continue
+            logger.info(f"Profile {profile['id']}: Using time/duration for HLS MEDIA-SEQUENCE (Sky-style).")
+
+        # Final validation of sequence number
+        if sequence_number is None:
+            logger.error(
+                f"Profile {profile['id']}: CRITICAL - Failed to determine a valid sequence_number. Skipping playlist generation for this profile."
+            )
+            continue
+
+        logger.info(
+            f"Profile {profile['id']}: First segment in HLS window: Number={first_segment_in_window.get('number')}, MPD_StartNumber={mpd_segment_template_start_number}, TimeValue(MPD):{first_segment_in_window.get('time')}, Duration(MPD_timescale):{first_segment_in_window.get('duration_mpd_timescale')}"
+        )
+        logger.info(
+            f"Profile {profile['id']}: Calculated HLS Media Sequence: {sequence_number}, Target Duration: {target_duration}"
+        )
+
+        # Add HLS headers
+        hls.extend(
+            [
+                f"#EXT-X-TARGETDURATION:{target_duration}",
+                f"#EXT-X-MEDIA-SEQUENCE:{sequence_number}",
+            ]
+        )
+
+        if mpd_dict.get("isLive", False):
+            pass  # Live streams don't need VOD markers
+        else:
+            hls.append("#EXT-X-PLAYLIST-TYPE:VOD")
+            hls.append("#EXT-X-ENDLIST")
+
+        # Get initialization URL
+        init_url = profile.get("initUrl", "")
+        if not init_url:
+            logger.error(f"Missing initUrl for profile {profile['id']}")
+
+        # Prepare query parameters for segments
         query_params = dict(request.query_params)
         query_params.pop("profile_id", None)
         query_params.pop("d", None)
-        has_encrypted = query_params.pop("has_encrypted", False)
+        has_encrypted_param = query_params.pop("has_encrypted", False)
 
-        for segment in segments:
-            hls.append(f'#EXTINF:{segment["extinf"]:.3f},')
-            query_params.update(
-                {"init_url": init_url, "segment_url": segment["media"], "mime_type": profile["mimeType"]}
+        # Add segments to HLS playlist
+        for segment in segments_for_this_hls_playlist:
+            if mpd_dict.get("isLive", False) and "program_date_time" in segment:
+                hls.append(f'#EXT-X-PROGRAM-DATE-TIME:{segment["program_date_time"]}')
+
+            hls.append(f'#EXTINF:{segment.get("extinf", target_duration):.3f},')
+
+            segment_media_url = segment.get("media")
+            if not segment_media_url:
+                logger.error(f"Segment missing 'media' URL: {segment}")
+                continue
+
+            current_segment_query_params = query_params.copy()
+            current_segment_query_params.update(
+                {"init_url": init_url, "segment_url": segment_media_url, "mime_type": profile.get("mimeType", "")}
             )
+
             hls.append(
                 encode_mediaflow_proxy_url(
                     proxy_url,
-                    query_params=query_params,
-                    encryption_handler=encryption_handler if has_encrypted else None,
+                    query_params=current_segment_query_params,
+                    encryption_handler=encryption_handler if has_encrypted_param else None,
                 )
             )
             added_segments += 1
 
-    if not mpd_dict["isLive"]:
-        hls.append("#EXT-X-ENDLIST")
+    # Handle empty playlists
+    if added_segments == 0:
+        if not mpd_dict.get("isLive", False):
+            logger.warning("Generated an empty HLS playlist for a VOD stream. Adding ENDLIST.")
+            hls.append("#EXT-X-ENDLIST")
+        else:
+            logger.warning("Generated an empty HLS playlist for a live stream.")
 
-    logger.info(f"Added {added_segments} segments to HLS playlist")
+    logger.info(f"Final HLS build: Added {added_segments} segments. Live: {mpd_dict.get('isLive', False)}")
     return "\n".join(hls)

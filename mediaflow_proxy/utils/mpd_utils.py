@@ -253,14 +253,25 @@ def parse_representation(
         profile["frameRate"] = round(int(frame_rate.split("/")[0]) / int(frame_rate.split("/")[1]), 3)
         profile["sar"] = representation.get("@sar", "1:1")
 
-    if parse_segment_profile_id is None or profile["id"] != parse_segment_profile_id:
-        return profile
-
-    item = adaptation.get("SegmentTemplate") or representation.get("SegmentTemplate")
-    if item:
-        profile["segments"] = parse_segment_template(parsed_dict, item, profile, source)
+    # Extract segment template start number for adaptive sequence calculation
+    segment_template_data = adaptation.get("SegmentTemplate") or representation.get("SegmentTemplate")
+    if segment_template_data:
+        try:
+            profile["segment_template_start_number"] = int(segment_template_data.get("@startNumber"))
+        except (ValueError, TypeError):
+            profile["segment_template_start_number"] = None
     else:
-        profile["segments"] = parse_segment_base(representation, source)
+        profile["segment_template_start_number"] = None
+
+    if parse_segment_profile_id is None or profile["id"] != parse_segment_profile_id:
+        return profile  # Return profile with segment_template_start_number but without parsed segments
+
+    # Parse segments only for the requested profile
+    if segment_template_data:
+        profile["segments"] = parse_segment_template(parsed_dict, segment_template_data, profile, source)
+    else:
+        logger.warning(f"Profile {profile.get('id')}: No SegmentTemplate or SegmentBase found for parsing segments.")
+        profile["segments"] = []
 
     return profile
 
@@ -490,7 +501,8 @@ def create_segment_data(segment: Dict, item: dict, profile: dict, source: str, t
     media = media.replace("$Number$", str(segment["number"]))
     media = media.replace("$Bandwidth$", str(profile["bandwidth"]))
 
-    if "time" in segment and timescale is not None:
+    # Replace $Time$ placeholder if present in segment data
+    if "time" in segment:
         media = media.replace("$Time$", str(int(segment["time"])))
 
     if not media.startswith("http"):
@@ -502,31 +514,40 @@ def create_segment_data(segment: Dict, item: dict, profile: dict, source: str, t
         "number": segment["number"],
     }
 
+    # Add time and duration metadata for adaptive sequence calculation
+    if "time" in segment:
+        segment_data["time"] = segment["time"]  # Presentation time in MPD timescale units
+
+    if "duration" in segment:
+        segment_data["duration_mpd_timescale"] = segment["duration"]  # Duration in MPD timescale units
+
+    # Add timing information for live streams
     if "start_time" in segment and "end_time" in segment:
         segment_data.update(
             {
                 "start_time": segment["start_time"],
                 "end_time": segment["end_time"],
                 "extinf": (segment["end_time"] - segment["start_time"]).total_seconds(),
-                "program_date_time": segment["start_time"].isoformat() + "Z",
+                "program_date_time": segment["start_time"].isoformat().replace("+00:00", "Z"),
             }
         )
-    elif "start_time" in segment and "duration" in segment:
+    elif "start_time" in segment and "duration" in segment and timescale is not None:
         duration_seconds = segment["duration"] / timescale
         segment_data.update(
             {
                 "start_time": segment["start_time"],
                 "end_time": segment["start_time"] + timedelta(seconds=duration_seconds),
                 "extinf": duration_seconds,
-                "program_date_time": segment["start_time"].isoformat() + "Z",
+                "program_date_time": segment["start_time"].isoformat().replace("+00:00", "Z"),
             }
         )
-    elif "duration" in segment and timescale is not None:
-        # Convert duration from timescale units to seconds
+    elif "duration" in segment and timescale and timescale > 0:
+        # Calculate extinf from duration and timescale
         segment_data["extinf"] = segment["duration"] / timescale
     elif "duration" in segment:
-        # If no timescale is provided, assume duration is already in seconds
-        segment_data["extinf"] = segment["duration"]
+        logger.warning(
+            f"Cannot calculate 'extinf' for segment {segment.get('number')} as timescale is missing or invalid."
+        )
 
     return segment_data
 
