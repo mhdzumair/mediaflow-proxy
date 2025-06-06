@@ -253,6 +253,16 @@ def parse_representation(
         profile["frameRate"] = round(int(frame_rate.split("/")[0]) / int(frame_rate.split("/")[1]), 3)
         profile["sar"] = representation.get("@sar", "1:1")
 
+    # Extract segment template start number for adaptive sequence calculation
+    segment_template_data = adaptation.get("SegmentTemplate") or representation.get("SegmentTemplate")
+    if segment_template_data:
+        try:
+            profile["segment_template_start_number"] = int(segment_template_data.get("@startNumber", 1))
+        except (ValueError, TypeError):
+            profile["segment_template_start_number"] = 1
+    else:
+        profile["segment_template_start_number"] = 1
+
     if parse_segment_profile_id is None or profile["id"] != parse_segment_profile_id:
         return profile
 
@@ -501,6 +511,12 @@ def create_segment_data(segment: Dict, item: dict, profile: dict, source: str, t
         "media": media,
         "number": segment["number"],
     }
+
+    # Add time and duration metadata for adaptive sequence calculation
+    if "time" in segment:
+        segment_data["time"] = segment["time"]
+    if "duration" in segment:
+        segment_data["duration_mpd_timescale"] = segment["duration"]
 
     if "start_time" in segment and "end_time" in segment:
         segment_data.update(
