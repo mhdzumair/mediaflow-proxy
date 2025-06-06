@@ -1,8 +1,7 @@
-from datetime import datetime
 from enum import Enum
 from typing import Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, HttpUrl
 
 
 class SpeedTestProvider(str, Enum):
@@ -21,26 +20,20 @@ class UserInfo(BaseModel):
     country: Optional[str] = None
 
 
-class SpeedTestResult(BaseModel):
-    speed_mbps: float = Field(..., description="Speed in Mbps")
-    duration: float = Field(..., description="Test duration in seconds")
-    data_transferred: int = Field(..., description="Data transferred in bytes")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+class MediaFlowServer(BaseModel):
+    url: HttpUrl
+    api_password: Optional[str] = None
+    name: Optional[str] = None
 
 
-class LocationResult(BaseModel):
-    result: Optional[SpeedTestResult] = None
-    error: Optional[str] = None
-    server_name: str
-    server_url: str
-
-
-class SpeedTestTask(BaseModel):
-    task_id: str
+class BrowserSpeedTestConfig(BaseModel):
     provider: SpeedTestProvider
-    results: Dict[str, LocationResult] = {}
-    started_at: datetime
-    completed_at: Optional[datetime] = None
-    status: str = "running"
+    test_urls: Dict[str, str]
+    test_duration: int = 10
     user_info: Optional[UserInfo] = None
-    current_location: Optional[str] = None
+
+
+class BrowserSpeedTestRequest(BaseModel):
+    provider: SpeedTestProvider
+    api_key: Optional[str] = None
+    current_api_password: Optional[str] = None

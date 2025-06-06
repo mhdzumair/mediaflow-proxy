@@ -3,38 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Debrid Speed Test</title>
+    <title>MediaFlow Speed Test</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/speedtest.js"></script>
     <script>
         tailwind.config = {
             darkMode: 'class',
             theme: {
                 extend: {
                     animation: {
-                        'progress': 'progress 180s linear forwards',
-                    },
-                    keyframes: {
-                        progress: {
-                            '0%': {width: '0%'},
-                            '100%': {width: '100%'}
-                        }
+                        'pulse-slow': 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'bounce-slow': 'bounce 2s infinite',
                     }
                 }
             }
         }
     </script>
     <style>
-        .provider-card {
+        .result-card {
             transition: all 0.3s ease;
         }
 
-        .provider-card:hover {
-            transform: translateY(-5px);
+        .result-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .server-input {
+            animation: slideIn 0.3s ease-out;
         }
 
         @keyframes slideIn {
             from {
-                transform: translateY(20px);
+                transform: translateY(-10px);
                 opacity: 0;
             }
             to {
@@ -43,8 +44,21 @@
             }
         }
 
-        .slide-in {
-            animation: slideIn 0.3s ease-out forwards;
+        .metric-card {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        .metric-card.success {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+
+        .metric-card.warning {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        }
+
+        .metric-card.error {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
         }
     </style>
 </head>
@@ -63,634 +77,301 @@
 </div>
 
 <main class="container mx-auto px-4 py-8">
-    <!-- Views Container -->
-    <div id="views-container">
-        <!-- API Password View -->
-        <div id="passwordView" class="space-y-8">
-            <h1 class="text-3xl font-bold text-center text-gray-800 dark:text-white mb-8">
-                Enter API Password
-            </h1>
+    <!-- Header -->
+    <div class="text-center mb-8">
+        <h1 class="text-4xl font-bold text-gray-800 dark:text-white mb-2">
+            🚀 MediaFlow Speed Test
+        </h1>
+        <p class="text-gray-600 dark:text-gray-300">
+            Compare your connection speed through MediaFlow proxy vs direct connection
+        </p>
+    </div>
 
-            <div class="max-w-md mx-auto">
-                <form id="passwordForm" class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 space-y-4">
+    <!-- Configuration View -->
+    <div id="configView" class="max-w-4xl mx-auto space-y-6">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+            <h2 class="text-2xl font-semibold text-gray-800 dark:text-white mb-6">Test Configuration</h2>
+
+            <form id="configForm" class="space-y-6">
+                <!-- Provider Selection -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div class="space-y-2">
-                        <label for="apiPassword" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            API Password
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Debrid Provider
                         </label>
-                        <input
-                                type="password"
-                                id="apiPassword"
-                                class="w-full px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                required
-                        >
+                        <select id="provider"
+                                class="w-full px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="real_debrid">Real-Debrid</option>
+                            <option value="all_debrid">AllDebrid</option>
+                        </select>
                     </div>
-                    <div class="flex items-center space-x-2">
-                        <input
-                                type="checkbox"
-                                id="rememberPassword"
-                                class="rounded border-gray-300 dark:border-gray-600"
-                        >
-                        <label for="rememberPassword" class="text-sm text-gray-600 dark:text-gray-400">
-                            Remember password
-                        </label>
-                    </div>
-                    <button
-                            type="submit"
-                            class="w-full px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
-                    >
-                        Continue
-                    </button>
-                </form>
-            </div>
-        </div>
 
-        <!-- Provider Selection View -->
-        <div id="selectionView" class="space-y-8 hidden">
-            <h1 class="text-3xl font-bold text-center text-gray-800 dark:text-white mb-8">
-                Select Debrid Service for Speed Test
-            </h1>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
-                <!-- Real-Debrid Card -->
-                <button onclick="startTest('real_debrid')" class="provider-card bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 text-left hover:shadow-xl transition-shadow">
-                    <h2 class="text-xl font-semibold text-gray-800 dark:text-white mb-2">Real-Debrid</h2>
-                    <p class="text-gray-600 dark:text-gray-300">Test speeds across multiple Real-Debrid servers worldwide</p>
-                </button>
-
-                <!-- AllDebrid Card -->
-                <button onclick="showAllDebridSetup()" class="provider-card bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 text-left hover:shadow-xl transition-shadow">
-                    <h2 class="text-xl font-semibold text-gray-800 dark:text-white mb-2">AllDebrid</h2>
-                    <p class="text-gray-600 dark:text-gray-300">Measure download speeds from AllDebrid servers</p>
-                </button>
-            </div>
-        </div>
-
-        <!-- AllDebrid Setup View -->
-        <div id="allDebridSetupView" class="max-w-md mx-auto space-y-6 hidden">
-            <h2 class="text-2xl font-bold text-center text-gray-800 dark:text-white mb-8">
-                AllDebrid Setup
-            </h2>
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-                <form id="allDebridForm" class="space-y-4">
-                    <div class="space-y-2">
-                        <label for="adApiKey" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    <!-- API Key (for AllDebrid) -->
+                    <div id="apiKeySection" class="space-y-2 hidden">
+                        <label for="apiKey" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
                             AllDebrid API Key
                         </label>
                         <input
                                 type="password"
-                                id="adApiKey"
+                                id="apiKey"
                                 class="w-full px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                required
+                                placeholder="Enter your AllDebrid API key"
                         >
-                        <p class="text-sm text-gray-500 dark:text-gray-400">
-                            You can find your API key in the AllDebrid dashboard
-                        </p>
                     </div>
-                    <div class="flex items-center space-x-2">
-                        <input
-                                type="checkbox"
-                                id="rememberAdKey"
-                                class="rounded border-gray-300 dark:border-gray-600"
-                        >
-                        <label for="rememberAdKey" class="text-sm text-gray-600 dark:text-gray-400">
-                            Remember API key
+                </div>
+
+                <!-- Current Instance API Password -->
+                <div class="space-y-2">
+                    <label for="currentApiPassword" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Current MediaFlow API Password (if required)
+                    </label>
+                    <input
+                            type="password"
+                            id="currentApiPassword"
+                            class="w-full px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Enter API password for current instance"
+                    >
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                        Required to fetch test configuration if this instance has API password protection
+                    </p>
+                </div>
+
+                <!-- MediaFlow Servers -->
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            MediaFlow Servers to Test
                         </label>
-                    </div>
-                    <div class="flex space-x-3">
                         <button
                                 type="button"
-                                onclick="showView('selectionView')"
-                                class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+                                id="addServerBtn"
+                                class="px-3 py-1 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                         >
-                            Back
-                        </button>
-                        <button
-                                type="submit"
-                                class="flex-1 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
-                        >
-                            Start Test
+                            + Add Server
                         </button>
                     </div>
-                </form>
-            </div>
-        </div>
 
-        <!-- Testing View -->
-        <div id="testingView" class="max-w-4xl mx-auto space-y-6 hidden">
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-                <!-- User Info Section -->
-                <div id="userInfo" class="mb-6 hidden">
-                    <!-- User info will be populated dynamically -->
+                    <div id="serversContainer" class="space-y-3">
+                        <!-- Current server (auto-added) -->
+                        <div class="server-input grid grid-cols-1 md:grid-cols-3 gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <input
+                                    type="url"
+                                    placeholder="MediaFlow URL"
+                                    class="server-url w-full px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                    required
+                            >
+                            <input
+                                    type="text"
+                                    placeholder="Server Name (optional)"
+                                    class="server-name w-full px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                            >
+                            <div class="flex gap-2">
+                                <input
+                                        type="password"
+                                        placeholder="API Password (optional)"
+                                        class="server-password flex-1 px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                >
+                                <button
+                                        type="button"
+                                        class="remove-server px-2 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 focus:outline-none text-sm hidden"
+                                >
+                                    ×
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- Progress Section -->
+                <!-- CDN Location Selection -->
                 <div class="space-y-4">
-                    <div class="text-center text-gray-600 dark:text-gray-300" id="currentLocation">
-                        Initializing test...
+                    <h3 class="text-lg font-medium text-gray-800 dark:text-white">CDN Locations</h3>
+
+                    <!-- CDN Status and Selection Container -->
+                    <div id="cdnStatusContainer">
+                        <!-- Status message will be populated here -->
                     </div>
-                    <div class="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                        <div class="h-full bg-blue-500 animate-progress" id="progressBar"></div>
+
+                    <div id="cdnSelection" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                        <!-- CDN checkboxes will be populated here -->
+                    </div>
+
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" id="refreshCdnBtn"
+                                class="px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg hover:from-green-600 hover:to-emerald-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition-all duration-200 font-medium shadow-md">
+                            🔄 Refresh CDNs
+                        </button>
+                        <button type="button" id="selectAllCdn"
+                                class="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors text-sm font-medium">Select
+                            All
+                        </button>
+                        <button type="button" id="selectNoneCdn"
+                                class="px-3 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors text-sm font-medium">Select
+                            None
+                        </button>
                     </div>
                 </div>
 
-                <!-- Results Container -->
-                <div id="resultsContainer" class="mt-8">
-                    <!-- Results will be populated dynamically -->
-                </div>
-            </div>
-        </div>
-
-        <!-- Results View -->
-        <div id="resultsView" class="max-w-4xl mx-auto space-y-6 hidden">
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-                <div class="space-y-6">
-                    <!-- Summary Section -->
-                    <div class="border-b border-gray-200 dark:border-gray-700 pb-4">
-                        <h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-4">Test Summary</h3>
-                        <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
-                            <div class="space-y-1">
-                                <div class="text-sm text-gray-500 dark:text-gray-400">Fastest Server</div>
-                                <div id="fastestServer" class="font-medium text-gray-900 dark:text-white"></div>
+                <!-- Test Options -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-4">
+                        <h3 class="text-lg font-medium text-gray-800 dark:text-white">Test Options</h3>
+                        <div class="space-y-2">
+                            <div class="flex items-center space-x-2">
+                                <input type="checkbox" id="testProxy" checked class="rounded border-gray-300 dark:border-gray-600">
+                                <label for="testProxy" class="text-sm text-gray-700 dark:text-gray-300">
+                                    Test through MediaFlow proxy
+                                </label>
                             </div>
-                            <div class="space-y-1">
-                                <div class="text-sm text-gray-500 dark:text-gray-400">Top Speed</div>
-                                <div id="topSpeed" class="font-medium text-green-500"></div>
-                            </div>
-                            <div class="space-y-1">
-                                <div class="text-sm text-gray-500 dark:text-gray-400">Average Speed</div>
-                                <div id="avgSpeed" class="font-medium text-blue-500"></div>
+                            <div class="flex items-center space-x-2">
+                                <input type="checkbox" id="testDirect" checked class="rounded border-gray-300 dark:border-gray-600">
+                                <label for="testDirect" class="text-sm text-gray-700 dark:text-gray-300">
+                                    Test direct connection (for comparison)
+                                </label>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Detailed Results -->
-                    <div id="finalResults" class="space-y-4">
-                        <!-- Results will be populated here -->
+                    <div class="space-y-4">
+                        <h3 class="text-lg font-medium text-gray-800 dark:text-white">Advanced Settings</h3>
+                        <div class="space-y-2">
+                            <label for="testDuration" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                Test Duration (seconds)
+                            </label>
+                            <input
+                                    type="number"
+                                    id="testDuration"
+                                    value="10"
+                                    min="5"
+                                    max="30"
+                                    class="w-full px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <div class="text-center mt-6">
-                <button onclick="resetTest()" class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
-                    Test Another Provider
+                <button
+                        type="submit"
+                        class="w-full px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-md hover:from-blue-600 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+                >
+                    🚀 Start Speed Test
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Testing View -->
+    <div id="testingView" class="max-w-6xl mx-auto space-y-6 hidden">
+        <!-- Progress Section -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+            <div class="text-center space-y-4">
+                <h2 class="text-2xl font-semibold text-gray-800 dark:text-white">Running Speed Tests</h2>
+                <div id="currentTest" class="text-gray-600 dark:text-gray-300">
+                    Initializing...
+                </div>
+                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
+                    <div id="progressBar" class="bg-gradient-to-r from-blue-500 to-purple-600 h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <div id="progressText" class="text-sm text-gray-500 dark:text-gray-400">
+                    0% complete
+                </div>
+                <button
+                        id="cancelTestBtn"
+                        class="mt-4 px-6 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
+                >
+                    ⏹️ Cancel Test
                 </button>
             </div>
         </div>
 
-        <!-- Error View -->
-        <div id="errorView" class="max-w-4xl mx-auto space-y-6 hidden">
-            <div class="bg-red-50 dark:bg-red-900/50 border-l-4 border-red-500 p-4 rounded">
-                <div class="flex">
-                    <div class="flex-shrink-0">
-                        <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                            <path fill-rule="evenodd"
-                                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                                  clip-rule="evenodd"/>
-                        </svg>
-                    </div>
-                    <div class="ml-3">
-                        <p class="text-sm text-red-700 dark:text-red-200" id="errorMessage"></p>
-                    </div>
-                </div>
-            </div>
+        <!-- Live Results -->
+        <div id="liveResults" class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+            <!-- Results will be populated here -->
+        </div>
+    </div>
 
-            <div class="text-center">
-                <button onclick="resetTest()"
-                        class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:hover:bg-blue-500 transition-colors duration-200">
-                    Try Again
-                </button>
+    <!-- Results View -->
+    <div id="resultsView" class="max-w-7xl mx-auto space-y-6 hidden">
+        <!-- Key Metrics -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div id="bestProxyMetric" class="metric-card text-white p-4 rounded-lg text-center">
+                <div class="text-2xl font-bold" id="bestProxySpeed">-- Mbps</div>
+                <div class="text-sm opacity-90">Best Proxy Speed</div>
+                <div class="text-xs opacity-75 mt-1" id="bestProxyServer">--</div>
+            </div>
+            <div id="bestDirectMetric" class="metric-card text-white p-4 rounded-lg text-center">
+                <div class="text-2xl font-bold" id="bestDirectSpeed">-- Mbps</div>
+                <div class="text-sm opacity-90">Best Direct Speed</div>
+                <div class="text-xs opacity-75 mt-1" id="bestDirectLocation">--</div>
+            </div>
+            <div id="avgProxyMetric" class="metric-card text-white p-4 rounded-lg text-center">
+                <div class="text-2xl font-bold" id="avgProxySpeed">-- Mbps</div>
+                <div class="text-sm opacity-90">Avg Proxy Speed</div>
+                <div class="text-xs opacity-75 mt-1" id="proxyTestCount">-- tests</div>
+            </div>
+            <div id="speedDiffMetric" class="metric-card text-white p-4 rounded-lg text-center">
+                <div class="text-2xl font-bold" id="speedDifference">--%</div>
+                <div class="text-sm opacity-90">Speed Difference</div>
+                <div class="text-xs opacity-75 mt-1">Proxy vs Direct</div>
             </div>
         </div>
 
+        <!-- Server Comparison Metrics -->
+        <div id="serverMetrics" class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-6">
+            <h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-4">MediaFlow Server Performance</h3>
+            <div id="serverComparisonGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <!-- Server metrics will be populated here -->
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+                <h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-4">Speed Comparison by Location</h3>
+                <div class="relative h-64 w-full">
+                    <canvas id="speedChart"></canvas>
+                </div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+                <h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-4">Server Performance Overview</h3>
+                <div class="relative h-64 w-full">
+                    <canvas id="serverChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detailed Results -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+            <h2 class="text-2xl font-semibold text-gray-800 dark:text-white mb-4">Detailed Results</h2>
+            <div id="detailedResults" class="space-y-4">
+                <!-- Detailed results will be populated here -->
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="text-center">
+            <button
+                    id="runAgainBtn"
+                    class="px-6 py-3 bg-gradient-to-r from-green-500 to-blue-600 text-white rounded-md hover:from-green-600 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+            >
+                🔄 Run Another Test
+            </button>
+        </div>
     </div>
 </main>
 
 <script>
-    // Config and State
-    const STATE = {
-        apiPassword: localStorage.getItem('speedtest_api_password'),
-        adApiKey: localStorage.getItem('ad_api_key'),
-        currentTaskId: null,
-        resultsCount: 0,
-    };
+    // Theme management
+    const themeToggle = document.getElementById('themeToggle');
+    const html = document.documentElement;
 
-    // Theme handling
-    function setTheme(theme) {
-        document.documentElement.classList.toggle('dark', theme === 'dark');
-        localStorage.theme = theme;
-    }
+    // Check for saved theme preference or default to light mode
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    html.classList.toggle('dark', savedTheme === 'dark');
 
-    function initTheme() {
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        setTheme(localStorage.theme || (prefersDark ? 'dark' : 'light'));
-    }
-
-    // View management
-    function showView(viewId) {
-        document.querySelectorAll('#views-container > div').forEach(view => {
-            view.classList.toggle('hidden', view.id !== viewId);
-        });
-    }
-
-
-    function createErrorResult(location, data) {
-        return `
-                <div class="py-4">
-                    <div class="flex justify-between items-center">
-                        <div>
-                            <span class="font-medium text-gray-800 dark:text-white">${location}</span>
-                            <span class="ml-2 text-sm text-gray-500 dark:text-gray-400">${data.server_name || ''}</span>
-                        </div>
-                        <span class="text-sm text-red-500 dark:text-red-400">
-                            Failed
-                        </span>
-                    </div>
-                    <div class="mt-1 text-sm text-red-400 dark:text-red-300">
-                        ${data.error || 'Test failed'}
-                    </div>
-                    <div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                        Server: ${data.server_url}
-                    </div>
-                </div>
-            `;
-    }
-
-
-    function formatBytes(bytes) {
-        const units = ['B', 'KB', 'MB', 'GB'];
-        let value = bytes;
-        let unitIndex = 0;
-
-        while (value >= 1024 && unitIndex < units.length - 1) {
-            value /= 1024;
-            unitIndex++;
-        }
-
-        return `${value.toFixed(2)} ${units[unitIndex]}`;
-    }
-
-    function handleAuthError() {
-        localStorage.removeItem('speedtest_api_password');
-        STATE.apiPassword = null;
-        showError('Authentication failed. Please check your API password.');
-    }
-
-    function showError(message) {
-        document.getElementById('errorMessage').textContent = message;
-        showView('errorView');
-    }
-
-    function resetTest() {
-        window.location.reload();
-    }
-
-    function showAllDebridSetup() {
-        showView('allDebridSetupView');
-    }
-
-    async function startTest(provider) {
-        if (provider === 'all_debrid' && !STATE.adApiKey) {
-            showAllDebridSetup();
-            return;
-        }
-
-        showView('testingView');
-        initializeResultsContainer();
-
-        try {
-            const params = new URLSearchParams({provider});
-            const headers = {'api_password': STATE.apiPassword};
-
-            if (provider === 'all_debrid' && STATE.adApiKey) {
-                headers['api_key'] = STATE.adApiKey;
-            }
-
-            const response = await fetch(`/speedtest/start?${params}`, {
-                method: 'POST',
-                headers
-            });
-
-            if (!response.ok) {
-                if (response.status === 403) {
-                    handleAuthError();
-                    return;
-                }
-                throw new Error('Failed to start speed test');
-            }
-
-            const {task_id} = await response.json();
-            STATE.currentTaskId = task_id;
-            await pollResults(task_id);
-        } catch (error) {
-            showError(error.message);
-        }
-    }
-
-    function initializeResultsContainer() {
-        const container = document.getElementById('resultsContainer');
-        container.innerHTML = `
-                <div class="space-y-4">
-                    <div id="locationResults" class="divide-y divide-gray-200 dark:divide-gray-700">
-                        <!-- Results will be populated here -->
-                    </div>
-                    <div id="summaryStats" class="hidden pt-4">
-                        <!-- Summary stats will be populated here -->
-                    </div>
-                </div>
-            `;
-    }
-
-    async function pollResults(taskId) {
-        let retryCount = 0;
-        const maxRetries = 10;
-        try {
-            while (true) {
-                const response = await fetch(`/speedtest/results/${taskId}`, {
-                    headers: {'api_password': STATE.apiPassword}
-                });
-
-                if (!response.ok) {
-                    if (response.status === 403) {
-                        handleAuthError();
-                        return;
-                    }
-                    if (retryCount < maxRetries) {
-                        retryCount++
-                        await new Promise(resolve => setTimeout(resolve, 2000));
-                        continue;
-                    }
-                    throw new Error('Failed to fetch results after multiple attempts');
-                }
-
-                const data = await response.json();
-                retryCount = 0; //reset the retry count
-
-                if (data.status === 'failed') {
-                    throw new Error('Speed test failed');
-                }
-
-                updateUI(data);
-
-                if (data.status === 'completed') {
-                    showFinalResults(data);
-                    break;
-                }
-
-                await new Promise(resolve => setTimeout(resolve, 2000));
-            }
-        } catch (error) {
-            showError(error.message);
-        }
-    }
-
-    function updateUI(data) {
-        if (data.user_info) {
-            updateUserInfo(data.user_info);
-        }
-
-        if (data.current_location) {
-            document.getElementById('currentLocation').textContent =
-                `Testing server ${data.current_location}...`;
-        }
-
-        updateResults(data.results);
-    }
-
-    function updateUserInfo(userInfo) {
-        const userInfoDiv = document.getElementById('userInfo');
-        userInfoDiv.innerHTML = `
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                    <div class="space-y-1">
-                        <div class="text-sm text-gray-500 dark:text-gray-400">IP Address</div>
-                        <div class="font-medium text-gray-900 dark:text-white">${userInfo.ip}</div>
-                    </div>
-                    <div class="space-y-1">
-                        <div class="text-sm text-gray-500 dark:text-gray-400">ISP</div>
-                        <div class="font-medium text-gray-900 dark:text-white">${userInfo.isp}</div>
-                    </div>
-                    <div class="space-y-1">
-                        <div class="text-sm text-gray-500 dark:text-gray-400">Country</div>
-                        <div class="font-medium text-gray-900 dark:text-white">${userInfo.country?.toUpperCase()}</div>
-                    </div>
-                </div>
-            `;
-        userInfoDiv.classList.remove('hidden');
-    }
-
-    function updateResults(results) {
-        const container = document.getElementById('resultsContainer');
-        const validResults = Object.entries(results)
-            .filter(([, data]) => data.result !== null && !data.error)
-            .sort(([, a], [, b]) => (b.result.speed_mbps) - (a.result.speed_mbps));
-
-        const failedResults = Object.entries(results)
-            .filter(([, data]) => data.error || data.result === null);
-
-        // Generate HTML for results
-        const resultsHTML = [
-            // Successful results
-            ...validResults.map(([location, data]) => createSuccessResult(location, data)),
-            // Failed results
-            ...failedResults.map(([location, data]) => createErrorResult(location, data))
-        ].join('');
-
-        container.innerHTML = `
-                <div class="space-y-4">
-                    <!-- Summary Stats -->
-                    ${createSummaryStats(validResults)}
-                    <!-- Individual Results -->
-                    <div class="mt-6 divide-y divide-gray-200 dark:divide-gray-700">
-                        ${resultsHTML}
-                    </div>
-                </div>
-            `;
-    }
-
-
-    function createSummaryStats(validResults) {
-        if (validResults.length === 0) return '';
-
-        const speeds = validResults.map(([, data]) => data.result.speed_mbps);
-        const maxSpeed = Math.max(...speeds);
-        const avgSpeed = speeds.reduce((a, b) => a + b, 0) / speeds.length;
-        const fastestServer = validResults[0][0]; // First server after sorting
-
-        return `
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
-                    <div class="text-center">
-                        <div class="text-sm text-gray-500 dark:text-gray-400">Fastest Server</div>
-                        <div class="font-medium text-gray-900 dark:text-white">${fastestServer}</div>
-                    </div>
-                    <div class="text-center">
-                        <div class="text-sm text-gray-500 dark:text-gray-400">Top Speed</div>
-                        <div class="font-medium text-green-500">${maxSpeed.toFixed(2)} Mbps</div>
-                    </div>
-                    <div class="text-center">
-                        <div class="text-sm text-gray-500 dark:text-gray-400">Average Speed</div>
-                        <div class="font-medium text-blue-500">${avgSpeed.toFixed(2)} Mbps</div>
-                    </div>
-                </div>
-            `;
-    }
-
-    function createSuccessResult(location, data) {
-        const speedClass = getSpeedClass(data.result.speed_mbps);
-        return `
-                <div class="py-4">
-                    <div class="flex justify-between items-center">
-                        <div>
-                            <span class="font-medium text-gray-800 dark:text-white">${location}</span>
-                            <span class="ml-2 text-sm text-gray-500 dark:text-gray-400">${data.server_name || ''}</span>
-                        </div>
-                        <span class="text-lg font-semibold ${speedClass}">${data.result.speed_mbps.toFixed(2)} Mbps</span>
-                    </div>
-                    <div class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                        Duration: ${data.result.duration.toFixed(2)}s •
-                        Data: ${formatBytes(data.result.data_transferred)}
-                    </div>
-                    <div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                        Server: ${data.server_url}
-                    </div>
-                </div>
-            `;
-    }
-
-    function getSpeedClass(speed) {
-        if (speed >= 10) return 'text-green-500 dark:text-green-400';
-        if (speed >= 5) return 'text-blue-500 dark:text-blue-400';
-        if (speed >= 2) return 'text-yellow-500 dark:text-yellow-400';
-        return 'text-red-500 dark:text-red-400';
-    }
-
-    function showFinalResults(data) {
-        // Stop the progress animation
-        document.querySelector('#progressBar').style.animation = 'none';
-
-        // Update the final results view
-        const validResults = Object.entries(data.results)
-            .filter(([, data]) => data.result !== null && !data.error)
-            .sort(([, a], [, b]) => (b.result.speed_mbps) - (a.result.speed_mbps));
-
-        const failedResults = Object.entries(data.results)
-            .filter(([, data]) => data.error || data.result === null);
-
-        // Update summary stats
-        if (validResults.length > 0) {
-            const speeds = validResults.map(([, data]) => data.result.speed_mbps);
-            const maxSpeed = Math.max(...speeds);
-            const avgSpeed = speeds.reduce((a, b) => a + b, 0) / speeds.length;
-            const fastestServer = validResults[0][0];
-
-            document.getElementById('fastestServer').textContent = fastestServer;
-            document.getElementById('topSpeed').textContent = `${maxSpeed.toFixed(2)} Mbps`;
-            document.getElementById('avgSpeed').textContent = `${avgSpeed.toFixed(2)} Mbps`;
-        }
-
-        // Generate detailed results HTML
-        const finalResultsHTML = `
-        ${validResults.map(([location, data]) => `
-            <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <h3 class="text-lg font-medium text-gray-900 dark:text-white">${location}</h3>
-                        <p class="text-sm text-gray-500 dark:text-gray-400">${data.server_name || ''}</p>
-                    </div>
-                    <div class="text-right">
-                        <p class="text-2xl font-bold ${getSpeedClass(data.result.speed_mbps)}">
-                            ${data.result.speed_mbps.toFixed(2)} Mbps
-                        </p>
-                        <p class="text-sm text-gray-500 dark:text-gray-400">
-                            ${data.result.duration.toFixed(2)}s • ${formatBytes(data.result.data_transferred)}
-                        </p>
-                    </div>
-                </div>
-                <div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
-                    ${data.server_url}
-                </div>
-            </div>
-        `).join('')}
-
-        ${failedResults.length > 0 ? `
-            <div class="mt-6">
-                <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Failed Tests</h3>
-                ${failedResults.map(([location, data]) => `
-                    <div class="bg-red-50 dark:bg-red-900/20 rounded-lg p-4 mb-4">
-                        <div class="flex justify-between items-center">
-                            <div>
-                                <h4 class="font-medium text-red-800 dark:text-red-200">
-                                    ${location} ${data.server_name ? `(${data.server_name})` : ''}
-                                </h4>
-                                <p class="text-sm text-red-700 dark:text-red-300">
-                                    ${data.error || 'Test failed'}
-                                </p>
-                                <p class="text-xs text-red-600 dark:text-red-400 mt-1">
-                                    ${data.server_url}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-        ` : ''}
-    `;
-
-        document.getElementById('finalResults').innerHTML = finalResultsHTML;
-
-        // If we have user info from AllDebrid, copy it to the final view
-        const userInfoDiv = document.getElementById('userInfo');
-        if (!userInfoDiv.classList.contains('hidden') && data.user_info) {
-            const userInfoContent = userInfoDiv.innerHTML;
-            document.getElementById('finalResults').insertAdjacentHTML('afterbegin', `
-            <div class="mb-6">
-                ${userInfoContent}
-            </div>
-        `);
-        }
-
-        // Show the final results view
-        showView('resultsView');
-    }
-
-    function initializeView() {
-        initTheme();
-        showView(STATE.apiPassword ? 'selectionView' : 'passwordView');
-    }
-
-    function initializeFormHandlers() {
-        // Password form handler
-        document.getElementById('passwordForm').addEventListener('submit', (e) => {
-            e.preventDefault();
-            const password = document.getElementById('apiPassword').value;
-            const remember = document.getElementById('rememberPassword').checked;
-
-            if (remember) {
-                localStorage.setItem('speedtest_api_password', password);
-            }
-            STATE.apiPassword = password;
-            showView('selectionView');
-        });
-
-        // AllDebrid form handler
-        document.getElementById('allDebridForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const apiKey = document.getElementById('adApiKey').value;
-            const remember = document.getElementById('rememberAdKey').checked;
-
-            if (remember) {
-                localStorage.setItem('ad_api_key', apiKey);
-            }
-            STATE.adApiKey = apiKey;
-            await startTest('all_debrid');
-        });
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-        initializeView();
-        initializeFormHandlers();
-    });
-
-    // Theme Toggle Event Listener
-    document.getElementById('themeToggle').addEventListener('click', () => {
-        setTheme(document.documentElement.classList.contains('dark') ? 'light' : 'dark');
+    themeToggle.addEventListener('click', () => {
+        html.classList.toggle('dark');
+        const newTheme = html.classList.contains('dark') ? 'dark' : 'light';
+        localStorage.setItem('theme', newTheme);
     });
 </script>
 </body>
