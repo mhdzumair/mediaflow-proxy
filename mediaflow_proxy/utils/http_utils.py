@@ -61,7 +61,7 @@ async def fetch_with_retry(client, method, url, headers, follow_redirects=True, 
 
     Raises:
         DownloadError: If the request fails after retries.
-        httpx.HTTPStatusError: If a 404 error occurs (not wrapped in DownloadError).
+        httpx.HTTPStatusError: If a 404 error occurs.
     """
     try:
         response = await client.request(method, url, headers=headers, follow_redirects=follow_redirects, **kwargs)
@@ -73,18 +73,16 @@ async def fetch_with_retry(client, method, url, headers, follow_redirects=True, 
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error {e.response.status_code} while downloading {url} (Request URL: {e.request.url})")
         if e.response.status_code == 404:
-            logger.error(f"Segment Resource not found: {url}")
-            raise e  # Do not wrap 404 in DownloadError, let it propagate as is
-        # For other HTTP status errors (5xx, some 4xx), wrap in DownloadError to make them retryable.
+            logger.error(f"Resource not found: {url}")
+            raise e  # Do not wrap 404 errors
+        # For other HTTP status errors, wrap in DownloadError to make them retryable
         raise DownloadError(e.response.status_code, f"HTTP error {e.response.status_code} while downloading {url}: {e}")
-    except httpx.RequestError as e:  # Catches ConnectError, ReadError, ProtocolError (like RemoteProtocolError), etc.
+    except httpx.RequestError as e:
         logger.error(f"Request error downloading {url}: {e}")
-        # Wrap these network/protocol related errors in DownloadError to make them retryable.
-        # Using 502 (Bad Gateway) as a general code for upstream communication issues.
+        # Wrap network/protocol errors in DownloadError to make them retryable
         raise DownloadError(502, f"Request error while downloading {url}: {e}")
-    except Exception as e:  # Generic fallback for truly unexpected errors
+    except Exception as e:
         logger.error(f"Unexpected error downloading {url}: {e}", exc_info=True)
-        # Re-raise to avoid retrying unknown states. If this becomes common, specific errors should be caught above.
         raise
 
 
