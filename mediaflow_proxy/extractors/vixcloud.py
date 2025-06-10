@@ -57,10 +57,12 @@ class VixCloudExtractor(BaseExtractor):
             token = re.search(r"'token':\s*'(\w+)'", script).group(1)
             expires = re.search(r"'expires':\s*'(\d+)'", script).group(1)
             canPlayFHD = re.search(r"window\.canPlayFHD\s*=\s*(\w+)", script).group(1)
-            server_url = re.search(r'"name":"Server1","active":true,"url":"([^"]+)"', script).group(1).replace('\\','')
-            vixid = server_url.split("playlist/")[1].split("?")[0]
-            base_url = server_url.split("://")[1].split("/")[0]
-            final_url = f"https://{base_url}/playlist/{vixid}.m3u8?token={token}&expires={expires}"
+            print(script,"A")
+            server_url = re.search(r"url:\s*'([^']+)'", script).group(1)
+            if "?b=1" in server_url:
+                final_url = f'{server_url}&token={token}&expires={expires}'
+            else:
+                final_url = f"{server_url}?token={token}&expires={expires}"
             if "window.canPlayFHD = true" in script:
                 final_url += "&h=1"
             self.base_headers["referer"] = url
