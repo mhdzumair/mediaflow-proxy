@@ -45,8 +45,6 @@ class VixCloudExtractor(BaseExtractor):
             response = await self._make_request(url, headers={"x-inertia": "true", "x-inertia-version": version})
             soup = BeautifulSoup(response.text, "lxml", parse_only=SoupStrainer("iframe"))
             iframe = soup.find("iframe").get("src")
-            parsed_url = urlparse(iframe)
-            query_params = parse_qs(parsed_url.query)
             response = await self._make_request(iframe, headers={"x-inertia": "true", "x-inertia-version": version})
         elif "movie" in url or "tv" in url:
             response = await self._make_request(url)
