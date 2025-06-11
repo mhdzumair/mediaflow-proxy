@@ -30,7 +30,7 @@ class DLHDExtractor(BaseExtractor):
         try:
             # Channel URL is required and serves as the referer
             channel_url = url
-            channel_origin = self._get_origin(channel_url) # Origine della pagina del canale
+            channel_origin = self._get_origin(channel_url) # Channel page origin
 
             # Check for direct parameters
             player_url_from_arg = kwargs.get("player_url")
