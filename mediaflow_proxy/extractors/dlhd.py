@@ -57,19 +57,19 @@ class DLHDExtractor(BaseExtractor):
             else:
                 current_player_url_for_processing = player_url_from_arg
 
-            # Tentativo 1: _handle_vecloud con current_player_url_for_processing
-            # Il referer per _handle_vecloud è l'origine della pagina del canale (channel_origin)
-            # o l'origine del player stesso se è un URL /stream/
+            # Attempt 1: _handle_vecloud with current_player_url_for_processing
+            # The referer for _handle_vecloud is the origin of the channel page (channel_origin) 
+            # or the origin of the player itself if it is a /stream/ URL.
             try:
                 referer_for_vecloud = channel_origin + "/"
                 if re.search(r"/stream/([a-zA-Z0-9-]+)", current_player_url_for_processing):
                     referer_for_vecloud = self._get_origin(current_player_url_for_processing) + "/"
                 return await self._handle_vecloud(current_player_url_for_processing, referer_for_vecloud)
             except Exception:
-                pass # Fallito, continua
-
-            # Tentativo 2: Se _handle_vecloud fallisce e l'URL non è di tipo /stream/, tenta _handle_playnow
-            # e poi _handle_vecloud di nuovo con l'URL risultante da playnow.
+                pass # Fail, Continue
+                
+            # Attempt 2: If _handle_vecloud fail and the URL is not /stream/, try _handle_playnow
+            # and then _handle_vecloud again with the URL resulting from playnow.
             if not re.search(r"/stream/([a-zA-Z0-9-]+)", current_player_url_for_processing):
                 try:
                     playnow_derived_player_url = await self._handle_playnow(current_player_url_for_processing, channel_origin + "/")
@@ -82,7 +82,7 @@ class DLHDExtractor(BaseExtractor):
                 except Exception:
                     pass
 
-            # Se tutti i tentativi precedenti sono falliti, procedi con l'autenticazione standard.
+            # If all previous attempts have failed, proceed with standard authentication.
             player_url_for_auth = current_player_url_for_processing
             player_origin_for_auth = self._get_origin(player_url_for_auth)
             
