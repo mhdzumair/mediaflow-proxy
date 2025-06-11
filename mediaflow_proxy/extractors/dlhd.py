@@ -30,46 +30,70 @@ class DLHDExtractor(BaseExtractor):
         try:
             # Channel URL is required and serves as the referer
             channel_url = url
-            player_origin = self._get_origin(channel_url)
+            channel_origin = self._get_origin(channel_url) # Origine della pagina del canale
 
             # Check for direct parameters
-            player_url = kwargs.get("player_url")
-            stream_url = kwargs.get("stream_url")
-            auth_url_base = kwargs.get("auth_url_base")
+            player_url_from_arg = kwargs.get("player_url")
+            stream_url_from_arg = kwargs.get("stream_url")
+            auth_url_base_from_arg = kwargs.get("auth_url_base")
+
+            current_player_url_for_processing: str
 
             # If player URL not provided, extract it from channel page
-            if not player_url:
+            if not player_url_from_arg:
                 # Get the channel page to extract the player iframe URL
                 channel_headers = {
-                    "referer": player_origin + "/",
-                    "origin": player_origin,
+                    "referer": channel_origin + "/",
+                    "origin": channel_origin,
                     "user-agent": self.base_headers["user-agent"],
                 }
 
                 channel_response = await self._make_request(channel_url, headers=channel_headers)
-                player_url = self._extract_player_url(channel_response.text)
+                extracted_iframe_url = self._extract_player_url(channel_response.text)
 
-                if not player_url:
+                if not extracted_iframe_url:
                     raise ExtractorError("Could not extract player URL from channel page")
+                current_player_url_for_processing = extracted_iframe_url
+            else:
+                current_player_url_for_processing = player_url_from_arg
 
-                if not re.search(r"/stream/([a-zA-Z0-9-]+)", player_url):
-                    iframe_player_url = await self._handle_playnow(player_url, player_origin)
-                    player_origin = self._get_origin(player_url)
-                    player_url = iframe_player_url
-
+            # Tentativo 1: _handle_vecloud con current_player_url_for_processing
+            # Il referer per _handle_vecloud è l'origine della pagina del canale (channel_origin)
+            # o l'origine del player stesso se è un URL /stream/
             try:
-                return await self._handle_vecloud(player_url, player_origin + "/")
-            except Exception as e:
-                pass
+                referer_for_vecloud = channel_origin + "/"
+                if re.search(r"/stream/([a-zA-Z0-9-]+)", current_player_url_for_processing):
+                    referer_for_vecloud = self._get_origin(current_player_url_for_processing) + "/"
+                return await self._handle_vecloud(current_player_url_for_processing, referer_for_vecloud)
+            except Exception:
+                pass # Fallito, continua
 
+            # Tentativo 2: Se _handle_vecloud fallisce e l'URL non è di tipo /stream/, tenta _handle_playnow
+            # e poi _handle_vecloud di nuovo con l'URL risultante da playnow.
+            if not re.search(r"/stream/([a-zA-Z0-9-]+)", current_player_url_for_processing):
+                try:
+                    playnow_derived_player_url = await self._handle_playnow(current_player_url_for_processing, channel_origin + "/")
+                    if re.search(r"/stream/([a-zA-Z0-9-]+)", playnow_derived_player_url):
+                        try:
+                            referer_for_vecloud_after_playnow = self._get_origin(playnow_derived_player_url) + "/"
+                            return await self._handle_vecloud(playnow_derived_player_url, referer_for_vecloud_after_playnow)
+                        except Exception:
+                            pass 
+                except Exception:
+                    pass
+
+            # Se tutti i tentativi precedenti sono falliti, procedi con l'autenticazione standard.
+            player_url_for_auth = current_player_url_for_processing
+            player_origin_for_auth = self._get_origin(player_url_for_auth)
+            
             # Get player page to extract authentication information
             player_headers = {
-                "referer": player_origin + "/",
-                "origin": player_origin,
+                "referer": player_origin_for_auth + "/",
+                "origin": player_origin_for_auth,
                 "user-agent": self.base_headers["user-agent"],
             }
 
-            player_response = await self._make_request(player_url, headers=player_headers)
+            player_response = await self._make_request(player_url_for_auth, headers=player_headers)
             player_content = player_response.text
 
             # Extract authentication details from script tag
@@ -78,62 +102,63 @@ class DLHDExtractor(BaseExtractor):
                 raise ExtractorError("Failed to extract authentication data from player")
 
             # Extract auth URL base if not provided
-            if not auth_url_base:
-                auth_url_base = self._extract_auth_url_base(player_content)
+            final_auth_url_base = auth_url_base_from_arg
+            if not final_auth_url_base:
+                final_auth_url_base = self._extract_auth_url_base(player_content)
 
             # If still no auth URL base, try to derive from stream URL or player URL
-            if not auth_url_base:
-                if stream_url:
-                    auth_url_base = self._get_origin(stream_url)
+            if not final_auth_url_base:
+                if stream_url_from_arg:
+                    final_auth_url_base = self._get_origin(stream_url_from_arg)
                 else:
                     # Try to extract from player URL structure
-                    player_domain = self._get_origin(player_url)
+                    player_domain_for_auth_derive = self._get_origin(player_url_for_auth)
                     # Attempt to construct a standard auth domain
-                    auth_url_base = self._derive_auth_url_base(player_domain)
+                    final_auth_url_base = self._derive_auth_url_base(player_domain_for_auth_derive)
 
-                if not auth_url_base:
+                if not final_auth_url_base:
                     raise ExtractorError("Could not determine auth URL base")
 
             # Construct auth URL
             auth_url = (
-                f"{auth_url_base}/auth.php?channel_id={auth_data['channel_key']}"
+                f"{final_auth_url_base}/auth.php?channel_id={auth_data['channel_key']}"
                 f"&ts={auth_data['auth_ts']}&rnd={auth_data['auth_rnd']}"
                 f"&sig={quote(auth_data['auth_sig'])}"
             )
 
             # Make auth request
-            player_origin = self._get_origin(player_url)
-            auth_headers = {
-                "referer": player_origin + "/",
-                "origin": player_origin,
+            auth_req_headers = {
+                "referer": player_origin_for_auth + "/",
+                "origin": player_origin_for_auth,
                 "user-agent": self.base_headers["user-agent"],
             }
 
-            auth_response = await self._make_request(auth_url, headers=auth_headers)
+            auth_response = await self._make_request(auth_url, headers=auth_req_headers)
 
             # Check if authentication succeeded
             if auth_response.json().get("status") != "ok":
                 raise ExtractorError("Authentication failed")
 
             # If no stream URL provided, look up the server and generate the stream URL
-            if not stream_url:
-                stream_url = await self._lookup_server(
-                    lookup_url_base=player_origin,
-                    auth_url_base=auth_url_base,
+            final_stream_url = stream_url_from_arg
+            if not final_stream_url:
+                final_stream_url = await self._lookup_server(
+                    lookup_url_base=player_origin_for_auth, # Usa l'origine del player che contiene gli script
+                    auth_url_base=final_auth_url_base,
                     auth_data=auth_data,
-                    headers=auth_headers,
+                    headers=auth_req_headers, # Riutilizza gli header della richiesta di auth
                 )
 
             # Set up the final stream headers
             stream_headers = {
-                "referer": player_url,
-                "origin": player_origin,
+                "referer": player_url_for_auth,
+                "origin": player_origin_for_auth,
                 "user-agent": self.base_headers["user-agent"],
             }
 
             # Return the stream URL with headers
             return {
-                "destination_url": stream_url,
+                "destination_url": final_stream_url,
                 "request_headers": stream_headers,
                 "mediaflow_endpoint": self.mediaflow_endpoint,
             }
