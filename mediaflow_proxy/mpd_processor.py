@@ -137,8 +137,10 @@ def build_hls(mpd_dict: dict, request: Request, key_id: str = None, key: str = N
 
     # Add video streams
     for profile, playlist_url in video_profiles.values():
+        # Only add AUDIO attribute if there are audio profiles available
+        audio_attr = ',AUDIO="audio"' if audio_profiles else ""
         hls.append(
-            f'#EXT-X-STREAM-INF:BANDWIDTH={profile["bandwidth"]},RESOLUTION={profile["width"]}x{profile["height"]},CODECS="{profile["codecs"]}",FRAME-RATE={profile["frameRate"]},AUDIO="audio"'
+            f'#EXT-X-STREAM-INF:BANDWIDTH={profile["bandwidth"]},RESOLUTION={profile["width"]}x{profile["height"]},CODECS="{profile["codecs"]}",FRAME-RATE={profile["frameRate"]}{audio_attr}'
         )
         hls.append(playlist_url)
 
