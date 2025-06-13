@@ -44,14 +44,33 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Extract version from tag
+      id: get_version
+      run: |
+        # Remove 'v' prefix if present (e.g., v1.2.3 -> 1.2.3)
+        VERSION=${GITHUB_REF_NAME#v}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Extracted version: $VERSION"
+
+    - name: Update version in pyproject.toml
+      run: |
+        # Update the version in pyproject.toml using sed
+        sed -i 's/^version = ".*"/version = "${{ steps.get_version.outputs.version }}"/' pyproject.toml
+        echo "Updated pyproject.toml version to: ${{ steps.get_version.outputs.version }}"
+        # Verify the change
+        grep '^version = ' pyproject.toml
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.12'
+        python-version: '3.13'
+
     - name: Install dependencies
       run: |
         pip install poetry
         poetry build
+
     - name: Build and publish
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
