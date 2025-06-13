@@ -143,10 +143,10 @@ class DLHDExtractor(BaseExtractor):
             final_stream_url = stream_url_from_arg
             if not final_stream_url:
                 final_stream_url = await self._lookup_server(
-                    lookup_url_base=player_origin_for_auth, # Usa l'origine del player che contiene gli script
+                    lookup_url_base=player_origin_for_auth,
                     auth_url_base=final_auth_url_base,
                     auth_data=auth_data,
-                    headers=auth_req_headers, # Riutilizza gli header della richiesta di auth
+                    headers=auth_req_headers,
                 )
 
             # Set up the final stream headers
