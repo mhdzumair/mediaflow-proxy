@@ -319,6 +319,24 @@ mpv "http://localhost:8888/proxy/stream?d=https://self-signed.badssl.com/&api_pa
 mpv "http://localhost:8888/proxy/hls/manifest.m3u8?d=https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8&h_referer=https://apple.com/&h_origin=https://apple.com&h_user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36&api_password=your_password"
 ```
 
+#### Proxy M3U/M3U_Plus IPTV Streams with Forced Playlist Proxying
+
+For IPTV m3u/m3u_plus streams where playlist URLs don't have clear keyword indicators, use the `force_playlist_proxy` parameter. This is commonly used with IPTV clients and applications:
+
+```bash
+# Example IPTV stream URL for use in IPTV clients like TiviMate, IPTV Smarters, etc.
+http://localhost:8888/proxy/hls/manifest.m3u8?d=https://iptv.example.com/playlist.m3u&force_playlist_proxy=true&api_password=your_password
+
+# With custom headers for IPTV providers that require authentication
+http://localhost:8888/proxy/hls/manifest.m3u8?d=https://iptv.provider.com/stream&force_playlist_proxy=true&h_user-agent=IPTV-Client&h_referer=https://iptv.provider.com&api_password=your_password
+```
+
+**IPTV Use Cases:**
+- **M3U Playlists**: When IPTV providers use m3u format without clear file extensions
+- **M3U_Plus Playlists**: Extended m3u format with additional metadata
+- **Provider-Specific Streams**: IPTV services with custom playlist formats
+- **Authentication Required**: Streams that need specific headers or authentication
+
 #### Live DASH Stream (Non-DRM Protected)
 
 ```bash
@@ -485,6 +503,17 @@ M3U8_CONTENT_ROUTING=stremio  # or "mediaflow" (default) or "direct"
 - `mediaflow` (default): All content through MediaFlow
 - `stremio`: Video segments through Stremio, playlists through MediaFlow
 - `direct`: Video segments served directly, playlists through MediaFlow
+
+**Force Playlist Proxy Parameter:**
+
+For IPTV streams where the playlist format (m3u/m3u_plus) cannot be reliably detected from the URL, you can use the `force_playlist_proxy` parameter to ensure all playlist URLs are proxied through MediaFlow:
+
+```bash
+# Force all playlist URLs to be proxied through MediaFlow (for IPTV clients)
+http://localhost:8888/proxy/hls/manifest.m3u8?d=https://iptv.provider.com/playlist&force_playlist_proxy=true&api_password=your_password
+```
+
+This parameter bypasses URL-based detection and routing strategy, ensuring consistent behavior for IPTV streams that don't have clear format indicators in their URLs.
 
 ## Future Development
 

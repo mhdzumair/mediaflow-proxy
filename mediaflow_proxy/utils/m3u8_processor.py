@@ -9,16 +9,18 @@ from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url, encode_
 
 
 class M3U8Processor:
-    def __init__(self, request, key_url: str = None):
+    def __init__(self, request, key_url: str = None, force_playlist_proxy: bool = None):
         """
         Initializes the M3U8Processor with the request and URL prefix.
 
         Args:
             request (Request): The incoming HTTP request.
             key_url (HttpUrl, optional): The URL of the key server. Defaults to None.
+            force_playlist_proxy (bool, optional): Force all playlist URLs to be proxied through MediaFlow. Defaults to None.
         """
         self.request = request
         self.key_url = parse.urlparse(key_url) if key_url else None
+        self.force_playlist_proxy = force_playlist_proxy
         self.mediaflow_proxy_url = str(
             request.url_for("hls_manifest_proxy").replace(scheme=get_original_scheme(request))
         )
@@ -146,8 +148,15 @@ class M3U8Processor:
         # Determine routing strategy based on configuration
         routing_strategy = settings.m3u8_content_routing
 
+        # Check if we should force MediaFlow proxy for all playlist URLs
+        if self.force_playlist_proxy:
+            return await self.proxy_url(full_url, base_url, use_full_url=True)
+
         # For playlist URLs, always use MediaFlow proxy regardless of strategy
-        if ".m3u" in full_url:
+        # Check for actual playlist file extensions, not just substring matches
+        parsed_url = parse.urlparse(full_url)
+        if (parsed_url.path.endswith((".m3u", ".m3u8", ".m3u_plus")) or
+            parse.parse_qs(parsed_url.query).get("type", [""])[0] in ["m3u", "m3u8", "m3u_plus"]):
             return await self.proxy_url(full_url, base_url, use_full_url=True)
 
         # Route non-playlist content URLs based on strategy
@@ -191,6 +200,8 @@ class M3U8Processor:
         has_encrypted = query_params.pop("has_encrypted", False)
         # Remove the response headers from the query params to avoid it being added to the consecutive requests
         [query_params.pop(key, None) for key in list(query_params.keys()) if key.startswith("r_")]
+        # Remove force_playlist_proxy to avoid it being added to subsequent requests
+        query_params.pop("force_playlist_proxy", None)
 
         return encode_mediaflow_proxy_url(
             self.mediaflow_proxy_url,
