@@ -64,6 +64,10 @@ class HLSManifestParams(GenericParams):
         None,
         description="The HLS Key URL to replace the original key URL. Defaults to None. (Useful for bypassing some sneaky protection)",
     )
+    force_playlist_proxy: Optional[bool] = Field(
+        None,
+        description="Force all playlist URLs to be proxied through MediaFlow regardless of m3u8_content_routing setting. Useful for IPTV m3u/m3u_plus formats that don't have clear URL indicators.",
+    )
 
 
 class MPDManifestParams(GenericParams):
