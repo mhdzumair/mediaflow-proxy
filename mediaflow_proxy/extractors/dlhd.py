@@ -1,5 +1,6 @@
 import re
-from typing import Dict, Any, Optional
+import base64
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse, quote
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
@@ -306,30 +307,49 @@ class DLHDExtractor(BaseExtractor):
     def _extract_auth_data(self, html_content: str) -> Dict[str, str]:
         """Extract authentication data from player page."""
         try:
-            # Extract channel key
             channel_key_match = re.search(r'var\s+channelKey\s*=\s*["\']([^"\']+)["\']', html_content)
-            # Extract auth timestamp
+            if not channel_key_match:
+                return {}
+            channel_key = channel_key_match.group(1)
+
+            # New pattern with atob
+            auth_ts_match = re.search(r'var\s+__c\s*=\s*atob\([\'"]([^\'"]+)[\'"]\)', html_content)
+            auth_rnd_match = re.search(r'var\s+__d\s*=\s*atob\([\'"]([^\'"]+)[\'"]\)', html_content)
+            auth_sig_match = re.search(r'var\s+__e\s*=\s*atob\([\'"]([^\'"]+)[\'"]\)', html_content)
+
+            if all([auth_ts_match, auth_rnd_match, auth_sig_match]):
+                return {
+                    "channel_key": channel_key,
+                    "auth_ts": base64.b64decode(auth_ts_match.group(1)).decode("utf-8"),
+                    "auth_rnd": base64.b64decode(auth_rnd_match.group(1)).decode("utf-8"),
+                    "auth_sig": base64.b64decode(auth_sig_match.group(1)).decode("utf-8"),
+                }
+
+            # Original pattern
             auth_ts_match = re.search(r'var\s+authTs\s*=\s*["\']([^"\']+)["\']', html_content)
-            # Extract auth random value
             auth_rnd_match = re.search(r'var\s+authRnd\s*=\s*["\']([^"\']+)["\']', html_content)
-            # Extract auth signature
             auth_sig_match = re.search(r'var\s+authSig\s*=\s*["\']([^"\']+)["\']', html_content)
 
-            if not all([channel_key_match, auth_ts_match, auth_rnd_match, auth_sig_match]):
-                return {}
-
-            return {
-                "channel_key": channel_key_match.group(1),
-                "auth_ts": auth_ts_match.group(1),
-                "auth_rnd": auth_rnd_match.group(1),
-                "auth_sig": auth_sig_match.group(1),
-            }
+            if all([auth_ts_match, auth_rnd_match, auth_sig_match]):
+                return {
+                    "channel_key": channel_key,
+                    "auth_ts": auth_ts_match.group(1),
+                    "auth_rnd": auth_rnd_match.group(1),
+                    "auth_sig": auth_sig_match.group(1),
+                }
+            return {}
         except Exception:
             return {}
 
     def _extract_auth_url_base(self, html_content: str) -> Optional[str]:
         """Extract auth URL base from player page script content."""
         try:
+            # New atob pattern for auth base URL
+            auth_url_base_match = re.search(r'var\s+__a\s*=\s*atob\([\'"]([^\'"]+)[\'"]\)', html_content)
+            if auth_url_base_match:
+                decoded_url = base64.b64decode(auth_url_base_match.group(1)).decode("utf-8")
+                return decoded_url.strip().rstrip("/")
+
             # Look for auth URL or domain in fetchWithRetry call or similar patterns
             auth_url_match = re.search(r'fetchWithRetry\([\'"]([^\'"]*/auth\.php)', html_content)
 
