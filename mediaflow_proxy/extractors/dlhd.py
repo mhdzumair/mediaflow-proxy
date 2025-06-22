@@ -6,6 +6,10 @@ from urllib.parse import urlparse, quote
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
 
+class VecloudAPIFailedError(ExtractorError):
+    """Custom exception for definitive vecloud API failures (e.g., success: false)."""
+    pass
+
 class DLHDExtractor(BaseExtractor):
     """DLHD (DaddyLive) URL extractor for M3U8 streams."""
 
@@ -63,7 +67,13 @@ class DLHDExtractor(BaseExtractor):
                 try:
                     referer_for_vecloud = self._get_origin(current_player_url_for_processing) + "/"
                     return await self._handle_vecloud(current_player_url_for_processing, referer_for_vecloud)
+                except VecloudAPIFailedError as e:
+                    # This is a definitive failure from the vecloud API (e.g., stream offline).
+                    # We should not attempt other methods. Re-raise the error.
+                    raise e
                 except Exception:
+                    # A different error occurred (e.g., network error, 404 on API endpoint).
+                    # This might indicate that it's not a vecloud stream, despite the URL pattern.
                     # Vecloud handler failed. Fall through to the standard auth flow.
                     # We will try the /cast/ trick later if it's needed.
                     pass
@@ -79,6 +89,9 @@ class DLHDExtractor(BaseExtractor):
                         try:
                             referer_for_vecloud = self._get_origin(playnow_derived_player_url) + "/"
                             return await self._handle_vecloud(playnow_derived_player_url, referer_for_vecloud)
+                        except VecloudAPIFailedError as e:
+                            # Definitive failure, re-raise.
+                            raise e
                         except Exception:
                             # Vecloud failed, fall through with the derived URL.
                             current_player_url_for_processing = playnow_derived_player_url
@@ -234,13 +247,13 @@ class DLHDExtractor(BaseExtractor):
 
             # Check if request was successful
             if not api_data.get("success"):
-                raise ExtractorError("Vecloud API request failed")
+                raise VecloudAPIFailedError("Vecloud API request returned success: false")
 
             # Extract stream URL from response
             stream_url = api_data.get("player", {}).get("source_file")
 
             if not stream_url:
-                raise ExtractorError("Could not find stream URL in vecloud response")
+                raise VecloudAPIFailedError("Could not find stream URL in vecloud API response")
 
             # Set up stream headers
             stream_headers = {
@@ -256,6 +269,9 @@ class DLHDExtractor(BaseExtractor):
                 "mediaflow_endpoint": self.mediaflow_endpoint,
             }
 
+        except VecloudAPIFailedError:
+            # Re-raise the specific error to be caught and handled in extract()
+            raise
         except Exception as e:
             raise ExtractorError(f"Vecloud extraction failed: {str(e)}")
 
