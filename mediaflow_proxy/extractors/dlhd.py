@@ -5,11 +5,6 @@ from urllib.parse import urlparse, quote
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
-
-class VecloudAPIFailedError(ExtractorError):
-    """Custom exception for definitive vecloud API failures (e.g., success: false)."""
-    pass
-
 class DLHDExtractor(BaseExtractor):
     """DLHD (DaddyLive) URL extractor for M3U8 streams."""
 
@@ -62,44 +57,40 @@ class DLHDExtractor(BaseExtractor):
             else:
                 current_player_url_for_processing = player_url_from_arg
 
-            # Attempt 1: Handle vecloud /stream/ URLs
-            if re.search(r"/stream/([a-zA-Z0-9-]+)", current_player_url_for_processing):
+            # First, resolve any 'playnow' wrappers to get a more direct player URL.
+            try:
+                playnow_derived_player_url = await self._handle_playnow(
+                    current_player_url_for_processing, channel_origin + "/"
+                )
+                # If successful, update the URL we are working with
+                current_player_url_for_processing = playnow_derived_player_url
+            except Exception:
+                # If playnow fails, just continue with the original player URL
+                pass
+
+            # Now, decide the extraction strategy based on the (potentially updated) URL.
+            is_vecloud_domain = "vecloud.eu" in current_player_url_for_processing
+            is_stream_path = "/stream/" in current_player_url_for_processing
+
+            # Strategy 1: It's a vecloud.eu URL. Use the vecloud handler exclusively.
+            if is_vecloud_domain:
                 try:
-                    referer_for_vecloud = self._get_origin(current_player_url_for_processing) + "/"
-                    return await self._handle_vecloud(current_player_url_for_processing, referer_for_vecloud)
-                except VecloudAPIFailedError as e:
-                    # This is a definitive failure from the vecloud API (e.g., stream offline).
-                    # We should not attempt other methods. Re-raise the error.
-                    raise e
-                except Exception:
-                    # A different error occurred (e.g., network error, 404 on API endpoint).
-                    # This might indicate that it's not a vecloud stream, despite the URL pattern.
-                    # Vecloud handler failed. Fall through to the standard auth flow.
-                    # We will try the /cast/ trick later if it's needed.
-                    pass
-            else:
-                # Attempt 2: Handle other URLs, which might be 'playnow' wrappers
+                    referer = self._get_origin(current_player_url_for_processing) + "/"
+                    return await self._handle_vecloud(current_player_url_for_processing, referer)
+                except Exception as e:
+                    # Any failure in the vecloud handler for a vecloud URL is a terminal failure.
+                    raise ExtractorError(f"Vecloud extraction failed: {e}") from e
+
+            # Strategy 2: It's a /stream/ URL on a non-vecloud domain. It could be a vecloud wrapper
+            # or a standard auth page. Try the vecloud handler first.
+            if is_stream_path:  # and not is_vecloud_domain (implicit from above)
                 try:
-                    # This might be a 'playnow' page that reveals the real player URL
-                    playnow_derived_player_url = await self._handle_playnow(
-                        current_player_url_for_processing, channel_origin + "/"
-                    )
-                    # The result of playnow might be a vecloud /stream/ URL
-                    if re.search(r"/stream/([a-zA-Z0-9-]+)", playnow_derived_player_url):
-                        try:
-                            referer_for_vecloud = self._get_origin(playnow_derived_player_url) + "/"
-                            return await self._handle_vecloud(playnow_derived_player_url, referer_for_vecloud)
-                        except VecloudAPIFailedError as e:
-                            # Definitive failure, re-raise.
-                            raise e
-                        except Exception:
-                            # Vecloud failed, fall through with the derived URL.
-                            current_player_url_for_processing = playnow_derived_player_url
-                    else:
-                        # If not a stream URL, update the player URL and proceed to standard auth
-                        current_player_url_for_processing = playnow_derived_player_url
+                    # This will follow redirects. If it finds a vecloud stream, it will return.
+                    referer = self._get_origin(current_player_url_for_processing) + "/"
+                    return await self._handle_vecloud(current_player_url_for_processing, referer)
                 except Exception:
-                    # If playnow fails, just continue with the original player URL
+                    # The vecloud handler failed. This is expected if it's not a vecloud wrapper.
+                    # We will now fall through to the standard authentication logic below.
                     pass
 
             # If all previous attempts have failed, proceed with standard authentication.
@@ -213,27 +204,28 @@ class DLHDExtractor(BaseExtractor):
             Dict containing stream URL and required headers
         """
         try:
-            # Extract stream ID from vecloud URL
-            stream_id_match = re.search(r"/stream/([a-zA-Z0-9-]+)", player_url)
-            if not stream_id_match:
-                raise ExtractorError("Could not extract stream ID from vecloud URL")
-
-            stream_id = stream_id_match.group(1)
-
+            # First, resolve any redirects to get the final player URL
             response = await self._make_request(
                 player_url, headers={"referer": channel_referer, "user-agent": self.base_headers["user-agent"]}
             )
-            player_url = str(response.url)
+            final_player_url = str(response.url)
+
+            # Now, extract the stream ID from the final URL. It could be in /stream/ or /cast/
+            stream_id_match = re.search(r"/(?:stream|cast)/([a-zA-Z0-9-]+)", final_player_url)
+            if not stream_id_match:
+                raise ExtractorError(f"Could not extract stream ID from final vecloud URL: {final_player_url}")
+
+            stream_id = stream_id_match.group(1)
 
             # Construct API URL
-            player_parsed = urlparse(player_url)
+            player_parsed = urlparse(final_player_url)
             player_domain = player_parsed.netloc
             player_origin = f"{player_parsed.scheme}://{player_parsed.netloc}"
             api_url = f"{player_origin}/api/source/{stream_id}?type=live"
 
             # Set up headers for API request
             api_headers = {
-                "referer": player_url,
+                "referer": final_player_url,
                 "origin": player_origin,
                 "user-agent": self.base_headers["user-agent"],
                 "content-type": "application/json",
@@ -247,13 +239,13 @@ class DLHDExtractor(BaseExtractor):
 
             # Check if request was successful
             if not api_data.get("success"):
-                raise VecloudAPIFailedError("Vecloud API request returned success: false")
+                raise ExtractorError("Vecloud API request returned success: false")
 
             # Extract stream URL from response
             stream_url = api_data.get("player", {}).get("source_file")
 
             if not stream_url:
-                raise VecloudAPIFailedError("Could not find stream URL in vecloud API response")
+                raise ExtractorError("Could not find stream URL in vecloud API response")
 
             # Set up stream headers
             stream_headers = {
@@ -269,11 +261,8 @@ class DLHDExtractor(BaseExtractor):
                 "mediaflow_endpoint": self.mediaflow_endpoint,
             }
 
-        except VecloudAPIFailedError:
-            # Re-raise the specific error to be caught and handled in extract()
-            raise
         except Exception as e:
-            raise ExtractorError(f"Vecloud extraction failed: {str(e)}")
+            raise ExtractorError(f"Vecloud extraction failed: {str(e)}") from e
 
     async def _handle_playnow(self, player_iframe: str, channel_origin: str) -> str:
         """Handle playnow URLs."""
