@@ -58,29 +58,35 @@ class DLHDExtractor(BaseExtractor):
             else:
                 current_player_url_for_processing = player_url_from_arg
 
-            # Attempt 1: _handle_vecloud with current_player_url_for_processing
-            # The referer for _handle_vecloud is the origin of the channel page (channel_origin) 
-            # or the origin of the player itself if it is a /stream/ URL.
-            try:
-                referer_for_vecloud = channel_origin + "/"
-                if re.search(r"/stream/([a-zA-Z0-9-]+)", current_player_url_for_processing):
-                    referer_for_vecloud = self._get_origin(current_player_url_for_processing) + "/"
-                return await self._handle_vecloud(current_player_url_for_processing, referer_for_vecloud)
-            except Exception:
-                pass # Fail, Continue
-                
-            # Attempt 2: If _handle_vecloud fail and the URL is not /stream/, try _handle_playnow
-            # and then _handle_vecloud again with the URL resulting from playnow.
-            if not re.search(r"/stream/([a-zA-Z0-9-]+)", current_player_url_for_processing):
+            # Attempt 1: Handle vecloud /stream/ URLs
+            if re.search(r"/stream/([a-zA-Z0-9-]+)", current_player_url_for_processing):
                 try:
-                    playnow_derived_player_url = await self._handle_playnow(current_player_url_for_processing, channel_origin + "/")
+                    referer_for_vecloud = self._get_origin(current_player_url_for_processing) + "/"
+                    return await self._handle_vecloud(current_player_url_for_processing, referer_for_vecloud)
+                except Exception:
+                    # Vecloud handler failed. Some /stream/ URLs are actually /cast/ URLs.
+                    # Transform the URL and fall through to the standard auth flow.
+                    current_player_url_for_processing = current_player_url_for_processing.replace("/stream/", "/cast/", 1)
+            else:
+                # Attempt 2: Handle other URLs, which might be 'playnow' wrappers
+                try:
+                    # This might be a 'playnow' page that reveals the real player URL
+                    playnow_derived_player_url = await self._handle_playnow(
+                        current_player_url_for_processing, channel_origin + "/"
+                    )
+                    # The result of playnow might be a vecloud /stream/ URL
                     if re.search(r"/stream/([a-zA-Z0-9-]+)", playnow_derived_player_url):
                         try:
-                            referer_for_vecloud_after_playnow = self._get_origin(playnow_derived_player_url) + "/"
-                            return await self._handle_vecloud(playnow_derived_player_url, referer_for_vecloud_after_playnow)
+                            referer_for_vecloud = self._get_origin(playnow_derived_player_url) + "/"
+                            return await self._handle_vecloud(playnow_derived_player_url, referer_for_vecloud)
                         except Exception:
-                            pass 
+                            # Vecloud failed, try the /cast/ trick on the derived URL
+                            current_player_url_for_processing = playnow_derived_player_url.replace("/stream/", "/cast/", 1)
+                    else:
+                        # If not a stream URL, update the player URL and proceed to standard auth
+                        current_player_url_for_processing = playnow_derived_player_url
                 except Exception:
+                    # If playnow fails, just continue with the original player URL
                     pass
 
             # If all previous attempts have failed, proceed with standard authentication.
