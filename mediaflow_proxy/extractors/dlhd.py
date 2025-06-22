@@ -64,9 +64,9 @@ class DLHDExtractor(BaseExtractor):
                     referer_for_vecloud = self._get_origin(current_player_url_for_processing) + "/"
                     return await self._handle_vecloud(current_player_url_for_processing, referer_for_vecloud)
                 except Exception:
-                    # Vecloud handler failed. Some /stream/ URLs are actually /cast/ URLs.
-                    # Transform the URL and fall through to the standard auth flow.
-                    current_player_url_for_processing = current_player_url_for_processing.replace("/stream/", "/cast/", 1)
+                    # Vecloud handler failed. Fall through to the standard auth flow.
+                    # We will try the /cast/ trick later if it's needed.
+                    pass
             else:
                 # Attempt 2: Handle other URLs, which might be 'playnow' wrappers
                 try:
@@ -80,8 +80,8 @@ class DLHDExtractor(BaseExtractor):
                             referer_for_vecloud = self._get_origin(playnow_derived_player_url) + "/"
                             return await self._handle_vecloud(playnow_derived_player_url, referer_for_vecloud)
                         except Exception:
-                            # Vecloud failed, try the /cast/ trick on the derived URL
-                            current_player_url_for_processing = playnow_derived_player_url.replace("/stream/", "/cast/", 1)
+                            # Vecloud failed, fall through with the derived URL.
+                            current_player_url_for_processing = playnow_derived_player_url
                     else:
                         # If not a stream URL, update the player URL and proceed to standard auth
                         current_player_url_for_processing = playnow_derived_player_url
@@ -105,6 +105,23 @@ class DLHDExtractor(BaseExtractor):
 
             # Extract authentication details from script tag
             auth_data = self._extract_auth_data(player_content)
+
+            # If auth data extraction fails on a /stream/ URL, try replacing it with /cast/ and re-attempt.
+            if not auth_data and "/stream/" in player_url_for_auth:
+                player_url_for_auth = player_url_for_auth.replace("/stream/", "/cast/", 1)
+                player_origin_for_auth = self._get_origin(player_url_for_auth)
+
+                # Re-fetch player page with the new /cast/ URL
+                player_headers = {
+                    "referer": player_origin_for_auth + "/",
+                    "origin": player_origin_for_auth,
+                    "user-agent": self.base_headers["user-agent"],
+                }
+                player_response = await self._make_request(player_url_for_auth, headers=player_headers)
+                player_content = player_response.text
+
+                auth_data = self._extract_auth_data(player_content)
+
             if not auth_data:
                 raise ExtractorError("Failed to extract authentication data from player")
 
