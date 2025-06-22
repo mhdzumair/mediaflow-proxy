@@ -48,8 +48,10 @@ class DLHDExtractor(BaseExtractor):
                 return await self._handle_vecloud(current_player_url_for_processing, referer_for_vecloud)
             except Exception:
                 # LOGICA AGGIUNTA: se fallisce e la URL contiene /stream/stream, prova con /cast/stream
-                if "/stream/stream" in current_player_url_for_processing:
-                    alternative_url = current_player_url_for_processing.replace("/stream/stream", "/cast/stream")
+                stream_pattern = re.compile(r"/stream/([a-zA-Z0-9\-]+\.php)")
+                match = stream_pattern.search(current_player_url_for_processing)
+                if match:
+                    alternative_url = current_player_url_for_processing.replace("/stream/", "/cast/", 1)
                     try:
                         referer_for_vecloud_alt = self._get_origin(alternative_url) + "/"
                         return await self._handle_vecloud(alternative_url, referer_for_vecloud_alt)
