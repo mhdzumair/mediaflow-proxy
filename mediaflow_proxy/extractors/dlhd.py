@@ -67,14 +67,6 @@ class DLHDExtractor(BaseExtractor):
                     referer_for_vecloud = self._get_origin(current_player_url_for_processing) + "/"
                 return await self._handle_vecloud(current_player_url_for_processing, referer_for_vecloud)
             except Exception:
-                # Fallback: If _handle_vecloud fails and the URL contains /stream/, try /cast/
-                if re.search(r"/stream/([a-zA-Z0-9-]+)", current_player_url_for_processing):
-                    try:
-                        cast_player_url = current_player_url_for_processing.replace("/stream/", "/cast/")
-                        referer_for_cast = self._get_origin(cast_player_url) + "/"
-                        return await self._handle_vecloud(cast_player_url, referer_for_cast)
-                    except Exception:
-                        pass # Fail, Continue to next attempt
                 pass # Fail, Continue
                 
             # Attempt 2: If _handle_vecloud fail and the URL is not /stream/, try _handle_playnow
