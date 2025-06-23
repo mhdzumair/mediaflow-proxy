@@ -10,7 +10,6 @@ class DLHDExtractor(BaseExtractor):
 
     def __init__(self, request_headers: dict):
         super().__init__(request_headers)
-        # Default to HLS proxy endpoint
         self.mediaflow_endpoint = "hls_manifest_proxy"
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
@@ -22,8 +21,6 @@ class DLHDExtractor(BaseExtractor):
             player_url_from_arg = kwargs.get("player_url")
             stream_url_from_arg = kwargs.get("stream_url")
             auth_url_base_from_arg = kwargs.get("auth_url_base")
-
-            current_player_url_for_processing: str
 
             # Se non fornito, estrai player_url dalla pagina del canale
             if not player_url_from_arg:
@@ -47,7 +44,7 @@ class DLHDExtractor(BaseExtractor):
             try:
                 return await self._handle_vecloud(current_player_url_for_processing, referer_for_vecloud)
             except Exception:
-                # LOGICA MODIFICATA: se fallisce e la URL contiene /stream/, prova con /cast/
+                # MODIFICA: fallback su /cast/ se la URL contiene /stream/
                 if "/stream/" in current_player_url_for_processing:
                     alternative_url = current_player_url_for_processing.replace("/stream/", "/cast/", 1)
                     try:
@@ -140,4 +137,163 @@ class DLHDExtractor(BaseExtractor):
         except Exception as e:
             raise ExtractorError(f"Extraction failed: {str(e)}")
 
-    # ... Tutte le altre funzioni della classe rimangono invariate (come da file allegato) ...
+    async def _handle_vecloud(self, player_url: str, channel_referer: str) -> Dict[str, Any]:
+        """Handle vecloud URLs with their specific API."""
+        try:
+            stream_id_match = re.search(r"/stream/([a-zA-Z0-9-]+)", player_url)
+            if not stream_id_match:
+                raise ExtractorError("Could not extract stream ID from vecloud URL")
+            stream_id = stream_id_match.group(1)
+
+            response = await self._make_request(
+                player_url, headers={"referer": channel_referer, "user-agent": self.base_headers["user-agent"]}
+            )
+            player_url = str(response.url)
+
+            player_parsed = urlparse(player_url)
+            player_domain = player_parsed.netloc
+            player_origin = f"{player_parsed.scheme}://{player_parsed.netloc}"
+            api_url = f"{player_origin}/api/source/{stream_id}?type=live"
+
+            api_headers = {
+                "referer": player_url,
+                "origin": player_origin,
+                "user-agent": self.base_headers["user-agent"],
+                "content-type": "application/json",
+            }
+
+            api_data = {"r": channel_referer, "d": player_domain}
+
+            api_response = await self._make_request(api_url, method="POST", headers=api_headers, json=api_data)
+            api_data = api_response.json()
+
+            if not api_data.get("success"):
+                raise ExtractorError("Vecloud API request failed")
+
+            stream_url = api_data.get("player", {}).get("source_file")
+            if not stream_url:
+                raise ExtractorError("Could not find stream URL in vecloud response")
+
+            stream_headers = {
+                "referer": player_origin + "/",
+                "origin": player_origin,
+                "user-agent": self.base_headers["user-agent"],
+            }
+
+            return {
+                "destination_url": stream_url,
+                "request_headers": stream_headers,
+                "mediaflow_endpoint": self.mediaflow_endpoint,
+            }
+
+        except Exception as e:
+            raise ExtractorError(f"Vecloud extraction failed: {str(e)}")
+
+    async def _handle_playnow(self, player_iframe: str, channel_origin: str) -> str:
+        playnow_headers = {"referer": channel_origin + "/", "user-agent": self.base_headers["user-agent"]}
+        playnow_response = await self._make_request(player_iframe, headers=playnow_headers)
+        player_url = self._extract_player_url(playnow_response.text)
+        if not player_url:
+            raise ExtractorError("Could not extract player URL from playnow response")
+        return player_url
+
+    def _extract_player_url(self, html_content: str) -> Optional[str]:
+        try:
+            iframe_match = re.search(
+                r'<iframe[^>]*src=["\']([^"\']+)["\'][^>]*allowfullscreen', html_content, re.IGNORECASE
+            )
+            if not iframe_match:
+                iframe_match = re.search(
+                    r'<iframe[^>]*src=["\']([^"\']+(?:premiumtv|daddylivehd|vecloud)[^"\']*)["\']',
+                    html_content,
+                    re.IGNORECASE,
+                )
+            if iframe_match:
+                return iframe_match.group(1).strip()
+            return None
+        except Exception:
+            return None
+
+    async def _lookup_server(
+        self, lookup_url_base: str, auth_url_base: str, auth_data: Dict[str, str], headers: Dict[str, str]
+    ) -> str:
+        try:
+            server_lookup_url = f"{lookup_url_base}/server_lookup.php?channel_id={quote(auth_data['channel_key'])}"
+            server_response = await self._make_request(server_lookup_url, headers=headers)
+            server_data = server_response.json()
+            server_key = server_data.get("server_key")
+            if not server_key:
+                raise ExtractorError("Failed to get server key")
+            auth_domain_parts = urlparse(auth_url_base).netloc.split(".")
+            domain_suffix = ".".join(auth_domain_parts[1:]) if len(auth_domain_parts) > 1 else auth_domain_parts[0]
+            if "/" in server_key:
+                parts = server_key.split("/")
+                return f"<https://{parts>[0]}.{domain_suffix}/{server_key}/{auth_data['channel_key']}/mono.m3u8"
+            else:
+                return f"https://{server_key}new.{domain_suffix}/{server_key}/{auth_data['channel_key']}/mono.m3u8"
+        except Exception as e:
+            raise ExtractorError(f"Server lookup failed: {str(e)}")
+
+    def _extract_auth_data(self, html_content: str) -> Dict[str, str]:
+        try:
+            channel_key_match = re.search(r'var\s+channelKey\s*=\s*["\']([^"\']+)["\']', html_content)
+            if not channel_key_match:
+                return {}
+            channel_key = channel_key_match.group(1)
+            auth_ts_match = re.search(r'var\s+__c\s*=\s*atob\([\'"]([^\'"]+)[\'"]\)', html_content)
+            auth_rnd_match = re.search(r'var\s+__d\s*=\s*atob\([\'"]([^\'"]+)[\'"]\)', html_content)
+            auth_sig_match = re.search(r'var\s+__e\s*=\s*atob\([\'"]([^\'"]+)[\'"]\)', html_content)
+            if all([auth_ts_match, auth_rnd_match, auth_sig_match]):
+                return {
+                    "channel_key": channel_key,
+                    "auth_ts": base64.b64decode(auth_ts_match.group(1)).decode("utf-8"),
+                    "auth_rnd": base64.b64decode(auth_rnd_match.group(1)).decode("utf-8"),
+                    "auth_sig": base64.b64decode(auth_sig_match.group(1)).decode("utf-8"),
+                }
+            auth_ts_match = re.search(r'var\s+authTs\s*=\s*["\']([^"\']+)["\']', html_content)
+            auth_rnd_match = re.search(r'var\s+authRnd\s*=\s*["\']([^"\']+)["\']', html_content)
+            auth_sig_match = re.search(r'var\s+authSig\s*=\s*["\']([^"\']+)["\']', html_content)
+            if all([auth_ts_match, auth_rnd_match, auth_sig_match]):
+                return {
+                    "channel_key": channel_key,
+                    "auth_ts": auth_ts_match.group(1),
+                    "auth_rnd": auth_rnd_match.group(1),
+                    "auth_sig": auth_sig_match.group(1),
+                }
+            return {}
+        except Exception:
+            return {}
+
+    def _extract_auth_url_base(self, html_content: str) -> Optional[str]:
+        try:
+            auth_url_base_match = re.search(r'var\s+__a\s*=\s*atob\([\'"]([^\'"]+)[\'"]\)', html_content)
+            if auth_url_base_match:
+                decoded_url = base64.b64decode(auth_url_base_match.group(1)).decode("utf-8")
+                return decoded_url.strip().rstrip("/")
+            auth_url_match = re.search(r'fetchWithRetry\([\'"]([^\'"]*/auth\.php)', html_content)
+            if auth_url_match:
+                auth_url = auth_url_match.group(1)
+                return auth_url.split("/auth.php")[0]
+            domain_match = re.search(r'[\'"]https://([^/\'\"]+)(?:/[^\'\"]*)?/auth\.php', html_content)
+            if domain_match:
+                return f"https://{domain_match.group(1)}"
+            return None
+        except Exception:
+            return None
+
+    def _get_origin(self, url: str) -> str:
+        parsed = urlparse(url)
+        return f"{parsed.scheme}://{parsed.netloc}"
+
+    def _derive_auth_url_base(self, player_domain: str) -> Optional[str]:
+        try:
+            parsed = urlparse(player_domain)
+            domain_parts = parsed.netloc.split(".")
+            if len(domain_parts) >= 2:
+                base_domain = ".".join(domain_parts[-2:])
+                for prefix in ["auth", "api", "cdn"]:
+                    potential_auth_domain = f"https://{prefix}.{base_domain}"
+                    return potential_auth_domain
+            return None
+        except Exception:
+            return None
