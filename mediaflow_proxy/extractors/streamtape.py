@@ -1,6 +1,5 @@
 import re
 from typing import Dict, Any
-
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
 
@@ -15,14 +14,10 @@ class StreamtapeExtractor(BaseExtractor):
         matches = re.findall(r"id=.*?(?=')", response.text)
         if not matches:
             raise ExtractorError("Failed to extract URL components")
-        final_url = next(
-            (
-                f"https://streamtape.com/get_video?{matches[i + 1]}"
-                for i in range(len(matches) - 1)
-                if matches[i] == matches[i + 1]
-            ),
-            None,
-        )
+        i = 0
+        for  i in range(len(matches)):
+            if matches[i-1] == matches[i] and "ip=" in matches[i]:
+                final_url = f"https://streamtape.com/get_video?{matches[i]}"
 
         self.base_headers["referer"] = url
         return {
