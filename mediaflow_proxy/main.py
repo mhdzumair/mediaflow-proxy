@@ -14,6 +14,7 @@ from mediaflow_proxy.routes import proxy_router, extractor_router, speedtest_rou
 from mediaflow_proxy.schemas import GenerateUrlRequest, GenerateMultiUrlRequest, MultiUrlRequestItem
 from mediaflow_proxy.utils.crypto_utils import EncryptionHandler, EncryptionMiddleware
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
+from mediaflow_proxy.utils.cache_utils import close_all_caches
 
 logging.basicConfig(level=settings.log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 app = FastAPI()
@@ -162,6 +163,11 @@ app.include_router(speedtest_router, prefix="/speedtest", tags=["speedtest"], de
 
 static_path = resources.files("mediaflow_proxy").joinpath("static")
 app.mount("/", StaticFiles(directory=str(static_path), html=True), name="static")
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    await close_all_caches()
 
 
 def run():
