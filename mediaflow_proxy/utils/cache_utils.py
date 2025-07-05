@@ -92,9 +92,24 @@ class HybridCache:
         self.memory_cache = LRUMemoryCache(maxsize=max_memory_size)
         self._executor = ThreadPoolExecutor(max_workers=executor_workers)
         self._lock = asyncio.Lock()
+        self._closed = False
 
         # Initialize cache directories
         self._init_cache_dirs()
+
+    async def close(self) -> None:
+        """Shut down the thread pool executor."""
+        if self._closed:
+            return
+
+        self._executor.shutdown(wait=True)
+        self._closed = True
+
+    async def __aenter__(self) -> "HybridCache":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self.close()
 
     def _init_cache_dirs(self):
         """Initialize sharded cache directories."""
@@ -273,6 +288,12 @@ EXTRACTOR_CACHE = HybridCache(
     ttl=5 * 60,  # 5 minutes
     max_memory_size=50 * 1024 * 1024,
 )
+
+
+async def close_all_caches() -> None:
+    """Close all caches and release resources."""
+    await INIT_SEGMENT_CACHE.close()
+    await EXTRACTOR_CACHE.close()
 
 
 # Specific cache implementations
