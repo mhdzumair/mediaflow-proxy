@@ -17,7 +17,7 @@ class VixCloudExtractor(BaseExtractor):
 
     async def version(self, site_url: str) -> str:
         """Get version of VixCloud Parent Site."""
-        base_url = f"{site_url}/richiedi-un-titolo"
+        base_url = f"{site_url}/request-a-title"
         response = await self._make_request(
             base_url,
             headers={
