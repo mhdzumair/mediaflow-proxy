@@ -1,4 +1,3 @@
-import re
 from typing import Dict, Any
 
 from mediaflow_proxy.extractors.base import BaseExtractor
@@ -19,8 +18,8 @@ class FastreamExtractor(BaseExtractor):
         """Extract Fastream URL."""
         final_url = await eval_solver(self,url,headers)
 
-        self.base_headers["referer"] = f'https://{url.replace('https://','').split('/')[0]}/'
-        self.base_headers["origin"] = f'https://{url.replace('https://','').split('/')[0]}'
+        self.base_headers["referer"] = f'https://{url.replace("https://","").split("/")[0]}/'
+        self.base_headers["origin"] = f'https://{url.replace("https://","").split("/")[0]}'
         self.base_headers['Accept-Language'] = 'en-US,en;q=0.5'
         self.base_headers['Accept'] = '*/*'
         self.base_headers['user-agent'] = 'Mozilla/5.0 (X11; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0'
