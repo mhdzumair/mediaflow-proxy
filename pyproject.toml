@@ -27,6 +27,7 @@ include = ["LICENSE", "README.md", "mediaflow_proxy/static/*"]
 python = ">=3.9"
 fastapi = "0.115.12"
 httpx = {extras = ["socks", "zstd"], version = "^0.28.1"}
+requests = "^2.31.0"
 tenacity = "^9.1.2"
 xmltodict = "^0.14.2"
 pydantic-settings = "^2.9.1"
