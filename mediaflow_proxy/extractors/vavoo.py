@@ -1,5 +1,5 @@
 import json
-import requests
+import httpx
 from typing import Any, Dict, Optional
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
@@ -11,12 +11,8 @@ class VavooExtractor(BaseExtractor):
     def __init__(self, request_headers: dict):
         super().__init__(request_headers)
         self.mediaflow_endpoint = "proxy_stream_endpoint"
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'MediaHubMX/2'
-        })
 
-    def get_auth_signature(self) -> Optional[str]:
+    async def get_auth_signature(self) -> Optional[str]:
         """Get authentication signature for Vavoo API."""
         headers = {
             "user-agent": "okhttp/4.11.0",
@@ -84,11 +80,12 @@ class VavooExtractor(BaseExtractor):
             }
         }
         try:
-            resp = self.session.post("https://www.vavoo.tv/api/app/ping", json=data, headers=headers, timeout=20)
-            resp.raise_for_status()
-            result = resp.json()
-            addon_sig = result.get("addonSig")
-            return addon_sig if addon_sig else None
+            async with httpx.AsyncClient() as client:
+                resp = await client.post("https://www.vavoo.tv/api/app/ping", json=data, headers=headers, timeout=20.0)
+                resp.raise_for_status()
+                result = resp.json()
+                addon_sig = result.get("addonSig")
+                return addon_sig if addon_sig else None
         except Exception:
             return None
 
@@ -105,7 +102,7 @@ class VavooExtractor(BaseExtractor):
             raise ExtractorError("Not a valid Vavoo URL")
 
         # Get authentication signature
-        signature = self.get_auth_signature()
+        signature = await self.get_auth_signature()
         if not signature:
             raise ExtractorError("Failed to get Vavoo authentication signature")
 
@@ -144,16 +141,17 @@ class VavooExtractor(BaseExtractor):
         }
         
         try:
-            resp = self.session.post("https://vavoo.to/mediahubmx-resolve.json", json=data, headers=headers, timeout=20)
-            resp.raise_for_status()
-            
-            result = resp.json()
-            if isinstance(result, list) and result and result[0].get("url"):
-                return result[0]["url"]
-            elif isinstance(result, dict) and result.get("url"):
-                return result["url"]
-            else:
-                return None
+            async with httpx.AsyncClient() as client:
+                resp = await client.post("https://vavoo.to/mediahubmx-resolve.json", json=data, headers=headers, timeout=20.0)
+                resp.raise_for_status()
                 
+                result = resp.json()
+                if isinstance(result, list) and result and result[0].get("url"):
+                    return result[0]["url"]
+                elif isinstance(result, dict) and result.get("url"):
+                    return result["url"]
+                else:
+                    return None
+                    
         except Exception as e:
             raise ExtractorError(f"Vavoo resolution failed: {str(e)}") 
