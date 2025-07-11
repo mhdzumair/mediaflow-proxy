@@ -85,6 +85,20 @@ async def handle_hls_stream_proxy(
     proxy_headers.request.update({"range": content_range})
 
     try:
+        # Auto-detect and resolve Vavoo links
+        if "vavoo.to" in hls_params.destination:
+            try:
+                from mediaflow_proxy.extractors.vavoo import VavooExtractor
+                vavoo_extractor = VavooExtractor(proxy_headers.request)
+                resolved_data = await vavoo_extractor.extract(hls_params.destination)
+                resolved_url = resolved_data["destination_url"]
+                logger.info(f"Auto-resolved Vavoo URL: {hls_params.destination} -> {resolved_url}")
+                # Update destination with resolved URL
+                hls_params.destination = resolved_url
+            except Exception as e:
+                logger.warning(f"Failed to auto-resolve Vavoo URL: {e}")
+                # Continue with original URL if resolution fails
+
         # If force_playlist_proxy is enabled, skip detection and directly process as m3u8
         if hls_params.force_playlist_proxy:
             return await fetch_and_process_m3u8(
@@ -141,6 +155,20 @@ async def handle_stream_request(
     client, streamer = await setup_client_and_streamer()
 
     try:
+        # Auto-detect and resolve Vavoo links
+        if "vavoo.to" in video_url:
+            try:
+                from mediaflow_proxy.extractors.vavoo import VavooExtractor
+                vavoo_extractor = VavooExtractor(proxy_headers.request)
+                resolved_data = await vavoo_extractor.extract(video_url)
+                resolved_url = resolved_data["destination_url"]
+                logger.info(f"Auto-resolved Vavoo URL: {video_url} -> {resolved_url}")
+                # Update video_url with resolved URL
+                video_url = resolved_url
+            except Exception as e:
+                logger.warning(f"Failed to auto-resolve Vavoo URL: {e}")
+                # Continue with original URL if resolution fails
+
         await streamer.create_streaming_response(video_url, proxy_headers.request)
         response_headers = prepare_response_headers(streamer.response.headers, proxy_headers.response)
 
