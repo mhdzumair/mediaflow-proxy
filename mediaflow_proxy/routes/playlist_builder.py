@@ -77,7 +77,7 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                 elif '.mpd' in logical_line:
                     processed_url_content = f"{base_url}/proxy/mpd/manifest.m3u8?api_password={api_password}&d={logical_line}"
                 elif '.php' in logical_line:
-                    processed_url_content = f"{base_url}/extractor/video?host=DLHD&redirect_stream=true&api_password={api_password}&d={logical_line}"
+                    processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?api_password={api_password}&d={logical_line}"
                 else:
                     # Link non modificato dalle regole, ma gli header potrebbero essere aggiunti
                     pass
