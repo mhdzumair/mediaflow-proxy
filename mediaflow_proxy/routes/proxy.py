@@ -2,9 +2,11 @@ from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import Request, Depends, APIRouter, Query, HTTPException
+from fastapi.responses import Response
 
 from mediaflow_proxy.handlers import (
     handle_hls_stream_proxy,
+    handle_stream_request,
     proxy_stream,
     get_manifest,
     get_playlist,
@@ -22,6 +24,7 @@ from mediaflow_proxy.utils.http_utils import get_proxy_headers, ProxyRequestHead
 proxy_router = APIRouter()
 
 
+@proxy_router.head("/hls/manifest.m3u8")
 @proxy_router.head("/hls/manifest.m3u8")
 @proxy_router.get("/hls/manifest.m3u8")
 async def hls_manifest_proxy(
@@ -41,6 +44,94 @@ async def hls_manifest_proxy(
         Response: The HTTP response with the processed m3u8 playlist or streamed content.
     """
     return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
+
+
+@proxy_router.get("/hls/segment")
+async def hls_segment_proxy(
+    request: Request,
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+    segment_url: str = Query(..., description="URL of the HLS segment"),
+):
+    """
+    Proxy HLS segments with optional pre-buffering support.
+
+    Args:
+        request (Request): The incoming HTTP request.
+        segment_url (str): URL of the HLS segment to proxy.
+        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
+
+    Returns:
+        Response: The HTTP response with the segment content.
+    """
+    from mediaflow_proxy.utils.hls_prebuffer import hls_prebuffer
+    from mediaflow_proxy.configs import settings
+    
+    # Extract headers for pre-buffering
+    headers = {}
+    for key, value in request.query_params.items():
+        if key.startswith("h_"):
+            headers[key[2:]] = value
+    
+    # Try to get segment from pre-buffer cache first
+    if settings.enable_hls_prebuffer:
+        cached_segment = await hls_prebuffer.get_segment(segment_url, headers)
+        if cached_segment:
+            return Response(
+                content=cached_segment,
+                media_type="video/mp2t",
+                headers={
+                    "Content-Type": "video/mp2t",
+                    "Cache-Control": "public, max-age=3600",
+                    "Access-Control-Allow-Origin": "*"
+                }
+            )
+    
+    # Fallback to direct streaming if not in cache
+    return await handle_stream_request("GET", segment_url, proxy_headers)
+
+
+@proxy_router.get("/dash/segment")
+async def dash_segment_proxy(
+    request: Request,
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+    segment_url: str = Query(..., description="URL of the DASH segment"),
+):
+    """
+    Proxy DASH segments with optional pre-buffering support.
+
+    Args:
+        request (Request): The incoming HTTP request.
+        segment_url (str): URL of the DASH segment to proxy.
+        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
+
+    Returns:
+        Response: The HTTP response with the segment content.
+    """
+    from mediaflow_proxy.utils.dash_prebuffer import dash_prebuffer
+    from mediaflow_proxy.configs import settings
+    
+    # Extract headers for pre-buffering
+    headers = {}
+    for key, value in request.query_params.items():
+        if key.startswith("h_"):
+            headers[key[2:]] = value
+    
+    # Try to get segment from pre-buffer cache first
+    if settings.enable_hls_prebuffer:
+        cached_segment = await dash_prebuffer.get_segment(segment_url, headers)
+        if cached_segment:
+            return Response(
+                content=cached_segment,
+                media_type="video/mp4",
+                headers={
+                    "Content-Type": "video/mp4",
+                    "Cache-Control": "public, max-age=3600",
+                    "Access-Control-Allow-Origin": "*"
+                }
+            )
+    
+    # Fallback to direct streaming if not in cache
+    return await handle_stream_request("GET", segment_url, proxy_headers)
 
 
 @proxy_router.head("/stream")
