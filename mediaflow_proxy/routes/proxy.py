@@ -2,7 +2,7 @@ from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import Request, Depends, APIRouter, Query, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, RedirectResponse
 
 from mediaflow_proxy.handlers import (
     handle_hls_stream_proxy,
@@ -43,6 +43,27 @@ async def hls_manifest_proxy(
     Returns:
         Response: The HTTP response with the processed m3u8 playlist or streamed content.
     """
+    # Check if destination contains /stream- and redirect to extractor
+    if "/stream-" in hls_params.destination:
+        from urllib.parse import urlencode
+        
+        # Build redirect URL to extractor
+        redirect_params = {
+            "host": "DLHD",
+            "redirect_stream": "true",
+            "d": hls_params.destination
+        }
+        
+        # Preserve api_password if present
+        if "api_password" in request.query_params:
+            redirect_params["api_password"] = request.query_params["api_password"]
+        
+        # Build the redirect URL
+        base_url = str(request.url_for("extract_url"))
+        redirect_url = f"{base_url}?{urlencode(redirect_params)}"
+        
+        return RedirectResponse(url=redirect_url, status_code=302)
+    
     return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
 
 
@@ -156,6 +177,27 @@ async def proxy_stream_endpoint(
     Returns:
         Response: The HTTP response with the streamed content.
     """
+    # Check if destination contains /stream- and redirect to extractor
+    if "/stream-" in destination:
+        from urllib.parse import urlencode
+        
+        # Build redirect URL to extractor
+        redirect_params = {
+            "host": "DLHD",
+            "redirect_stream": "true",
+            "d": destination
+        }
+        
+        # Preserve api_password if present
+        if "api_password" in request.query_params:
+            redirect_params["api_password"] = request.query_params["api_password"]
+        
+        # Build the redirect URL
+        base_url = str(request.url_for("extract_url"))
+        redirect_url = f"{base_url}?{urlencode(redirect_params)}"
+        
+        return RedirectResponse(url=redirect_url, status_code=302)
+    
     content_range = proxy_headers.request.get("range", "bytes=0-")
     if "nan" in content_range.casefold():
         # Handle invalid range requests "bytes=NaN-NaN"
