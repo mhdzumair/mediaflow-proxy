@@ -1,3 +1,4 @@
+import asyncio
 import codecs
 import re
 from typing import AsyncGenerator
@@ -6,6 +7,7 @@ from urllib import parse
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.utils.crypto_utils import encryption_handler
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url, encode_stremio_proxy_url, get_original_scheme
+from mediaflow_proxy.utils.hls_prebuffer import hls_prebuffer
 
 
 class M3U8Processor:
@@ -45,6 +47,22 @@ class M3U8Processor:
                 processed_lines.append(await self.proxy_content_url(line, base_url))
             else:
                 processed_lines.append(line)
+        
+        # Pre-buffer segments if enabled and this is a playlist
+        if (settings.enable_hls_prebuffer and 
+            "#EXTM3U" in content):
+            
+            # Extract headers from request for pre-buffering
+            headers = {}
+            for key, value in self.request.query_params.items():
+                if key.startswith("h_"):
+                    headers[key[2:]] = value
+            
+            # Start pre-buffering in background
+            asyncio.create_task(
+                hls_prebuffer.prebuffer_playlist(base_url, headers)
+            )
+        
         return "\n".join(processed_lines)
 
     async def process_m3u8_streaming(
@@ -62,6 +80,8 @@ class M3U8Processor:
         """
         buffer = ""  # String buffer for decoded content
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        playlist_content = ""
+        is_playlist_processed = False
 
         # Process the content chunk by chunk
         async for chunk in content_iterator:
@@ -71,6 +91,7 @@ class M3U8Processor:
             # Incrementally decode the chunk
             decoded_chunk = decoder.decode(chunk)
             buffer += decoded_chunk
+            playlist_content += decoded_chunk
 
             # Process complete lines
             lines = buffer.split("\n")
@@ -88,10 +109,29 @@ class M3U8Processor:
         final_chunk = decoder.decode(b"", final=True)
         if final_chunk:
             buffer += final_chunk
+            playlist_content += final_chunk
 
         if buffer:  # Process the last line if it's not empty
             processed_line = await self.process_line(buffer, base_url)
             yield processed_line
+
+        # Pre-buffer segments if enabled and this is a playlist
+        if (settings.enable_hls_prebuffer and 
+            not is_playlist_processed and 
+            playlist_content and 
+            "#EXTM3U" in playlist_content):
+            
+            # Extract headers from request for pre-buffering
+            headers = {}
+            for key, value in self.request.query_params.items():
+                if key.startswith("h_"):
+                    headers[key[2:]] = value
+            
+            # Start pre-buffering in background
+            asyncio.create_task(
+                hls_prebuffer.prebuffer_playlist(base_url, headers)
+            )
+            is_playlist_processed = True
 
     async def process_line(self, line: str, base_url: str) -> str:
         """
