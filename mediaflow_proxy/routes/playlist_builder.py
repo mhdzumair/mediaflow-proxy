@@ -181,7 +181,7 @@ def generate_combined_playlist(playlist_definitions: list[str], base_url: str, a
 @playlist_builder_router.get("/playlist")
 async def proxy_handler(
     request: Request,
-    query_string: str = Query(..., description="Query string con le definizioni delle playlist"),
+    d: str = Query(..., description="Query string con le definizioni delle playlist", alias="d"),
     api_password: Optional[str] = Query(None, description="Password API per MFP"),
 ):
     """
@@ -191,10 +191,10 @@ async def proxy_handler(
     Esempio: https://mfp.com:pass123&http://provider.com/playlist.m3u
     """
     try:
-        if not query_string:
+        if not d:
             raise HTTPException(status_code=400, detail="Query string mancante")
 
-        playlist_definitions = query_string.split(';')
+        playlist_definitions = d.split(';')
         
         # Estrai base_url dalla prima definizione se presente
         base_url = str(request.base_url).rstrip('/')
@@ -230,7 +230,7 @@ async def url_builder():
     """
     html_content = """
     <!DOCTYPE html>
-    <html lang="it">
+    <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -257,48 +257,48 @@ async def url_builder():
             <h1>🔗 MFP Playlist Builder</h1>
             
             <div class="form-group">
-                <label for="server-address">Indirizzo del Server MFP</label>
-                <input type="text" id="server-address" placeholder="Indirizzo del server corrente" value="" readonly style="background-color: #e9ecef;">
+                <label for="server-address">MFP Server Address</label>
+                <input type="text" id="server-address" placeholder="Current server address" value="" readonly style="background-color: #e9ecef;">
             </div>
 
             <div class="form-group">
-                <label for="api-password">Password API MFP</label>
-                <input type="text" id="api-password" placeholder="Password API per MFP">
+                <label for="api-password">MFP API Password</label>
+                <input type="text" id="api-password" placeholder="API password for MFP">
             </div>
 
-            <h2>Playlist da Unire</h2>
+            <h2>Playlists to Merge</h2>
             <div id="playlist-container">
-                <!-- Le playlist verranno aggiunte qui dinamicamente -->
+                <!-- Playlists will be added here dynamically -->
             </div>
 
-            <button type="button" class="btn btn-add" onclick="addPlaylistEntry()">Aggiungi Playlist</button>
+            <button type="button" class="btn btn-add" onclick="addPlaylistEntry()">Add Playlist</button>
             <hr style="margin: 20px 0;">
 
-            <button type="button" class="btn" onclick="generateUrl()">Genera URL</button>
+            <button type="button" class="btn" onclick="generateUrl()">Generate URL</button>
 
             <div class="output-area">
-                <label for="generated-url">URL Generato</label>
-                <div id="generated-url">L'URL apparirà qui...</div>
-                <button type="button" class="btn" onclick="copyUrl()">Copia URL</button>
+                <label for="generated-url">Generated URL</label>
+                <div id="generated-url">The URL will appear here...</div>
+                <button type="button" class="btn" onclick="copyUrl()">Copy URL</button>
             </div>
         </div>
 
-        <!-- Template per una singola playlist -->
+        <!-- Template for a single playlist -->
         <template id="playlist-template">
             <div class="playlist-entry">
-                <button type="button" class="btn btn-remove" style="position: absolute; top: 10px; right: 10px;" onclick="this.parentElement.remove()">Rimuovi</button>
+                <button type="button" class="btn btn-remove" style="position: absolute; top: 10px; right: 10px;" onclick="this.parentElement.remove()">Remove</button>
                 <div class="form-group">
-                    <label>URL della Playlist M3U</label>
-                    <input type="url" class="playlist-url" placeholder="Es: http://provider.com/playlist.m3u">
+                    <label>M3U Playlist URL</label>
+                    <input type="url" class="playlist-url" placeholder="Ex: http://provider.com/playlist.m3u">
                 </div>
             </div>
         </template>
 
         <script>
             document.addEventListener('DOMContentLoaded', function() {
-                // Imposta l'indirizzo del server di default
+                // Set the default server address
                 document.getElementById('server-address').value = window.location.origin;
-                // Aggiunge una playlist di default all'avvio
+                // Add a default playlist on startup
                 addPlaylistEntry();
             });
 
@@ -310,7 +310,7 @@ async def url_builder():
             function generateUrl() {
                 const serverAddress = document.getElementById('server-address').value.trim().replace(/\\/$/, '');
                 if (!serverAddress) {
-                    alert('Indirizzo del server non disponibile. Ricarica la pagina.');
+                    alert('Server address not available. Please reload the page.');
                     return;
                 }
 
@@ -326,11 +326,11 @@ async def url_builder():
                 });
 
                 if (definitions.length === 0) {
-                    document.getElementById('generated-url').textContent = 'Nessuna playlist valida inserita.';
+                    document.getElementById('generated-url').textContent = 'No valid playlist entered.';
                     return;
                 }
 
-                let finalUrl = serverAddress + '/playlist/playlist?query_string=' + definitions.join(';');
+                let finalUrl = serverAddress + '/playlist/playlist?d=' + definitions.join(';');
                 if (apiPassword) {
                     finalUrl += '&api_password=' + encodeURIComponent(apiPassword);
                 }
@@ -340,14 +340,14 @@ async def url_builder():
 
             function copyUrl() {
                 const urlText = document.getElementById('generated-url').textContent;
-                if (urlText && !urlText.startsWith('L\\'URL') && !urlText.startsWith('Nessuna')) {
+                if (urlText && !urlText.startsWith('The URL') && !urlText.startsWith('No valid')) {
                     navigator.clipboard.writeText(urlText).then(() => {
-                        alert('URL copiato negli appunti!');
+                        alert('URL copied to clipboard!');
                     }).catch(err => {
-                        alert('Errore durante la copia: ' + err);
+                        alert('Error copying: ' + err);
                     });
                 } else {
-                    alert('Nessun URL da copiare.');
+                    alert('No URL to copy.');
                 }
             }
         </script>
