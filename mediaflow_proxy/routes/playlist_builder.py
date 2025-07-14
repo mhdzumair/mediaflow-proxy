@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request, Response, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import httpx
 from mediaflow_proxy.configs import settings
+import asyncio
 
 playlist_builder_router = APIRouter()
 
@@ -100,81 +101,71 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
             yield line_with_newline
 
 
-def download_m3u_playlist_streaming(url: str) -> Iterator[str]:
-    """Download streaming di una playlist M3U"""
+async def async_download_m3u_playlist(url: str) -> list[str]:
+    """Scarica una playlist M3U in modo asincrono e restituisce le righe."""
+    headers = {
+        'User-Agent': settings.user_agent,
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate',
+        'Connection': 'keep-alive'
+    }
+    lines = []
     try:
-        headers = {
-            'User-Agent': settings.user_agent,
-            'Accept': '*/*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive'
-        }
-        
-        # Usa httpx per la compatibilità con il resto del progetto
-        with httpx.Client(verify=False, timeout=30) as client:
-            with client.stream('GET', url, headers=headers) as response:
+        async with httpx.AsyncClient(verify=False, timeout=30) as client:
+            async with client.stream('GET', url, headers=headers) as response:
                 response.raise_for_status()
-                for line_bytes in response.iter_lines():
+                async for line_bytes in response.aiter_lines():
                     if isinstance(line_bytes, bytes):
                         decoded_line = line_bytes.decode('utf-8', errors='replace')
                     else:
                         decoded_line = str(line_bytes)
-                    yield decoded_line + '\n' if decoded_line else ''
-        
+                    lines.append(decoded_line + '\n' if decoded_line else '')
     except Exception as e:
-        print(f"Errore download (streaming) della playlist: {str(e)}")
+        print(f"Errore download (async) della playlist: {str(e)}")
         raise
+    return lines
 
-
-def generate_combined_playlist(playlist_definitions: list[str], base_url: str, api_password: Optional[str]) -> Iterator[str]:
-    """Genera una playlist combinata da multiple definizioni"""
-    first_playlist_header_handled = False  # Tracks if the main #EXTM3U header context is done
-    
-    for definition_idx, definition in enumerate(playlist_definitions):
-        # Gestisce sia il formato base_url&playlist_url che playlist_url semplice
+async def async_generate_combined_playlist(playlist_definitions: list[str], base_url: str, api_password: Optional[str]):
+    """Genera una playlist combinata da multiple definizioni, scaricando in parallelo."""
+    # Prepara gli URL
+    playlist_urls = []
+    for definition in playlist_definitions:
         if '&' in definition:
             parts = definition.split('&', 1)
             playlist_url_str = parts[1] if len(parts) > 1 else parts[0]
         else:
-            # Se non c'è '&', considera l'intera stringa come URL della playlist
             playlist_url_str = definition
-        
+        playlist_urls.append(playlist_url_str)
+
+    # Scarica tutte le playlist in parallelo
+    results = await asyncio.gather(*[async_download_m3u_playlist(url) for url in playlist_urls], return_exceptions=True)
+
+    first_playlist_header_handled = False
+    for idx, (definition, lines) in enumerate(zip(playlist_definitions, results)):
+        if isinstance(lines, Exception):
+            yield f"# ERROR processing playlist {playlist_urls[idx]}: {str(lines)}\n"
+            continue
+        playlist_lines: list[str] = lines  # type: ignore
         current_playlist_had_lines = False
         first_line_of_this_segment = True
         lines_processed_for_current_playlist = 0
-        
-        try:
-            downloaded_lines_iter = download_m3u_playlist_streaming(playlist_url_str)
-            rewritten_lines_iter = rewrite_m3u_links_streaming(
-                downloaded_lines_iter, base_url, api_password
-            )
-            
-            for line in rewritten_lines_iter:
-                current_playlist_had_lines = True
-                is_extm3u_line = line.strip().startswith('#EXTM3U')
-                lines_processed_for_current_playlist += 1
-
-                if not first_playlist_header_handled:  # Still in the context of the first playlist's header
+        rewritten_lines_iter = rewrite_m3u_links_streaming(iter(playlist_lines), base_url, api_password)
+        for line in rewritten_lines_iter:
+            current_playlist_had_lines = True
+            is_extm3u_line = line.strip().startswith('#EXTM3U')
+            lines_processed_for_current_playlist += 1
+            if not first_playlist_header_handled:
+                yield line
+                if is_extm3u_line:
+                    first_playlist_header_handled = True
+            else:
+                if first_line_of_this_segment and is_extm3u_line:
+                    pass
+                else:
                     yield line
-                    if is_extm3u_line:
-                        first_playlist_header_handled = True  # Main header yielded
-                else:  # Main header already handled (or first playlist didn't have one)
-                    if first_line_of_this_segment and is_extm3u_line:
-                        # Skip #EXTM3U if it's the first line of a subsequent segment
-                        pass
-                    else:
-                        yield line
-                first_line_of_this_segment = False
-
-        except Exception as e:
-            print(f"💥 [{definition_idx}] Error processing playlist {playlist_url_str}: {str(e)}")
-            yield f"# ERROR processing playlist {playlist_url_str}: {str(e)}\n"
-        
+            first_line_of_this_segment = False
         if current_playlist_had_lines and not first_playlist_header_handled:
-            # This playlist (which was effectively the first with content) finished,
-            # and no #EXTM3U was found to mark as the main header.
-            # Mark header as handled so subsequent playlists skip their #EXTM3U.
             first_playlist_header_handled = True
 
 
@@ -206,8 +197,9 @@ async def proxy_handler(
                 if base_url_part.startswith('http'):
                     base_url = base_url_part
 
-        def generate_response():
-            return generate_combined_playlist(playlist_definitions, base_url, api_password)
+        async def generate_response():
+            async for line in async_generate_combined_playlist(playlist_definitions, base_url, api_password):
+                yield line
 
         return StreamingResponse(
             generate_response(),
