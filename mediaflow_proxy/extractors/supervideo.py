@@ -19,7 +19,7 @@ class SupervideoExtractor(BaseExtractor):
 
         
         """Extract Supervideo URL."""
-        final_url = await eval_solver(self,url,headers)
+        final_url = await eval_solver(self,url,headers, r'file:"(.*?)"')
 
         self.base_headers["referer"] = url
         return {
