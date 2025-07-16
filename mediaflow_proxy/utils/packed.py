@@ -144,7 +144,7 @@ class UnpackingError(Exception):
 
 async def eval_solver(self, url: str, headers, pattern: str) -> str:
     try:
-        response = await self._make_request(url, headers = headers)
+        response = await self._make_request(url, headers=headers)
         soup = BeautifulSoup(response.text, "lxml",parse_only=SoupStrainer("script"))
         script_all = soup.find_all("script")
         for i in script_all:
