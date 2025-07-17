@@ -2,8 +2,6 @@ services:
   mediaflow-proxy:
     ports:
       - "8888:8888"
-    env_file:
-      - .env
     restart: always
     logging:
       options:
