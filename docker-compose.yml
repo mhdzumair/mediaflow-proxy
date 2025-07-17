@@ -1,9 +1,12 @@
+version: "3.9"
+
 services:
-  mediaflow-proxy:
+  mediaflow_proxy:
+    build: .
     ports:
       - "8888:8888"
-    restart: always
-    logging:
-      options:
-        max-size: 1g
-    image: mhdzumair/mediaflow-proxy:latest
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      - PORT=8888
+    restart: unless-stopped
