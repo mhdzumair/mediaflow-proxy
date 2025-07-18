@@ -102,7 +102,7 @@ async def handle_hls_stream_proxy(
         # If force_playlist_proxy is enabled, skip detection and directly process as m3u8
         if hls_params.force_playlist_proxy:
             return await fetch_and_process_m3u8(
-                streamer, hls_params.destination, proxy_headers, request, hls_params.key_url, hls_params.force_playlist_proxy
+                streamer, hls_params.destination, proxy_headers, request, hls_params.key_url or "", hls_params.force_playlist_proxy or False
             )
 
         parsed_url = urlparse(hls_params.destination)
@@ -111,7 +111,7 @@ async def handle_hls_stream_proxy(
             0
         ] in ["m3u", "m3u8", "m3u_plus"]:
             return await fetch_and_process_m3u8(
-                streamer, hls_params.destination, proxy_headers, request, hls_params.key_url, hls_params.force_playlist_proxy
+                streamer, hls_params.destination, proxy_headers, request, hls_params.key_url or "", hls_params.force_playlist_proxy or False
             )
 
         # Create initial streaming response to check content type
@@ -120,7 +120,7 @@ async def handle_hls_stream_proxy(
 
         if "mpegurl" in response_headers.get("content-type", "").lower():
             return await fetch_and_process_m3u8(
-                streamer, hls_params.destination, proxy_headers, request, hls_params.key_url, hls_params.force_playlist_proxy
+                streamer, hls_params.destination, proxy_headers, request, hls_params.key_url or "", hls_params.force_playlist_proxy or False
             )
 
         return EnhancedStreamingResponse(
@@ -139,21 +139,7 @@ async def handle_stream_request(
     video_url: str,
     proxy_headers: ProxyRequestHeaders,
 ) -> Response:
-    """
-    Handle general stream requests.
-
-    This function processes both HEAD and GET requests for video streams.
-
-    Args:
-        method (str): The HTTP method (e.g., 'GET' or 'HEAD').
-        video_url (str): The URL of the video to stream.
-        proxy_headers (ProxyRequestHeaders): Headers to be used in the proxy request.
-
-    Returns:
-        Union[Response, EnhancedStreamingResponse]: Either a HEAD response with headers or a streaming response.
-    """
     client, streamer = await setup_client_and_streamer()
-
     try:
         # Auto-detect and resolve Vavoo links
         if "vavoo.to" in video_url:
@@ -173,11 +159,25 @@ async def handle_stream_request(
         response_headers = prepare_response_headers(streamer.response.headers, proxy_headers.response)
 
         if method == "HEAD":
-            # For HEAD requests, just return the headers without streaming content
             await streamer.close()
             return Response(headers=response_headers, status_code=streamer.response.status_code)
         else:
-            # For GET requests, return the streaming response
+            # Fallback: se la risposta è 404 e c'era un header Range, riprova senza Range
+            if streamer.response.status_code == 404 and "range" in proxy_headers.request:
+                proxy_headers_no_range = ProxyRequestHeaders(
+                    request={k: v for k, v in proxy_headers.request.items() if k.lower() != "range"},
+                    response=proxy_headers.response,
+                )
+                await streamer.close()
+                client2, streamer2 = await setup_client_and_streamer()
+                await streamer2.create_streaming_response(video_url, proxy_headers_no_range.request)
+                response_headers2 = prepare_response_headers(streamer2.response.headers, proxy_headers_no_range.response)
+                return EnhancedStreamingResponse(
+                    streamer2.stream_content(),
+                    headers=response_headers2,
+                    status_code=streamer2.response.status_code,
+                    background=BackgroundTask(streamer2.close),
+                )
             return EnhancedStreamingResponse(
                 streamer.stream_content(),
                 headers=response_headers,
