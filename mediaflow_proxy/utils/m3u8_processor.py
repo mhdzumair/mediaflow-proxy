@@ -1,7 +1,7 @@
 import asyncio
 import codecs
 import re
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator
 from urllib import parse
 
 from mediaflow_proxy.configs import settings
@@ -11,7 +11,7 @@ from mediaflow_proxy.utils.hls_prebuffer import hls_prebuffer
 
 
 class M3U8Processor:
-    def __init__(self, request, key_url: Optional[str] = None, force_playlist_proxy: Optional[bool] = None):
+    def __init__(self, request, key_url: str = None, force_playlist_proxy: bool = None):
         """
         Initializes the M3U8Processor with the request and URL prefix.
 
@@ -173,36 +173,38 @@ class M3U8Processor:
         return line
 
     async def proxy_content_url(self, url: str, base_url: str) -> str:
+        """
+        Proxies a content URL based on the configured routing strategy.
+
+        Args:
+            url (str): The URL to proxy.
+            base_url (str): The base URL to resolve relative URLs.
+
+        Returns:
+            str: The proxied URL.
+        """
         full_url = parse.urljoin(base_url, url)
-        parsed_url = parse.urlparse(full_url)
 
-        # Se è un segmento .ts, .aac, .mp4, ecc.
-        if parsed_url.path.endswith(('.ts', '.aac', '.mp4')):
-            # Costruisci l'URL del proxy segmento
-            query_params = dict(self.request.query_params)
-            segment_url = parse.quote(full_url, safe='')
-            api_password = query_params.get('api_password')
-            segment_proxy_url = f"{self.request.url_for('hls_segment_proxy')}?segment_url={segment_url}"
-            if api_password:
-                segment_proxy_url += f"&api_password={api_password}"
-            # Aggiungi eventuali header custom (h_)
-            for k, v in query_params.items():
-                if k.startswith('h_'):
-                    segment_proxy_url += f"&{k}={parse.quote(v)}"
-            return segment_proxy_url
-
-        # Se è un manifest .m3u8, .m3u, .m3u_plus
-        if parsed_url.path.endswith((".m3u", ".m3u8", ".m3u_plus")) or \
-            parse.parse_qs(parsed_url.query).get("type", [""])[0] in ["m3u", "m3u8", "m3u_plus"]:
-            return await self.proxy_url(full_url, base_url, use_full_url=True)
-
-        # Routing di default (come già presente)
+        # Determine routing strategy based on configuration
         routing_strategy = settings.m3u8_content_routing
+
+        # Check if we should force MediaFlow proxy for all playlist URLs
         if self.force_playlist_proxy:
             return await self.proxy_url(full_url, base_url, use_full_url=True)
+
+        # For playlist URLs, always use MediaFlow proxy regardless of strategy
+        # Check for actual playlist file extensions, not just substring matches
+        parsed_url = parse.urlparse(full_url)
+        if (parsed_url.path.endswith((".m3u", ".m3u8", ".m3u_plus")) or
+            parse.parse_qs(parsed_url.query).get("type", [""])[0] in ["m3u", "m3u8", "m3u_plus"]):
+            return await self.proxy_url(full_url, base_url, use_full_url=True)
+
+        # Route non-playlist content URLs based on strategy
         if routing_strategy == "direct":
+            # Return the URL directly without any proxying
             return full_url
         elif routing_strategy == "stremio" and settings.stremio_proxy_url:
+            # Use Stremio proxy for content URLs
             query_params = dict(self.request.query_params)
             request_headers = {k[2:]: v for k, v in query_params.items() if k.startswith("h_")}
             response_headers = {k[2:]: v for k, v in query_params.items() if k.startswith("r_")}
@@ -214,6 +216,7 @@ class M3U8Processor:
                 response_headers=response_headers if response_headers else None,
             )
         else:
+            # Default to MediaFlow proxy (routing_strategy == "mediaflow" or fallback)
             return await self.proxy_url(full_url, base_url, use_full_url=True)
 
     async def proxy_url(self, url: str, base_url: str, use_full_url: bool = False) -> str:
@@ -240,18 +243,10 @@ class M3U8Processor:
         # Remove force_playlist_proxy to avoid it being added to subsequent requests
         query_params.pop("force_playlist_proxy", None)
 
-        if has_encrypted and encryption_handler is not None:
-            return encode_mediaflow_proxy_url(
-                self.mediaflow_proxy_url,
-                "",
-                full_url,
-                query_params=query_params,
-                encryption_handler=encryption_handler,
-            )
-        else:
-            return encode_mediaflow_proxy_url(
-                self.mediaflow_proxy_url,
-                "",
-                full_url,
-                query_params=query_params,
-            )
+        return encode_mediaflow_proxy_url(
+            self.mediaflow_proxy_url,
+            "",
+            full_url,
+            query_params=query_params,
+            encryption_handler=encryption_handler if has_encrypted else None,
+        )
