@@ -77,22 +77,22 @@ class DLHDExtractor(BaseExtractor):
                 resp3 = await client.get(iframe_url, headers=daddylive_headers)
                 resp3.raise_for_status()
                 iframe_content = resp3.text
-                # 5. Estrai parametri auth
-                try:
-                    channel_key = re.findall(r'(?s) channelKey = \\"([^\"]*)', iframe_content)[0]
-                    auth_ts_b64 = re.findall(r'(?s)c = atob\("([^\"]*)', iframe_content)[0]
-                    auth_ts = base64.b64decode(auth_ts_b64).decode('utf-8')
-                    auth_rnd_b64 = re.findall(r'(?s)d = atob\("([^\"]*)', iframe_content)[0]
-                    auth_rnd = base64.b64decode(auth_rnd_b64).decode('utf-8')
-                    auth_sig_b64 = re.findall(r'(?s)e = atob\("([^\"]*)', iframe_content)[0]
-                    auth_sig = base64.b64decode(auth_sig_b64).decode('utf-8')
-                    auth_sig = quote_plus(auth_sig)
-                    auth_host_b64 = re.findall(r'(?s)a = atob\("([^\"]*)', iframe_content)[0]
-                    auth_host = base64.b64decode(auth_host_b64).decode('utf-8')
-                    auth_php_b64 = re.findall(r'(?s)b = atob\("([^\"]*)', iframe_content)[0]
-                    auth_php = base64.b64decode(auth_php_b64).decode('utf-8')
-                except Exception as e:
-                    raise ExtractorError(f"Errore estrazione parametri: {e}")
+                # 5. Estrai parametri auth (robusto)
+                def extract_var(js, name):
+                    m = re.search(rf'var (?:__)?{name}\s*=\s*atob\("([^"]+)"\)', js)
+                    if m:
+                        return base64.b64decode(m.group(1)).decode('utf-8')
+                    return None
+                channel_key = re.search(r'channelKey\s*=\s*"([^"]+)"', iframe_content)
+                channel_key = channel_key.group(1) if channel_key else None
+                auth_ts = extract_var(iframe_content, 'c')
+                auth_rnd = extract_var(iframe_content, 'd')
+                auth_sig = extract_var(iframe_content, 'e')
+                auth_host = extract_var(iframe_content, 'a')
+                auth_php = extract_var(iframe_content, 'b')
+                if not all([channel_key, auth_ts, auth_rnd, auth_sig, auth_host, auth_php]):
+                    raise ExtractorError("Errore estrazione parametri: uno o più parametri non trovati")
+                auth_sig = quote_plus(auth_sig)
                 # 6. Richiesta auth
                 auth_url = f'{auth_host}{auth_php}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
                 auth_resp = await client.get(auth_url, headers=daddylive_headers)
