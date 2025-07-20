@@ -29,54 +29,70 @@ class DLHDExtractor(BaseExtractor):
             Dict containing stream URL and required headers
         """
         try:
-            # Channel URL is required and serves as the referer
             channel_url = url
-            channel_origin = self._get_origin(channel_url) # Channel page origin
+            channel_origin = self._get_origin(channel_url)
 
             # Check for direct parameters
             player_url_from_arg = kwargs.get("player_url")
             stream_url_from_arg = kwargs.get("stream_url")
             auth_url_base_from_arg = kwargs.get("auth_url_base")
 
+            # Lista di possibili endpoint da provare direttamente
+            possible_paths = [
+                "/stream/", "/cast/", "/player/", "/watch/"
+            ]
+            # Se l'URL fornito contiene uno di questi endpoint, prova tutti in sequenza
+            parsed = urlparse(channel_url)
+            for path in possible_paths:
+                if path in parsed.path:
+                    # Genera tutte le varianti sostituendo il path
+                    for try_path in possible_paths:
+                        new_path = parsed.path
+                        for p in possible_paths:
+                            if p in new_path:
+                                new_path = new_path.replace(p, try_path)
+                        try_url = urlunparse((
+                            parsed.scheme,
+                            parsed.netloc,
+                            new_path,
+                            parsed.params,
+                            parsed.query,
+                            parsed.fragment
+                        ))
+                        try:
+                            return await self._try_extract_with_url(try_url, channel_origin)
+                        except Exception:
+                            continue
+                    # Se nessuna variante funziona, esci dal ciclo e passa alla logica di fallback
+                    break
+            # Se non era un endpoint diretto, o tutte le varianti hanno fallito, procedi con la logica originale
             current_player_url_for_processing: str
-
-            # If player URL not provided, extract it from channel page
             if not player_url_from_arg:
-                # Get the channel page to extract the player iframe URL
                 channel_headers = {
                     "referer": channel_origin + "/",
                     "origin": channel_origin,
                     "user-agent": self.base_headers["user-agent"],
                 }
-
                 channel_response = await self._make_request(channel_url, headers=channel_headers)
                 extracted_iframe_url = self._extract_player_url(channel_response.text)
-
                 if not extracted_iframe_url:
                     raise ExtractorError("Could not extract player URL from channel page")
                 current_player_url_for_processing = extracted_iframe_url
             else:
                 current_player_url_for_processing = player_url_from_arg
-
-            # Try to extract with the original URL first
+            # Prova la logica di fallback
             try:
                 return await self._try_extract_with_url(current_player_url_for_processing, channel_origin)
             except Exception as original_error:
-                # If original URL fails, try alternative paths
                 alternative_paths = ["/cast/", "/watch/", "/player/"]
-                
                 for path in alternative_paths:
                     try:
-                        # Create alternative URL by replacing the path
                         alternative_url = self._create_alternative_url(current_player_url_for_processing, path)
                         if alternative_url:
                             return await self._try_extract_with_url(alternative_url, channel_origin)
                     except Exception:
-                        continue  # Try next alternative path
-                
-                # If all alternatives fail, raise the original error
+                        continue
                 raise original_error
-
         except Exception as e:
             raise ExtractorError(f"Extraction failed: {str(e)}")
 
