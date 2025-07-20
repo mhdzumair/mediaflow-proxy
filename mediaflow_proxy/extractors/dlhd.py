@@ -15,84 +15,125 @@ class DLHDExtractor(BaseExtractor):
         self.mediaflow_endpoint = "hls_manifest_proxy"
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
-        """Extract DLHD stream URL and required headers.
+        """Extract DLHD stream URL and required headers (logica tvproxy adattata async, con fallback su endpoint alternativi)."""
+        import httpx
+        from urllib.parse import urlparse, quote_plus
 
-        Args:
-            url: The DaddyLive channel URL (required)
-
-        Keyword Args:
-            player_url: Direct player URL (optional)
-            stream_url: The stream URL (optional)
-            auth_url_base: Base URL for auth requests (optional)
-
-        Returns:
-            Dict containing stream URL and required headers
-        """
-        try:
-            channel_url = url
-            channel_origin = self._get_origin(channel_url)
-
-            player_url_from_arg = kwargs.get("player_url")
-            stream_url_from_arg = kwargs.get("stream_url")
-            auth_url_base_from_arg = kwargs.get("auth_url_base")
-
-            possible_paths = [
-                "/stream/", "/cast/", "/player/", "/watch/"
-            ]
-            parsed = urlparse(channel_url)
-            # Se l'URL fornito contiene uno degli endpoint diretti
-            for path in possible_paths:
-                if path in parsed.path:
-                    # Prova prima l'endpoint fornito
-                    try:
-                        return await self._try_extract_with_url(channel_url, channel_origin)
-                    except Exception:
-                        # Se fallisce, prova gli altri endpoint alternativi (escludendo quello già provato)
-                        for try_path in possible_paths:
-                            if try_path == path:
-                                continue
-                            new_path = parsed.path.replace(path, try_path)
-                            try_url = urlunparse((
-                                parsed.scheme,
-                                parsed.netloc,
-                                new_path,
-                                parsed.params,
-                                parsed.query,
-                                parsed.fragment
-                            ))
-                            try:
-                                return await self._try_extract_with_url(try_url, channel_origin)
-                            except Exception:
-                                continue
-                        # Se tutte le varianti falliscono, passa alla logica di fallback
-                    break
-            # Se non era un endpoint diretto, o tutte le varianti hanno fallito, procedi con la logica originale
-            current_player_url_for_processing: str
-            if not player_url_from_arg:
-                channel_headers = {
-                    "referer": channel_origin + "/",
-                    "origin": channel_origin,
-                    "user-agent": self.base_headers["user-agent"],
-                }
-                channel_response = await self._make_request(channel_url, headers=channel_headers)
-                extracted_iframe_url = self._extract_player_url(channel_response.text)
-                if not extracted_iframe_url:
-                    raise ExtractorError("Could not extract player URL from channel page")
-                current_player_url_for_processing = extracted_iframe_url
-            else:
-                current_player_url_for_processing = player_url_from_arg
+        async def get_daddylive_base_url():
+            github_url = 'https://raw.githubusercontent.com/thecrewwh/dl_url/refs/heads/main/dl.xml'
             try:
-                return await self._try_extract_with_url(current_player_url_for_processing, channel_origin)
-            except Exception as original_error:
-                alternative_paths = ["/cast/", "/watch/", "/player/"]
-                for path in alternative_paths:
-                    try:
-                        alternative_url = self._create_alternative_url(current_player_url_for_processing, path)
-                        if alternative_url:
-                            return await self._try_extract_with_url(alternative_url, channel_origin)
-                    except Exception:
-                        continue
-                raise original_error
+                async with httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.get(github_url)
+                    resp.raise_for_status()
+                    content = resp.text
+                    match = re.search(r'src\s*=\s*"([^"]*)"', content)
+                    if match:
+                        base_url = match.group(1)
+                        if not base_url.endswith('/'):
+                            base_url += '/'
+                        return base_url
+            except Exception:
+                pass
+            return "https://daddylive.sx/"
+
+        def extract_channel_id(url):
+            match_premium = re.search(r'/premium(\d+)/mono\.m3u8$', url)
+            if match_premium:
+                return match_premium.group(1)
+            match_player = re.search(r'/(?:watch|stream|cast|player)/stream-(\d+)\.php', url)
+            if match_player:
+                return match_player.group(1)
+            return None
+
+        async def try_endpoint(baseurl, endpoint, channel_id):
+            stream_url = f"{baseurl}{endpoint}stream-{channel_id}.php"
+            daddy_origin = urlparse(baseurl).scheme + "://" + urlparse(baseurl).netloc
+            daddylive_headers = {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+                'Referer': baseurl,
+                'Origin': daddy_origin
+            }
+            async with httpx.AsyncClient(timeout=15) as client:
+                # 1. Richiesta alla pagina stream/cast/player/watch
+                resp1 = await client.get(stream_url, headers=daddylive_headers)
+                resp1.raise_for_status()
+                # 2. Estrai link Player 2
+                iframes = re.findall(r'<a[^>]*href="([^"]+)"[^>]*>\s*<button[^>]*>\s*Player\s*2\s*</button>', resp1.text)
+                if not iframes:
+                    raise ExtractorError("Nessun link Player 2 trovato")
+                url2 = iframes[0]
+                url2 = baseurl + url2
+                url2 = url2.replace('//cast', '/cast')
+                daddylive_headers['Referer'] = url2
+                daddylive_headers['Origin'] = url2
+                # 3. Richiesta alla pagina Player 2
+                resp2 = await client.get(url2, headers=daddylive_headers)
+                resp2.raise_for_status()
+                # 4. Estrai iframe
+                iframes2 = re.findall(r'iframe src="([^"]*)', resp2.text)
+                if not iframes2:
+                    raise ExtractorError("Nessun iframe trovato nella pagina Player 2")
+                iframe_url = iframes2[0]
+                resp3 = await client.get(iframe_url, headers=daddylive_headers)
+                resp3.raise_for_status()
+                iframe_content = resp3.text
+                # 5. Estrai parametri auth
+                try:
+                    channel_key = re.findall(r'(?s) channelKey = \\"([^\"]*)', iframe_content)[0]
+                    auth_ts_b64 = re.findall(r'(?s)c = atob\("([^\"]*)', iframe_content)[0]
+                    auth_ts = base64.b64decode(auth_ts_b64).decode('utf-8')
+                    auth_rnd_b64 = re.findall(r'(?s)d = atob\("([^\"]*)', iframe_content)[0]
+                    auth_rnd = base64.b64decode(auth_rnd_b64).decode('utf-8')
+                    auth_sig_b64 = re.findall(r'(?s)e = atob\("([^\"]*)', iframe_content)[0]
+                    auth_sig = base64.b64decode(auth_sig_b64).decode('utf-8')
+                    auth_sig = quote_plus(auth_sig)
+                    auth_host_b64 = re.findall(r'(?s)a = atob\("([^\"]*)', iframe_content)[0]
+                    auth_host = base64.b64decode(auth_host_b64).decode('utf-8')
+                    auth_php_b64 = re.findall(r'(?s)b = atob\("([^\"]*)', iframe_content)[0]
+                    auth_php = base64.b64decode(auth_php_b64).decode('utf-8')
+                except Exception as e:
+                    raise ExtractorError(f"Errore estrazione parametri: {e}")
+                # 6. Richiesta auth
+                auth_url = f'{auth_host}{auth_php}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
+                auth_resp = await client.get(auth_url, headers=daddylive_headers)
+                auth_resp.raise_for_status()
+                # 7. Lookup server
+                host = re.findall('(?s)m3u8 =.*?:.*?:.*?".*?".*?"([^"]*)', iframe_content)[0]
+                server_lookup = re.findall(r'n fetchWithRetry\(\s*\'([^\']*)', iframe_content)[0]
+                server_lookup_url = f"https://{urlparse(iframe_url).netloc}{server_lookup}{channel_key}"
+                lookup_resp = await client.get(server_lookup_url, headers=daddylive_headers)
+                lookup_resp.raise_for_status()
+                server_data = lookup_resp.json()
+                server_key = server_data['server_key']
+                referer_raw = f'https://{urlparse(iframe_url).netloc}'
+                clean_m3u8_url = f'https://{server_key}{host}{server_key}/{channel_key}/mono.m3u8'
+                stream_headers = {
+                    'User-Agent': daddylive_headers['User-Agent'],
+                    'Referer': referer_raw,
+                    'Origin': referer_raw
+                }
+                return {
+                    "destination_url": clean_m3u8_url,
+                    "request_headers": stream_headers,
+                    "mediaflow_endpoint": self.mediaflow_endpoint,
+                }
+
+        try:
+            clean_url = url
+            channel_id = extract_channel_id(clean_url)
+            if not channel_id:
+                raise ExtractorError(f"Impossibile estrarre ID canale da {clean_url}")
+
+            baseurl = await get_daddylive_base_url()
+            endpoints = ["stream/", "cast/", "player/", "watch/"]
+            last_exc = None
+            for endpoint in endpoints:
+                try:
+                    return await try_endpoint(baseurl, endpoint, channel_id)
+                except Exception as exc:
+                    last_exc = exc
+                    continue
+            raise ExtractorError(f"Extraction failed: {str(last_exc)}")
         except Exception as e:
             raise ExtractorError(f"Extraction failed: {str(e)}")
 
