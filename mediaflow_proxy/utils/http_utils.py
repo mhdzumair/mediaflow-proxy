@@ -111,7 +111,25 @@ class Streamer:
 
         """
         try:
-            request = self.client.build_request("GET", url, headers=headers)
+            # PATCH: Simula requests per Vavoo/m3u8
+            import logging
+            import re
+            patched_headers = dict(headers)
+            if url.endswith('.m3u8') or 'vavoo.to' in url:
+                # Forza header tipici di requests
+                patched_headers.setdefault('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
+                patched_headers.setdefault('Accept', '*/*')
+                patched_headers.setdefault('Connection', 'keep-alive')
+                if 'referer' in patched_headers:
+                    patched_headers['Referer'] = patched_headers.pop('referer')
+                if 'origin' in patched_headers:
+                    patched_headers['Origin'] = patched_headers.pop('origin')
+                # Rimuovi header None
+                patched_headers = {k: v for k, v in patched_headers.items() if v is not None}
+                logging.warning(f"STREAMER REQ PATCHED HEADERS: {patched_headers}")
+            else:
+                patched_headers = headers
+            request = self.client.build_request("GET", url, headers=patched_headers)
             self.response = await self.client.send(request, stream=True, follow_redirects=True)
             self.response.raise_for_status()
         except httpx.TimeoutException:
