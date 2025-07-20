@@ -1,28 +1,25 @@
 import json
-import requests
+import base64
 from typing import Any, Dict, Optional
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
+import httpx
 
 class VavooExtractor(BaseExtractor):
-    """Vavoo URL extractor for resolving vavoo.to links."""
+    """Vavoo URL extractor for resolving vavoo.to links (solo httpx, async)."""
 
     def __init__(self, request_headers: dict):
         super().__init__(request_headers)
         self.mediaflow_endpoint = "proxy_stream_endpoint"
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'MediaHubMX/2'
-        })
 
-    def get_auth_signature(self) -> Optional[str]:
-        """Get authentication signature for Vavoo API."""
+    async def get_auth_signature(self) -> Optional[str]:
+        """Get authentication signature for Vavoo API (async, httpx, pulito)."""
+        import httpx
         headers = {
             "user-agent": "okhttp/4.11.0",
             "accept": "application/json", 
             "content-type": "application/json; charset=utf-8",
-            "content-length": "1106",
             "accept-encoding": "gzip"
         }
         data = {
@@ -84,28 +81,22 @@ class VavooExtractor(BaseExtractor):
             }
         }
         try:
-            resp = self.session.post("https://www.vavoo.tv/api/app/ping", json=data, headers=headers, timeout=20)
-            resp.raise_for_status()
-            result = resp.json()
-            addon_sig = result.get("addonSig")
-            return addon_sig if addon_sig else None
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.post("https://www.vavoo.tv/api/app/ping", json=data, headers=headers)
+                resp.raise_for_status()
+                result = resp.json()
+                addon_sig = result.get("addonSig")
+                return addon_sig if addon_sig else None
         except Exception:
             return None
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
-        """Extract Vavoo stream URL.
-
-        Args:
-            url: The Vavoo URL to resolve
-
-        Returns:
-            Dict containing stream URL and required headers
-        """
+        """Extract Vavoo stream URL (async, httpx)."""
         if "vavoo.to" not in url:
             raise ExtractorError("Not a valid Vavoo URL")
 
         # Get authentication signature
-        signature = self.get_auth_signature()
+        signature = await self.get_auth_signature()
         if not signature:
             raise ExtractorError("Failed to get Vavoo authentication signature")
 
@@ -127,12 +118,11 @@ class VavooExtractor(BaseExtractor):
         }
 
     async def _resolve_vavoo_link(self, link: str, signature: str) -> Optional[str]:
-        """Resolve a Vavoo link using the MediaHubMX API."""
+        """Resolve a Vavoo link using the MediaHubMX API (async, httpx)."""
         headers = {
             "user-agent": "MediaHubMX/2",
             "accept": "application/json",
             "content-type": "application/json; charset=utf-8", 
-            "content-length": "115",
             "accept-encoding": "gzip",
             "mediahubmx-signature": signature
         }
@@ -142,18 +132,16 @@ class VavooExtractor(BaseExtractor):
             "url": link,
             "clientVersion": "3.0.2"
         }
-        
         try:
-            resp = self.session.post("https://vavoo.to/mediahubmx-resolve.json", json=data, headers=headers, timeout=20)
-            resp.raise_for_status()
-            
-            result = resp.json()
-            if isinstance(result, list) and result and result[0].get("url"):
-                return result[0]["url"]
-            elif isinstance(result, dict) and result.get("url"):
-                return result["url"]
-            else:
-                return None
-                
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.post("https://vavoo.to/mediahubmx-resolve.json", json=data, headers=headers)
+                resp.raise_for_status()
+                result = resp.json()
+                if isinstance(result, list) and result and result[0].get("url"):
+                    return result[0]["url"]
+                elif isinstance(result, dict) and result.get("url"):
+                    return result["url"]
+                else:
+                    return None
         except Exception as e:
             raise ExtractorError(f"Vavoo resolution failed: {str(e)}") 
