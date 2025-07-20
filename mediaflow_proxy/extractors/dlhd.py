@@ -32,38 +32,39 @@ class DLHDExtractor(BaseExtractor):
             channel_url = url
             channel_origin = self._get_origin(channel_url)
 
-            # Check for direct parameters
             player_url_from_arg = kwargs.get("player_url")
             stream_url_from_arg = kwargs.get("stream_url")
             auth_url_base_from_arg = kwargs.get("auth_url_base")
 
-            # Lista di possibili endpoint da provare direttamente
             possible_paths = [
                 "/stream/", "/cast/", "/player/", "/watch/"
             ]
-            # Se l'URL fornito contiene uno di questi endpoint, prova tutti in sequenza
             parsed = urlparse(channel_url)
+            # Se l'URL fornito contiene uno degli endpoint diretti
             for path in possible_paths:
                 if path in parsed.path:
-                    # Genera tutte le varianti sostituendo il path
-                    for try_path in possible_paths:
-                        new_path = parsed.path
-                        for p in possible_paths:
-                            if p in new_path:
-                                new_path = new_path.replace(p, try_path)
-                        try_url = urlunparse((
-                            parsed.scheme,
-                            parsed.netloc,
-                            new_path,
-                            parsed.params,
-                            parsed.query,
-                            parsed.fragment
-                        ))
-                        try:
-                            return await self._try_extract_with_url(try_url, channel_origin)
-                        except Exception:
-                            continue
-                    # Se nessuna variante funziona, esci dal ciclo e passa alla logica di fallback
+                    # Prova prima l'endpoint fornito
+                    try:
+                        return await self._try_extract_with_url(channel_url, channel_origin)
+                    except Exception:
+                        # Se fallisce, prova gli altri endpoint alternativi (escludendo quello già provato)
+                        for try_path in possible_paths:
+                            if try_path == path:
+                                continue
+                            new_path = parsed.path.replace(path, try_path)
+                            try_url = urlunparse((
+                                parsed.scheme,
+                                parsed.netloc,
+                                new_path,
+                                parsed.params,
+                                parsed.query,
+                                parsed.fragment
+                            ))
+                            try:
+                                return await self._try_extract_with_url(try_url, channel_origin)
+                            except Exception:
+                                continue
+                        # Se tutte le varianti falliscono, passa alla logica di fallback
                     break
             # Se non era un endpoint diretto, o tutte le varianti hanno fallito, procedi con la logica originale
             current_player_url_for_processing: str
@@ -80,7 +81,6 @@ class DLHDExtractor(BaseExtractor):
                 current_player_url_for_processing = extracted_iframe_url
             else:
                 current_player_url_for_processing = player_url_from_arg
-            # Prova la logica di fallback
             try:
                 return await self._try_extract_with_url(current_player_url_for_processing, channel_origin)
             except Exception as original_error:
