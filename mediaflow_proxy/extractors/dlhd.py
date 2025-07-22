@@ -20,7 +20,7 @@ class DLHDExtractor(BaseExtractor):
         from urllib.parse import urlparse, quote_plus
 
         async def get_daddylive_base_url():
-            github_url = 'https://raw.githubusercontent.com/thecrewwh/dl_url/refs/heads/main/dl.xml'
+            github_url = 'https://raw.githubusercontent.com/nzo66/dlhd_url/refs/heads/main/dlhd.xml'
             try:
                 async with httpx.AsyncClient(timeout=10) as client:
                     resp = await client.get(github_url)
