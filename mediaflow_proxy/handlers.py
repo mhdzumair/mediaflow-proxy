@@ -312,9 +312,12 @@ async def get_manifest(
     """
     try:
         # Decodifica l'URL se contiene doppia codifica per &
+        import urllib.parse
         destination_url = manifest_params.destination
         if '%2526' in destination_url:
+            # Prima sostituisci %2526 con %26, poi decodifica completamente
             destination_url = destination_url.replace('%2526', '%26')
+            destination_url = urllib.parse.unquote(destination_url)
         
         mpd_dict = await get_cached_mpd(
             destination_url,
