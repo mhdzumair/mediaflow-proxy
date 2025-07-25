@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request, Response, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import httpx
 from mediaflow_proxy.configs import settings
+from mediaflow_proxy.utils.http_utils import get_original_scheme
 import asyncio
 
 playlist_builder_router = APIRouter()
@@ -192,8 +193,11 @@ async def proxy_handler(
 
         playlist_definitions = d.split(';')
         
+        # Costruisci base_url con lo schema corretto
+        original_scheme = get_original_scheme(request)
+        base_url = f"{original_scheme}://{request.url.netloc}"
+        
         # Estrai base_url dalla prima definizione se presente
-        base_url = str(request.base_url).rstrip('/')
         if playlist_definitions and '&' in playlist_definitions[0]:
             parts = playlist_definitions[0].split('&', 1)
             if ':' in parts[0] and not parts[0].startswith('http'):
