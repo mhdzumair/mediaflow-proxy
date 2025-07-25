@@ -80,7 +80,10 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                     encoded_url = urllib.parse.quote(logical_line, safe='')
                     processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}&api_password={api_password}"
                 elif '.mpd' in logical_line:
+                    # Doppia codifica per gestire & negli URL MPD
                     encoded_url = urllib.parse.quote(logical_line, safe='')
+                    # Codifica ulteriormente i caratteri & per evitare che vengano interpretati come separatori
+                    encoded_url = encoded_url.replace('%26', '%2526')
                     processed_url_content = f"{base_url}/proxy/mpd/manifest.m3u8?d={encoded_url}&api_password={api_password}"
                 elif '.php' in logical_line:
                     encoded_url = urllib.parse.quote(logical_line, safe='')
