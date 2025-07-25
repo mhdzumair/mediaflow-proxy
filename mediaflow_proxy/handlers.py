@@ -311,8 +311,13 @@ async def get_manifest(
         Response: The HTTP response with the HLS manifest.
     """
     try:
+        # Decodifica l'URL se contiene doppia codifica per &
+        destination_url = manifest_params.destination
+        if '%2526' in destination_url:
+            destination_url = destination_url.replace('%2526', '%26')
+        
         mpd_dict = await get_cached_mpd(
-            manifest_params.destination,
+            destination_url,
             headers=proxy_headers.request,
             parse_drm=not manifest_params.key_id and not manifest_params.key,
         )
