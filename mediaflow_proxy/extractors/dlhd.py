@@ -40,9 +40,18 @@ class DLHDExtractor(BaseExtractor):
             match_premium = re.search(r'/premium(\d+)/mono\.m3u8$', url)
             if match_premium:
                 return match_premium.group(1)
+            # Handle both normal and URL-encoded patterns
             match_player = re.search(r'/(?:watch|stream|cast|player)/stream-(\d+)\.php', url)
             if match_player:
                 return match_player.group(1)
+            # Handle URL-encoded patterns like %2Fstream%2Fstream-123.php or just stream-123.php
+            match_encoded = re.search(r'(?:%2F|/)stream-(\d+)\.php', url, re.IGNORECASE)
+            if match_encoded:
+                return match_encoded.group(1)
+            # Handle direct stream- pattern without path
+            match_direct = re.search(r'stream-(\d+)\.php', url)
+            if match_direct:
+                return match_direct.group(1)
             return None
 
         async def try_endpoint(baseurl, endpoint, channel_id):
@@ -53,7 +62,7 @@ class DLHDExtractor(BaseExtractor):
                 'Referer': baseurl,
                 'Origin': daddy_origin
             }
-            async with httpx.AsyncClient(timeout=15) as client:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
                 # 1. Richiesta alla pagina stream/cast/player/watch
                 resp1 = await client.get(stream_url, headers=daddylive_headers)
                 resp1.raise_for_status()
