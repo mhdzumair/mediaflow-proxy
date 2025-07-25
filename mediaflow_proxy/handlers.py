@@ -314,10 +314,29 @@ async def get_manifest(
         # Decodifica l'URL se contiene doppia codifica per &
         import urllib.parse
         destination_url = manifest_params.destination
-        if '%2526' in destination_url:
-            # Prima sostituisci %2526 con %26, poi decodifica completamente
-            destination_url = destination_url.replace('%2526', '%26')
+        logger.info(f"Original destination URL: {destination_url}")
+        
+        # Gestisci URL con parametri codificati
+        if '%26' in destination_url or '%3F' in destination_url:
+            logger.info(f"URL contains encoded parameters, processing...")
+            
+            # Prima sostituisci %2526 con %26 se presente (doppia codifica)
+            if '%2526' in destination_url:
+                destination_url = destination_url.replace('%2526', '%26')
+                logger.info(f"After %2526 replacement: {destination_url}")
+            
+            # Poi decodifica completamente l'URL
             destination_url = urllib.parse.unquote(destination_url)
+            logger.info(f"After full decode: {destination_url}")
+        
+        # Correggi il primo & che dovrebbe essere ? (indipendentemente dalla decodifica)
+        if '&' in destination_url and '?' not in destination_url:
+            logger.info(f"URL has & but no ?, correcting first & to ?")
+            # Trova la prima occorrenza di & e sostituiscila con ?
+            first_amp_pos = destination_url.find('&')
+            if first_amp_pos > 0:
+                destination_url = destination_url[:first_amp_pos] + '?' + destination_url[first_amp_pos+1:]
+                logger.info(f"After ? correction: {destination_url}")
         
         mpd_dict = await get_cached_mpd(
             destination_url,
