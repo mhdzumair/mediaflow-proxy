@@ -118,8 +118,9 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                 encoded_url = urllib.parse.quote(logical_line, safe='')
                 processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}&api_password={api_password}"
             else:
-                # Per tutti gli altri link senza estensioni specifiche, trattali come .m3u8 senza codifica
-                processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={logical_line}&api_password={api_password}"
+                # Per tutti gli altri link senza estensioni specifiche, trattali come .m3u8 con codifica
+                encoded_url = urllib.parse.quote(logical_line, safe='')
+                processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}&api_password={api_password}"
             
             # Applica gli header raccolti, indipendentemente dalla modalità
             if current_ext_headers:
