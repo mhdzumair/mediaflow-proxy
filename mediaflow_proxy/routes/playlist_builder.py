@@ -62,74 +62,65 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
         if logical_line and not logical_line.startswith('#') and \
            ('http://' in logical_line or 'https://' in logical_line):
             
-            # Decide la logica di riscrittura in base alla presenza della password
-            if api_password is not None:
-                # --- LOGICA CON PASSWORD (MFP) ---
+            processed_url_content = logical_line
+            
+            # Non modificare link pluto.tv
+            if 'pluto.tv' in logical_line:
                 processed_url_content = logical_line
+            elif 'vavoo.to' in logical_line:
+                encoded_url = urllib.parse.quote(logical_line, safe='')
+                processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}&api_password={api_password}"
+            elif 'vixsrc.to' in logical_line:
+                encoded_url = urllib.parse.quote(logical_line, safe='')
+                processed_url_content = f"{base_url}/extractor/video?host=VixCloud&redirect_stream=true&d={encoded_url}&api_password={api_password}"
+            elif '.m3u8' in logical_line:
+                encoded_url = urllib.parse.quote(logical_line, safe='')
+                processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}&api_password={api_password}"
+            elif '.mpd' in logical_line:
+                # Estrai parametri DRM dall'URL MPD se presenti
+                import re
+                from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
                 
-                # Non modificare link pluto.tv
-                if 'pluto.tv' in logical_line:
-                    processed_url_content = logical_line
-                elif 'vavoo.to' in logical_line:
-                    encoded_url = urllib.parse.quote(logical_line, safe='')
-                    processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}&api_password={api_password}"
-                elif 'vixsrc.to' in logical_line:
-                    encoded_url = urllib.parse.quote(logical_line, safe='')
-                    processed_url_content = f"{base_url}/extractor/video?host=VixCloud&redirect_stream=true&d={encoded_url}&api_password={api_password}"
-                elif '.m3u8' in logical_line:
-                    encoded_url = urllib.parse.quote(logical_line, safe='')
-                    processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}&api_password={api_password}"
-                elif '.mpd' in logical_line:
-                    # Estrai parametri DRM dall'URL MPD se presenti
-                    import re
-                    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-                    
-                    # Parse dell'URL per estrarre parametri
-                    parsed_url = urlparse(logical_line)
-                    query_params = parse_qs(parsed_url.query)
-                    
-                    # Estrai key_id e key se presenti
-                    key_id = query_params.get('key_id', [None])[0]
-                    key = query_params.get('key', [None])[0]
-                    
-                    # Rimuovi key_id e key dai parametri originali
-                    clean_params = {k: v for k, v in query_params.items() if k not in ['key_id', 'key']}
-                    
-                    # Ricostruisci l'URL senza i parametri DRM
-                    clean_query = urlencode(clean_params, doseq=True) if clean_params else ''
-                    clean_url = urlunparse((
-                        parsed_url.scheme,
-                        parsed_url.netloc,
-                        parsed_url.path,
-                        parsed_url.params,
-                        clean_query,
-                        parsed_url.fragment
-                    ))
-                    
-                    # Nessuna codifica per l'URL MPD
-                    clean_url_for_param = clean_url
-                    
-                    # Costruisci l'URL MediaFlow con parametri DRM separati
-                    processed_url_content = f"{base_url}/proxy/mpd/manifest.m3u8?api_password={api_password}&d={clean_url_for_param}"
-                    
-                    # Aggiungi parametri DRM se presenti
-                    if key_id:
-                        processed_url_content += f"&key_id={key_id}"
-                    if key:
-                        processed_url_content += f"&key={key}"
-                elif '.php' in logical_line:
-                    encoded_url = urllib.parse.quote(logical_line, safe='')
-                    processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}&api_password={api_password}"
-                else:
-                    # Link non modificato dalle regole, ma gli header potrebbero essere aggiunti
-                    pass
+                # Parse dell'URL per estrarre parametri
+                parsed_url = urlparse(logical_line)
+                query_params = parse_qs(parsed_url.query)
+                
+                # Estrai key_id e key se presenti
+                key_id = query_params.get('key_id', [None])[0]
+                key = query_params.get('key', [None])[0]
+                
+                # Rimuovi key_id e key dai parametri originali
+                clean_params = {k: v for k, v in query_params.items() if k not in ['key_id', 'key']}
+                
+                # Ricostruisci l'URL senza i parametri DRM
+                clean_query = urlencode(clean_params, doseq=True) if clean_params else ''
+                clean_url = urlunparse((
+                    parsed_url.scheme,
+                    parsed_url.netloc,
+                    parsed_url.path,
+                    parsed_url.params,
+                    clean_query,
+                    parsed_url.fragment
+                ))
+                
+                # Nessuna codifica per l'URL MPD
+                clean_url_for_param = clean_url
+                
+                # Costruisci l'URL MediaFlow con parametri DRM separati
+                processed_url_content = f"{base_url}/proxy/mpd/manifest.m3u8?api_password={api_password}&d={clean_url_for_param}"
+                
+                # Aggiungi parametri DRM se presenti
+                if key_id:
+                    processed_url_content += f"&key_id={key_id}"
+                if key:
+                    processed_url_content += f"&key={key}"
+            elif '.php' in logical_line:
+                encoded_url = urllib.parse.quote(logical_line, safe='')
+                processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}&api_password={api_password}"
             else:
-                # --- LOGICA SENZA PASSWORD ---
-                # Non modificare link pluto.tv anche senza password
-                if 'pluto.tv' in logical_line:
-                    processed_url_content = logical_line
-                else:
-                    processed_url_content = f"{base_url}/proxy/m3u?url={logical_line}"
+                # Per tutti gli altri link senza estensioni specifiche, trattali come .m3u8
+                encoded_url = urllib.parse.quote(logical_line, safe='')
+                processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}&api_password={api_password}"
             
             # Applica gli header raccolti, indipendentemente dalla modalità
             if current_ext_headers:
