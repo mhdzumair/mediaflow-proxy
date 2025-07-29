@@ -1,5 +1,9 @@
+import logging
 from typing import Any, Dict, Optional
+import httpx
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
+
+logger = logging.getLogger(__name__)
 
 class VavooExtractor(BaseExtractor):
     """Vavoo URL extractor for resolving vavoo.to links (solo httpx, async)."""
@@ -10,13 +14,15 @@ class VavooExtractor(BaseExtractor):
 
     async def get_auth_signature(self) -> Optional[str]:
         """Get authentication signature for Vavoo API (async, httpx, pulito)."""
-        import httpx
         headers = {
             "user-agent": "okhttp/4.11.0",
             "accept": "application/json", 
             "content-type": "application/json; charset=utf-8",
             "accept-encoding": "gzip"
         }
+        import time
+        current_time = int(time.time() * 1000)
+        
         data = {
             "token": "tosFwQCJMS8qrW_AjLoHPQ41646J5dRNha6ZWHnijoYQQQoADQoXYSo7ki7O5-CsgN4CH0uRk6EEoJ0728ar9scCRQW3ZkbfrPfeCXW2VgopSW2FWDqPOoVYIuVPAOnXCZ5g",
             "reason": "app-blur",
@@ -26,19 +32,19 @@ class VavooExtractor(BaseExtractor):
                 "device": {
                     "type": "Handset",
                     "brand": "google",
-                    "model": "Nexus",
-                    "name": "21081111RG",
+                    "model": "Pixel",
+                    "name": "sdk_gphone64_arm64",
                     "uniqueId": "d10e5d99ab665233"
                 },
                 "os": {
                     "name": "android",
-                    "version": "7.1.2",
+                    "version": "13",
                     "abis": ["arm64-v8a", "armeabi-v7a", "armeabi"],
                     "host": "android"
                 },
                 "app": {
                     "platform": "android",
-                    "version": "3.1.20",
+                    "version": "3.1.21",
                     "buildId": "289515000",
                     "engine": "hbc85",
                     "signatures": ["6e8a975e3cbf07d5de823a760d4c2547f86c1403105020adee5de67ac510999e"],
@@ -46,8 +52,8 @@ class VavooExtractor(BaseExtractor):
                 },
                 "version": {
                     "package": "tv.vavoo.app",
-                    "binary": "3.1.20",
-                    "js": "3.1.20"
+                    "binary": "3.1.21",
+                    "js": "3.1.21"
                 }
             },
             "appFocusTime": 0,
@@ -57,10 +63,10 @@ class VavooExtractor(BaseExtractor):
             "hasAddon": True,
             "castConnected": False,
             "package": "tv.vavoo.app",
-            "version": "3.1.20",
+            "version": "3.1.21",
             "process": "app",
-            "firstAppStart": 1743962904623,
-            "lastAppStart": 1743962904623,
+            "firstAppStart": current_time,
+            "lastAppStart": current_time,
             "ipLocation": "",
             "adblockEnabled": True,
             "proxy": {
@@ -69,19 +75,13 @@ class VavooExtractor(BaseExtractor):
                 "ssVersion": 1,
                 "enabled": True,
                 "autoServer": True,
-                "id": "pl-waw"
+                "id": "de-fra"
             },
             "iap": {
                 "supported": False
             }
         }
-import logging
-
-logger = logging.getLogger(__name__)
-
-class VavooExtractor(BaseExtractor):
-    ...
-    async def get_auth_signature(self, data: Dict[str, Any], headers: Dict[str, str]) -> Optional[str]:
+        
         try:
             async with httpx.AsyncClient(timeout=20) as client:
                 resp = await client.post(
@@ -92,9 +92,14 @@ class VavooExtractor(BaseExtractor):
                 resp.raise_for_status()
                 result = resp.json()
                 addon_sig = result.get("addonSig")
-                return addon_sig if addon_sig else None
-        except Exception:
-            logger.exception("Failed to get Vavoo authentication signature")
+                if addon_sig:
+                    logger.info("Successfully obtained Vavoo authentication signature")
+                    return addon_sig
+                else:
+                    logger.warning("No addonSig in Vavoo API response")
+                    return None
+        except Exception as e:
+            logger.exception(f"Failed to get Vavoo authentication signature: {str(e)}")
             return None
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
@@ -137,18 +142,27 @@ class VavooExtractor(BaseExtractor):
             "language": "de",
             "region": "AT", 
             "url": link,
-            "clientVersion": "3.0.2"
+            "clientVersion": "3.1.21"
         }
         try:
             async with httpx.AsyncClient(timeout=20) as client:
+                logger.info(f"Attempting to resolve Vavoo URL: {link}")
                 resp = await client.post("https://vavoo.to/mediahubmx-resolve.json", json=data, headers=headers)
                 resp.raise_for_status()
                 result = resp.json()
+                logger.info(f"Vavoo API response: {result}")
+                
                 if isinstance(result, list) and result and result[0].get("url"):
-                    return result[0]["url"]
+                    resolved_url = result[0]["url"]
+                    logger.info(f"Successfully resolved Vavoo URL to: {resolved_url}")
+                    return resolved_url
                 elif isinstance(result, dict) and result.get("url"):
-                    return result["url"]
+                    resolved_url = result["url"]
+                    logger.info(f"Successfully resolved Vavoo URL to: {resolved_url}")
+                    return resolved_url
                 else:
+                    logger.warning(f"No URL found in Vavoo API response: {result}")
                     return None
         except Exception as e:
+            logger.exception(f"Vavoo resolution failed for URL {link}: {str(e)}")
             raise ExtractorError(f"Vavoo resolution failed: {str(e)}") from e
