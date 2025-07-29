@@ -35,6 +35,4 @@ COPY --chown=mediaflow_proxy:mediaflow_proxy . /mediaflow_proxy
 EXPOSE 8888
 
 # Activate virtual environment and run the application with Gunicorn
-# --- UNICA RIGA MODIFICATA ---
-# Aggiunto --forwarded-allow-ips "*" alla fine per fidarsi del proxy
-CMD ["poetry", "run", "gunicorn", "mediaflow_proxy.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8888", "--timeout", "120", "--max-requests", "500", "--max-requests-jitter", "200", "--access-logfile", "-", "--error-logfile", "-", "--log-level", "info", "--forwarded-allow-ips", "127.0.0.1"]
+CMD ["sh", "-c", "poetry run gunicorn mediaflow_proxy.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8888 --timeout 120 --max-requests 500 --max-requests-jitter 200 --access-logfile - --error-logfile - --log-level info --forwarded-allow-ips $FORWARDED_ALLOW_IPS"]
