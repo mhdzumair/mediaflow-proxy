@@ -75,14 +75,26 @@ class VavooExtractor(BaseExtractor):
                 "supported": False
             }
         }
+import logging
+
+logger = logging.getLogger(__name__)
+
+class VavooExtractor(BaseExtractor):
+    ...
+    async def get_auth_signature(self, data: Dict[str, Any], headers: Dict[str, str]) -> Optional[str]:
         try:
             async with httpx.AsyncClient(timeout=20) as client:
-                resp = await client.post("https://www.vavoo.tv/api/app/ping", json=data, headers=headers)
+                resp = await client.post(
+                    "https://www.vavoo.tv/api/app/ping",
+                    json=data,
+                    headers=headers
+                )
                 resp.raise_for_status()
                 result = resp.json()
                 addon_sig = result.get("addonSig")
                 return addon_sig if addon_sig else None
         except Exception:
+            logger.exception("Failed to get Vavoo authentication signature")
             return None
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
