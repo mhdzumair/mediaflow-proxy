@@ -1,9 +1,7 @@
-import asyncio
 import logging
 import psutil
-from typing import Dict, Optional, List, Set
-from urllib.parse import urlparse, urljoin
-import httpx
+from typing import Dict, Optional, List
+from urllib.parse import urljoin
 import xmltodict
 from mediaflow_proxy.utils.http_utils import create_httpx_client
 from mediaflow_proxy.configs import settings
