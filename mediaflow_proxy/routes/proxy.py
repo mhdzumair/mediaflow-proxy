@@ -138,7 +138,7 @@ async def dash_segment_proxy(
             headers[key[2:]] = value
     
     # Try to get segment from pre-buffer cache first
-    if settings.enable_hls_prebuffer:
+    if settings.enable_dash_prebuffer:
         cached_segment = await dash_prebuffer.get_segment(segment_url, headers)
         if cached_segment:
             return Response(
