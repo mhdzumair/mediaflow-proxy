@@ -139,4 +139,4 @@ class VavooExtractor(BaseExtractor):
                 else:
                     return None
         except Exception as e:
-            raise ExtractorError(f"Vavoo resolution failed: {str(e)}") 
+            raise ExtractorError(f"Vavoo resolution failed: {str(e)}") from e
