@@ -1,10 +1,5 @@
-import json
-import base64
 from typing import Any, Dict, Optional
-
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
-
-import httpx
 
 class VavooExtractor(BaseExtractor):
     """Vavoo URL extractor for resolving vavoo.to links (solo httpx, async)."""
