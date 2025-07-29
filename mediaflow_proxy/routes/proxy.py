@@ -1,5 +1,6 @@
 from typing import Annotated
 from urllib.parse import quote
+import re
 
 from fastapi import Request, Depends, APIRouter, Query, HTTPException
 from fastapi.responses import Response, RedirectResponse
@@ -22,6 +23,22 @@ from mediaflow_proxy.schemas import (
 from mediaflow_proxy.utils.http_utils import get_proxy_headers, ProxyRequestHeaders
 
 proxy_router = APIRouter()
+
+
+def sanitize_url(url: str) -> str:
+    """
+    Sanitize URL to fix common encoding issues.
+    
+    Args:
+        url (str): The URL to sanitize.
+        
+    Returns:
+        str: The sanitized URL.
+    """
+    # Fix malformed URLs where https%22// should be https://
+    url = re.sub(r'https%22//', 'https://', url)
+    url = re.sub(r'http%22//', 'http://', url)
+    return url
 
 
 def _check_and_redirect_dlhd_stream(request: Request, destination: str) -> RedirectResponse | None:
@@ -80,6 +97,9 @@ async def hls_manifest_proxy(
     Returns:
         Response: The HTTP response with the processed m3u8 playlist or streamed content.
     """
+    # Sanitize destination URL to fix common encoding issues
+    hls_params.destination = sanitize_url(hls_params.destination)
+    
     # Check if destination contains stream-{numero} pattern and redirect to extractor
     redirect_response = _check_and_redirect_dlhd_stream(request, hls_params.destination)
     if redirect_response:
@@ -107,6 +127,9 @@ async def hls_segment_proxy(
     """
     from mediaflow_proxy.utils.hls_prebuffer import hls_prebuffer
     from mediaflow_proxy.configs import settings
+    
+    # Sanitize segment URL to fix common encoding issues
+    segment_url = sanitize_url(segment_url)
     
     # Extract headers for pre-buffering
     headers = {}
@@ -151,6 +174,9 @@ async def dash_segment_proxy(
     """
     from mediaflow_proxy.utils.dash_prebuffer import dash_prebuffer
     from mediaflow_proxy.configs import settings
+    
+    # Sanitize segment URL to fix common encoding issues
+    segment_url = sanitize_url(segment_url)
     
     # Extract headers for pre-buffering
     headers = {}
@@ -198,6 +224,9 @@ async def proxy_stream_endpoint(
     Returns:
         Response: The HTTP response with the streamed content.
     """
+    # Sanitize destination URL to fix common encoding issues
+    destination = sanitize_url(destination)
+    
     # Check if destination contains stream-{numero} pattern and redirect to extractor
     redirect_response = _check_and_redirect_dlhd_stream(request, destination)
     if redirect_response:
@@ -241,6 +270,9 @@ async def mpd_manifest_proxy(
     Returns:
         Response: The HTTP response with the HLS manifest.
     """
+    # Sanitize destination URL to fix common encoding issues
+    manifest_params.destination = sanitize_url(manifest_params.destination)
+    
     return await get_manifest(request, manifest_params, proxy_headers)
 
 
@@ -261,6 +293,9 @@ async def playlist_endpoint(
     Returns:
         Response: The HTTP response with the HLS playlist.
     """
+    # Sanitize destination URL to fix common encoding issues
+    playlist_params.destination = sanitize_url(playlist_params.destination)
+    
     return await get_playlist(request, playlist_params, proxy_headers)
 
 
