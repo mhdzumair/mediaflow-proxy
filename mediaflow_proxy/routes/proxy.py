@@ -24,6 +24,43 @@ from mediaflow_proxy.utils.http_utils import get_proxy_headers, ProxyRequestHead
 proxy_router = APIRouter()
 
 
+def _check_and_redirect_dlhd_stream(request: Request, destination: str) -> RedirectResponse | None:
+    """
+    Check if destination contains stream-{numero} pattern and redirect to extractor if needed.
+    
+    Args:
+        request (Request): The incoming HTTP request.
+        destination (str): The destination URL to check.
+        
+    Returns:
+        RedirectResponse | None: RedirectResponse if redirect is needed, None otherwise.
+    """
+    import re
+    
+    # Check for stream-{numero} pattern (e.g., stream-1, stream-123, etc.)
+    if re.search(r'stream-\d+', destination):
+        from urllib.parse import urlencode
+        
+        # Build redirect URL to extractor
+        redirect_params = {
+            "host": "DLHD",
+            "redirect_stream": "true",
+            "d": destination
+        }
+        
+        # Preserve api_password if present
+        if "api_password" in request.query_params:
+            redirect_params["api_password"] = request.query_params["api_password"]
+        
+        # Build the redirect URL
+        base_url = str(request.url_for("extract_url"))
+        redirect_url = f"{base_url}?{urlencode(redirect_params)}"
+        
+        return RedirectResponse(url=redirect_url, status_code=302)
+    
+    return None
+
+
 @proxy_router.head("/hls/manifest.m3u8")
 @proxy_router.head("/hls/manifest.m3u8")
 @proxy_router.get("/hls/manifest.m3u8")
@@ -43,26 +80,10 @@ async def hls_manifest_proxy(
     Returns:
         Response: The HTTP response with the processed m3u8 playlist or streamed content.
     """
-    # Check if destination contains /stream- and redirect to extractor
-    if "/stream-" in hls_params.destination:
-        from urllib.parse import urlencode
-        
-        # Build redirect URL to extractor
-        redirect_params = {
-            "host": "DLHD",
-            "redirect_stream": "true",
-            "d": hls_params.destination
-        }
-        
-        # Preserve api_password if present
-        if "api_password" in request.query_params:
-            redirect_params["api_password"] = request.query_params["api_password"]
-        
-        # Build the redirect URL
-        base_url = str(request.url_for("extract_url"))
-        redirect_url = f"{base_url}?{urlencode(redirect_params)}"
-        
-        return RedirectResponse(url=redirect_url, status_code=302)
+    # Check if destination contains stream-{numero} pattern and redirect to extractor
+    redirect_response = _check_and_redirect_dlhd_stream(request, hls_params.destination)
+    if redirect_response:
+        return redirect_response
     
     return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
 
@@ -177,26 +198,10 @@ async def proxy_stream_endpoint(
     Returns:
         Response: The HTTP response with the streamed content.
     """
-    # Check if destination contains /stream- and redirect to extractor
-    if "/stream-" in destination:
-        from urllib.parse import urlencode
-        
-        # Build redirect URL to extractor
-        redirect_params = {
-            "host": "DLHD",
-            "redirect_stream": "true",
-            "d": destination
-        }
-        
-        # Preserve api_password if present
-        if "api_password" in request.query_params:
-            redirect_params["api_password"] = request.query_params["api_password"]
-        
-        # Build the redirect URL
-        base_url = str(request.url_for("extract_url"))
-        redirect_url = f"{base_url}?{urlencode(redirect_params)}"
-        
-        return RedirectResponse(url=redirect_url, status_code=302)
+    # Check if destination contains stream-{numero} pattern and redirect to extractor
+    redirect_response = _check_and_redirect_dlhd_stream(request, destination)
+    if redirect_response:
+        return redirect_response
     
     content_range = proxy_headers.request.get("range", "bytes=0-")
     if "nan" in content_range.casefold():
