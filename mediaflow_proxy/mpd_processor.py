@@ -33,7 +33,7 @@ async def process_manifest(
     hls_content = build_hls(mpd_dict, request, key_id, key)
     
     # Start DASH pre-buffering in background if enabled
-    if settings.enable_hls_prebuffer:
+    if settings.enable_dash_prebuffer:
         # Extract headers for pre-buffering
         headers = {}
         for key, value in request.query_params.items():
