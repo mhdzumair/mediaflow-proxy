@@ -22,10 +22,10 @@ class DASHPreBuffer:
             max_cache_size (int): Maximum number of segments to cache (uses config if None)
             prebuffer_segments (int): Number of segments to pre-buffer ahead (uses config if None)
         """
-        self.max_cache_size = max_cache_size or settings.hls_prebuffer_cache_size
-        self.prebuffer_segments = prebuffer_segments or settings.hls_prebuffer_segments
-        self.max_memory_percent = settings.hls_prebuffer_max_memory_percent
-        self.emergency_threshold = settings.hls_prebuffer_emergency_threshold
+        self.max_cache_size = max_cache_size or settings.dash_prebuffer_cache_size
+        self.prebuffer_segments = prebuffer_segments or settings.dash_prebuffer_segments
+        self.max_memory_percent = settings.dash_prebuffer_max_memory_percent
+        self.emergency_threshold = settings.dash_prebuffer_emergency_threshold
         
         # Cache for different types of DASH content
         self.segment_cache: Dict[str, bytes] = {}
