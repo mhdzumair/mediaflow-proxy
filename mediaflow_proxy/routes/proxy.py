@@ -1,6 +1,7 @@
 from typing import Annotated
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 import re
+import logging
 
 from fastapi import Request, Depends, APIRouter, Query, HTTPException
 from fastapi.responses import Response, RedirectResponse
@@ -35,9 +36,38 @@ def sanitize_url(url: str) -> str:
     Returns:
         str: The sanitized URL.
     """
+    logger = logging.getLogger(__name__)
+    original_url = url
+    
     # Fix malformed URLs where https%22// should be https://
     url = re.sub(r'https%22//', 'https://', url)
     url = re.sub(r'http%22//', 'http://', url)
+    
+    # Fix malformed URLs where https%3A%22// should be https://
+    url = re.sub(r'https%3A%22//', 'https://', url)
+    url = re.sub(r'http%3A%22//', 'http://', url)
+    
+    # Fix malformed URLs where https:"// should be https:// (after partial decoding)
+    url = re.sub(r'https:"/', 'https://', url)
+    url = re.sub(r'http:"/', 'http://', url)
+    
+    # Log if URL was changed
+    if url != original_url:
+        logger.info(f"URL sanitized: '{original_url}' -> '{url}'")
+    
+    # Also try URL decoding to see what we get
+    try:
+        decoded_url = unquote(url)
+        if decoded_url != url:
+            logger.info(f"URL after decoding: '{decoded_url}'")
+            # If after decoding we still have malformed protocol, fix it
+            if ':"/' in decoded_url and not '://' in decoded_url:
+                fixed_decoded = re.sub(r'([a-z]+):"/', r'\1://', decoded_url)
+                logger.info(f"Fixed decoded URL: '{fixed_decoded}'")
+                return fixed_decoded
+    except Exception as e:
+        logger.warning(f"Error decoding URL '{url}': {e}")
+    
     return url
 
 
