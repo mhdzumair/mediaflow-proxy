@@ -204,9 +204,9 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
 
 4. To run the server with uvicorn options: (Optional)
    ```
-   uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888 --workers 4
+   uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888 --workers 4 --forwarded-allow-ips "*"
    ```
-
+  remove --forwarded-allow-ips "*" if you are on localhost
 
 #### Using git & poetry
 
@@ -232,9 +232,9 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
 
 4. Run the FastAPI server:
    ```
-   poetry run uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888 --workers 4
+   poetry run uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888 --workers 4 --forwarded-allow-ips "*"
    ```
-
+  remove --forwarded-allow-ips "*" if you are on localhost
 
 #### Build and Run Docker Image Locally
 
