@@ -48,8 +48,8 @@ def sanitize_url(url: str) -> str:
     url = re.sub(r'http%3A%22//', 'http://', url)
     
     # Fix malformed URLs where https:"// should be https:// (after partial decoding)
-    url = re.sub(r'https:"/', 'https://', url)
-    url = re.sub(r'http:"/', 'http://', url)
+    url = re.sub(r'https:"//', 'https://', url)
+    url = re.sub(r'http:"//', 'http://', url)
     
     # Log if URL was changed
     if url != original_url:
@@ -61,8 +61,9 @@ def sanitize_url(url: str) -> str:
         if decoded_url != url:
             logger.info(f"URL after decoding: '{decoded_url}'")
             # If after decoding we still have malformed protocol, fix it
-            if ':"/' in decoded_url and not '://' in decoded_url:
-                fixed_decoded = re.sub(r'([a-z]+):"/', r'\1://', decoded_url)
+            if ':"/' in decoded_url:
+                # Fix https:"// or http:"// patterns
+                fixed_decoded = re.sub(r'([a-z]+):"//', r'\1://', decoded_url)
                 logger.info(f"Fixed decoded URL: '{fixed_decoded}'")
                 return fixed_decoded
     except Exception as e:
