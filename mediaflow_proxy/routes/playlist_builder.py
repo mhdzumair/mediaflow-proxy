@@ -258,8 +258,8 @@ async def proxy_handler(
         )
         
     except Exception as e:
-        print(f"ERRORE GENERALE: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Errore: {str(e)}")
+        logger.error(f"General error in playlist handler: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}") from e
 
 
 @playlist_builder_router.get("/builder")
