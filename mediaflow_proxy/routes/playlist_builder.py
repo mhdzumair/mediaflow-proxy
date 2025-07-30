@@ -69,13 +69,13 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                 processed_url_content = logical_line
             elif 'vavoo.to' in logical_line:
                 encoded_url = urllib.parse.quote(logical_line, safe='')
-                processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}&api_password={api_password}"
+                processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}"
             elif 'vixsrc.to' in logical_line:
                 encoded_url = urllib.parse.quote(logical_line, safe='')
-                processed_url_content = f"{base_url}/extractor/video?host=VixCloud&redirect_stream=true&d={encoded_url}&api_password={api_password}"
+                processed_url_content = f"{base_url}/extractor/video?host=VixCloud&redirect_stream=true&d={encoded_url}"
             elif '.m3u8' in logical_line:
                 encoded_url = urllib.parse.quote(logical_line, safe='')
-                processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}&api_password={api_password}"
+                processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}"
             elif '.mpd' in logical_line:
                 # Estrai parametri DRM dall'URL MPD se presenti
                 import re
@@ -107,7 +107,7 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                 clean_url_for_param = clean_url
                 
                 # Costruisci l'URL MediaFlow con parametri DRM separati
-                processed_url_content = f"{base_url}/proxy/mpd/manifest.m3u8?api_password={api_password}&d={clean_url_for_param}"
+                processed_url_content = f"{base_url}/proxy/mpd/manifest.m3u8?d={clean_url_for_param}"
                 
                 # Aggiungi parametri DRM se presenti
                 if key_id:
@@ -116,17 +116,21 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                     processed_url_content += f"&key={key}"
             elif '.php' in logical_line:
                 encoded_url = urllib.parse.quote(logical_line, safe='')
-                processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}&api_password={api_password}"
+                processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}"
             else:
                 # Per tutti gli altri link senza estensioni specifiche, trattali come .m3u8 con codifica
                 encoded_url = urllib.parse.quote(logical_line, safe='')
-                processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}&api_password={api_password}"
+                processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}"
             
-            # Applica gli header raccolti, indipendentemente dalla modalità
+            # Applica gli header raccolti prima di api_password
             if current_ext_headers:
                 header_params_str = "".join([f"&h_{urllib.parse.quote(key)}={urllib.parse.quote(urllib.parse.quote(value))}" for key, value in current_ext_headers.items()])
                 processed_url_content += header_params_str
                 current_ext_headers = {}
+            
+            # Aggiungi api_password sempre alla fine
+            if api_password:
+                processed_url_content += f"&api_password={api_password}"
             
             yield processed_url_content + '\n'
         else:
