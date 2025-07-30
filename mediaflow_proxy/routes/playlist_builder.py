@@ -124,7 +124,7 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
             
             # Applica gli header raccolti prima di api_password
             if current_ext_headers:
-                header_params_str = "".join([f"&h_{urllib.parse.quote(key)}={urllib.parse.quote(urllib.parse.quote(value))}" for key, value in current_ext_headers.items()])
+                header_params_str = "".join([f"&h_{urllib.parse.quote(key)}={urllib.parse.quote(value)}" for key, value in current_ext_headers.items()])
                 processed_url_content += header_params_str
                 current_ext_headers = {}
             
