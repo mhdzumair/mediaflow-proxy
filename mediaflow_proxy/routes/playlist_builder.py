@@ -221,6 +221,14 @@ async def proxy_handler(
         if not d:
             raise HTTPException(status_code=400, detail="Query string mancante")
 
+        if not d.strip():
+            raise HTTPException(status_code=400, detail="Query string cannot be empty")
+
+        # Validate that we have at least one valid definition
+        playlist_definitions = [def_.strip() for def_ in d.split(';') if def_.strip()]
+        if not playlist_definitions:
+            raise HTTPException(status_code=400, detail="No valid playlist definitions found")
+
         playlist_definitions = d.split(';')
         
         # Costruisci base_url con lo schema corretto
