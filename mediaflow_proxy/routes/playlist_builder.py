@@ -358,7 +358,10 @@ async def url_builder():
             }
 
             function generateUrl() {
-                const serverAddress = document.getElementById('server-address').value.trim().replace(/\/$/, '');
+                let serverAddress = document.getElementById('server-address').value.trim();
+                if (serverAddress.endsWith('/')) {
+                    serverAddress = serverAddress.slice(0, -1);
+                }
                 if (!serverAddress) {
                     alert('Server address not available. Please reload the page.');
                     return;
@@ -372,7 +375,7 @@ async def url_builder():
                 for (const entry of entries) {
                     const playlistUrl = entry.querySelector('.playlist-url').value.trim();
                     if (playlistUrl) {
-                        if (playlistUrl && (playlistUrl.startsWith('http://') || playlistUrl.startsWith('https://'))) {
+                        if (playlistUrl.startsWith('http://') || playlistUrl.startsWith('https://')) {
                             definitions.push(playlistUrl);
                         } else {
                             alert('Invalid URL: ' + playlistUrl + '. URLs must start with http:// or https://');
