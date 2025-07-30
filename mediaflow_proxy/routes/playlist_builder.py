@@ -45,7 +45,7 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                         header_key = '-'.join(word.capitalize() for word in key_vlc[len('http-'):].split('-'))
                         current_ext_headers[header_key] = value_vlc
             except Exception as e:
-                print(f"⚠️ Errore nel parsing di #EXTVLCOPT '{logical_line}': {e}")
+                logger.error(f"⚠️ Error parsing #EXTVLCOPT '{logical_line}': {e}")
         
         elif logical_line.startswith('#EXTHTTP:'):
             is_header_tag = True
@@ -54,7 +54,7 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                 # Sostituisce tutti gli header correnti con quelli del JSON
                 current_ext_headers = json.loads(json_str)
             except Exception as e:
-                print(f"⚠️ Errore nel parsing di #EXTHTTP '{logical_line}': {e}")
+                logger.error(f"⚠️ Error parsing #EXTHTTP '{logical_line}': {e}")
                 current_ext_headers = {}  # Resetta in caso di errore
 
         if is_header_tag:
@@ -160,7 +160,7 @@ async def async_download_m3u_playlist(url: str) -> list[str]:
                         decoded_line = str(line_bytes)
                     lines.append(decoded_line + '\n' if decoded_line else '')
     except Exception as e:
-        print(f"Errore download (async) della playlist: {str(e)}")
+        logger.error(f"Error downloading playlist (async): {str(e)}")
         raise
     return lines
 
