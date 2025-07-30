@@ -51,6 +51,14 @@ def sanitize_url(url: str) -> str:
     url = re.sub(r'https:"//', 'https://', url)
     url = re.sub(r'http:"//', 'http://', url)
     
+    # Fix URLs where key_id and key parameters are incorrectly appended to the base URL
+    # This happens when the URL contains &key_id= and &key= which should be handled as proxy parameters
+    if '&key_id=' in url and '&key=' in url:
+        # Split the URL at the first occurrence of &key_id= to separate the base URL from the incorrectly appended parameters
+        base_url = url.split('&key_id=')[0]
+        logger.info(f"Removed incorrectly appended key parameters from URL: '{url}' -> '{base_url}'")
+        url = base_url
+    
     # Log if URL was changed
     if url != original_url:
         logger.info(f"URL sanitized: '{original_url}' -> '{url}'")
@@ -70,6 +78,44 @@ def sanitize_url(url: str) -> str:
         logger.warning(f"Error decoding URL '{url}': {e}")
     
     return url
+
+
+def extract_drm_params_from_url(url: str) -> tuple[str, str, str]:
+    """
+    Extract DRM parameters (key_id and key) from a URL if they are incorrectly appended.
+    
+    Args:
+        url (str): The URL that may contain appended DRM parameters.
+        
+    Returns:
+        tuple: (clean_url, key_id, key) where clean_url has the parameters removed,
+               and key_id/key are the extracted values (or None if not found).
+    """
+    logger = logging.getLogger(__name__)
+    key_id = None
+    key = None
+    clean_url = url
+    
+    # Check if URL contains incorrectly appended key_id and key parameters
+    if '&key_id=' in url and '&key=' in url:
+        # Extract key_id
+        key_id_match = re.search(r'&key_id=([^&]+)', url)
+        if key_id_match:
+            key_id = key_id_match.group(1)
+        
+        # Extract key
+        key_match = re.search(r'&key=([^&]+)', url)
+        if key_match:
+            key = key_match.group(1)
+        
+        # Remove the parameters from the URL
+        clean_url = re.sub(r'&key_id=[^&]*', '', url)
+        clean_url = re.sub(r'&key=[^&]*', '', clean_url)
+        
+        logger.info(f"Extracted DRM parameters from URL: key_id={key_id}, key={key}")
+        logger.info(f"Cleaned URL: '{url}' -> '{clean_url}'")
+    
+    return clean_url, key_id, key
 
 
 def _check_and_redirect_dlhd_stream(request: Request, destination: str) -> RedirectResponse | None:
@@ -301,6 +347,18 @@ async def mpd_manifest_proxy(
     Returns:
         Response: The HTTP response with the HLS manifest.
     """
+    # Extract DRM parameters from destination URL if they are incorrectly appended
+    clean_url, extracted_key_id, extracted_key = extract_drm_params_from_url(manifest_params.destination)
+    
+    # Update the destination with the cleaned URL
+    manifest_params.destination = clean_url
+    
+    # Use extracted parameters if they exist and the manifest params don't already have them
+    if extracted_key_id and not manifest_params.key_id:
+        manifest_params.key_id = extracted_key_id
+    if extracted_key and not manifest_params.key:
+        manifest_params.key = extracted_key
+    
     # Sanitize destination URL to fix common encoding issues
     manifest_params.destination = sanitize_url(manifest_params.destination)
     
@@ -324,6 +382,18 @@ async def playlist_endpoint(
     Returns:
         Response: The HTTP response with the HLS playlist.
     """
+    # Extract DRM parameters from destination URL if they are incorrectly appended
+    clean_url, extracted_key_id, extracted_key = extract_drm_params_from_url(playlist_params.destination)
+    
+    # Update the destination with the cleaned URL
+    playlist_params.destination = clean_url
+    
+    # Use extracted parameters if they exist and the playlist params don't already have them
+    if extracted_key_id and not playlist_params.key_id:
+        playlist_params.key_id = extracted_key_id
+    if extracted_key and not playlist_params.key:
+        playlist_params.key = extracted_key
+    
     # Sanitize destination URL to fix common encoding issues
     playlist_params.destination = sanitize_url(playlist_params.destination)
     
