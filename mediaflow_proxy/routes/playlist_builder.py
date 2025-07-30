@@ -369,7 +369,17 @@ async def url_builder():
                     return;
                 }
 
-                let finalUrl = serverAddress + '/playlist/playlist?d=' + definitions.join(';');
+                 entries.forEach(entry => {
+                     const playlistUrl = entry.querySelector('.playlist-url').value.trim();
+-                    if (playlistUrl) {
++                    if (playlistUrl && (playlistUrl.startsWith('http://') || playlistUrl.startsWith('https://'))) {
+                         definitions.push(playlistUrl);
++                    } else if (playlistUrl) {
++                        alert('Invalid URL: ' + playlistUrl + '. URLs must start with http:// or https://');
++                        return;
+                     }
+                 });
+                 let finalUrl = serverAddress + '/playlist/playlist?d=' + definitions.join(';');
                 if (apiPassword) {
                     finalUrl += '&api_password=' + encodeURIComponent(apiPassword);
                 }
