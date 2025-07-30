@@ -1,6 +1,7 @@
 import json
+import logging
 import urllib.parse
-from typing import Iterator, Dict, Any, Optional
+from typing import Iterator, Dict, Optional
 from fastapi import APIRouter, Request, Response, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import httpx
@@ -8,6 +9,7 @@ from mediaflow_proxy.configs import settings
 from mediaflow_proxy.utils.http_utils import get_original_scheme
 import asyncio
 
+logger = logging.getLogger(__name__)
 playlist_builder_router = APIRouter()
 
 
