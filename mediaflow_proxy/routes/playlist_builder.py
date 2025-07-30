@@ -358,7 +358,7 @@ async def url_builder():
             }
 
             function generateUrl() {
-                const serverAddress = document.getElementById('server-address').value.trim().replace(/\\/$/, '');
+                const serverAddress = document.getElementById('server-address').value.trim().replace(/\/$/, '');
                 if (!serverAddress) {
                     alert('Server address not available. Please reload the page.');
                     return;
@@ -368,28 +368,23 @@ async def url_builder():
                 const entries = document.querySelectorAll('.playlist-entry');
                 const definitions = [];
 
-                entries.forEach(entry => {
+                // Single loop for URL collection and validation
+                for (const entry of entries) {
                     const playlistUrl = entry.querySelector('.playlist-url').value.trim();
                     if (playlistUrl) {
-                        definitions.push(playlistUrl);
+                        if (playlistUrl && (playlistUrl.startsWith('http://') || playlistUrl.startsWith('https://'))) {
+                            definitions.push(playlistUrl);
+                        } else {
+                            alert('Invalid URL: ' + playlistUrl + '. URLs must start with http:// or https://');
+                            return;
+                        }
                     }
-                });
+                }
 
                 if (definitions.length === 0) {
                     document.getElementById('generated-url').textContent = 'No valid playlist entered.';
                     return;
                 }
-
-                 entries.forEach(entry => {
-                     const playlistUrl = entry.querySelector('.playlist-url').value.trim();
--                    if (playlistUrl) {
-+                    if (playlistUrl && (playlistUrl.startsWith('http://') || playlistUrl.startsWith('https://'))) {
-                         definitions.push(playlistUrl);
-+                    } else if (playlistUrl) {
-+                        alert('Invalid URL: ' + playlistUrl + '. URLs must start with http:// or https://');
-+                        return;
-                     }
-                 });
                  let finalUrl = serverAddress + '/playlist/playlist?d=' + definitions.join(';');
                 if (apiPassword) {
                     finalUrl += '&api_password=' + encodeURIComponent(apiPassword);
