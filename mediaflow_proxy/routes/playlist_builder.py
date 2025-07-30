@@ -103,9 +103,9 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                     parsed_url.fragment
                 ))
                 
-                # Nessuna codifica per l'URL MPD
-                clean_url_for_param = clean_url
-                
+                # Encode the MPD URL like other URL types
+                clean_url_for_param = urllib.parse.quote(clean_url, safe='')
+
                 # Costruisci l'URL MediaFlow con parametri DRM separati
                 processed_url_content = f"{base_url}/proxy/mpd/manifest.m3u8?d={clean_url_for_param}"
                 
