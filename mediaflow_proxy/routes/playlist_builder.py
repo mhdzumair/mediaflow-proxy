@@ -80,7 +80,6 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                 processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}"
             elif '.mpd' in logical_line:
                 # Estrai parametri DRM dall'URL MPD se presenti
-                import re
                 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
                 
                 # Parse dell'URL per estrarre parametri
@@ -226,17 +225,6 @@ async def proxy_handler(
         if not d.strip():
             raise HTTPException(status_code=400, detail="Query string cannot be empty")
 
-        # Validate that we have at least one valid definition
-        playlist_definitions = [def_.strip() for def_ in d.split(';') if def_.strip()]
-        if not playlist_definitions:
-            raise HTTPException(status_code=400, detail="No valid playlist definitions found")
-
-        if not d:
-            raise HTTPException(status_code=400, detail="Query string mancante")
-        
-        if not d.strip():
-            raise HTTPException(status_code=400, detail="Query string cannot be empty")
-        
         # Validate that we have at least one valid definition
         playlist_definitions = [def_.strip() for def_ in d.split(';') if def_.strip()]
         if not playlist_definitions:
