@@ -50,16 +50,17 @@ Set the following environment variables:
 - `DISABLE_SPEEDTEST`: Optional. Disables the speedtest UI. Returns 403 for the /speedtest path and direct access to speedtest.html. Default is `false`.
 - `STREMIO_PROXY_URL`: Optional. Stremio server URL for alternative content proxying. Example: `http://127.0.0.1:11470`.
 - `M3U8_CONTENT_ROUTING`: Optional. Routing strategy for M3U8 content URLs: `mediaflow` (default), `stremio`, or `direct`.
-- `ENABLE_HLS_PREBUFFER`: Optional. Enables HLS pre-buffering for improved streaming performance. Default: `true`.
-- `HLS_PREBUFFER_SEGMENTS`: Optional. Number of HLS segments to pre-buffer ahead. Default: `5`.
-- `HLS_PREBUFFER_CACHE_SIZE`: Optional. Maximum number of HLS segments to keep in memory cache. Default: `50`.
-- `HLS_PREBUFFER_MAX_MEMORY_PERCENT`: Optional. Maximum percentage of system memory to use for HLS pre-buffer cache. Default: `80`.
-- `HLS_PREBUFFER_EMERGENCY_THRESHOLD`: Optional. Emergency threshold (%) to trigger aggressive HLS cache cleanup. Default: `90`.
-- `ENABLE_DASH_PREBUFFER`: Optional. Enables DASH pre-buffering for improved streaming performance. Default: `true`.
-- `DASH_PREBUFFER_SEGMENTS`: Optional. Number of DASH segments to pre-buffer ahead. Default: `5`.
-- `DASH_PREBUFFER_CACHE_SIZE`: Optional. Maximum number of DASH segments to keep in memory cache. Default: `50`.
-- `DASH_PREBUFFER_MAX_MEMORY_PERCENT`: Optional. Maximum percentage of system memory to use for DASH pre-buffer cache. Default: `80`.
-- `DASH_PREBUFFER_EMERGENCY_THRESHOLD`: Optional. Emergency threshold (%) to trigger aggressive DASH cache cleanup. Default: `90`.
+- `ENABLE_HLS_PREBUFFER`: Optional. Enables HLS pre-buffering for improved streaming performance. Default: `false`. Enable this when you experience frequent buffering or want to improve playback smoothness for high-bitrate streams. Note that enabling pre-buffering increases memory usage and may not be suitable for low-memory environments.
+- `HLS_PREBUFFER_SEGMENTS`: Optional. Number of HLS segments to pre-buffer ahead. Default: `5`. Only effective when `ENABLE_HLS_PREBUFFER` is `true`.
+- `HLS_PREBUFFER_CACHE_SIZE`: Optional. Maximum number of HLS segments to keep in memory cache. Default: `50`. Only effective when `ENABLE_HLS_PREBUFFER` is `true`.
+- `HLS_PREBUFFER_MAX_MEMORY_PERCENT`: Optional. Maximum percentage of system memory to use for HLS pre-buffer cache. Default: `80`. Only effective when `ENABLE_HLS_PREBUFFER` is `true`.
+- `HLS_PREBUFFER_EMERGENCY_THRESHOLD`: Optional. Emergency threshold (%) to trigger aggressive HLS cache cleanup. Default: `90`. Only effective when `ENABLE_HLS_PREBUFFER` is `true`.
+- `ENABLE_DASH_PREBUFFER`: Optional. Enables DASH pre-buffering for improved streaming performance. Default: `false`. Enable this when you experience frequent buffering or want to improve playback smoothness for high-bitrate streams. Note that enabling pre-buffering increases memory usage and may not be suitable for low-memory environments.
+- `DASH_PREBUFFER_SEGMENTS`: Optional. Number of DASH segments to pre-buffer ahead. Default: `5`. Only effective when `ENABLE_DASH_PREBUFFER` is `true`.
+- `DASH_PREBUFFER_CACHE_SIZE`: Optional. Maximum number of DASH segments to keep in memory cache. Default: `50`. Only effective when `ENABLE_DASH_PREBUFFER` is `true`.
+- `DASH_PREBUFFER_MAX_MEMORY_PERCENT`: Optional. Maximum percentage of system memory to use for DASH pre-buffer cache. Default: `80`. Only effective when `ENABLE_DASH_PREBUFFER` is `true`.
+- `DASH_PREBUFFER_EMERGENCY_THRESHOLD`: Optional. Emergency threshold (%) to trigger aggressive DASH cache cleanup. Default: `90`. Only effective when `ENABLE_DASH_PREBUFFER` is `true`.
+- `FORWARDED_ALLOW_IPS`: Optional. Controls which IP addresses are trusted to provide forwarded headers (X-Forwarded-For, X-Forwarded-Proto, etc.) when MediaFlow Proxy is deployed behind reverse proxies or load balancers. Default: `127.0.0.1`. See [Forwarded Headers Configuration](#forwarded-headers-configuration) for detailed usage.
 
 ### Transport Configuration
 
@@ -147,6 +148,435 @@ Each route can have the following settings:
         }
     }'
     ```
+
+### Forwarded Headers Configuration
+
+When MediaFlow Proxy is deployed behind reverse proxies, load balancers, or CDNs (such as Nginx, Apache, Cloudflare, AWS ALB, etc.), it needs to properly handle forwarded headers to determine the real client IP address and original request protocol. The `FORWARDED_ALLOW_IPS` environment variable and `--forwarded-allow-ips` uvicorn parameter control which IP addresses are trusted to provide these headers.
+
+#### What are Forwarded Headers?
+
+Forwarded headers are HTTP headers that preserve information about the original client request when it passes through intermediary servers:
+
+- **X-Forwarded-For**: Contains the original client IP address
+- **X-Forwarded-Proto**: Contains the original request protocol (http/https)
+- **X-Real-IP**: Alternative header for client IP address
+- **X-Forwarded-Host**: Contains the original host header
+
+#### Security Importance
+
+Only trusted proxy servers should be allowed to set these headers, as malicious clients could potentially spoof them to bypass IP-based restrictions or logging. MediaFlow Proxy uses these headers for:
+
+- **Client IP Detection**: For IP-based access control in encrypted URLs
+- **Protocol Detection**: For generating correct URLs with proper schemes
+- **Security Logging**: For accurate request tracking and abuse prevention
+
+#### Configuration Options
+
+**Environment Variable (Docker/Production):**
+```env
+# Trust only localhost (default - most secure)
+FORWARDED_ALLOW_IPS=127.0.0.1
+
+# Trust specific proxy IPs
+FORWARDED_ALLOW_IPS=10.0.0.1,192.168.1.100
+
+# Trust all IPs (use with caution)
+FORWARDED_ALLOW_IPS=*
+
+# Trust IP ranges (CIDR notation)
+FORWARDED_ALLOW_IPS=10.0.0.0/8,172.16.0.0/12
+```
+
+**Uvicorn Command Line Parameter:**
+```bash
+# Trust only localhost (recommended for local development)
+uvicorn mediaflow_proxy.main:app --forwarded-allow-ips "127.0.0.1"
+
+# Trust specific proxy servers
+uvicorn mediaflow_proxy.main:app --forwarded-allow-ips "10.0.0.1,192.168.1.100"
+
+# Trust all IPs (development only - not recommended for production)
+uvicorn mediaflow_proxy.main:app --forwarded-allow-ips "*"
+```
+
+#### Common Deployment Scenarios
+
+**1. Direct Internet Access (No Proxy)**
+```bash
+# Remove --forwarded-allow-ips parameter entirely or use localhost only
+uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888
+```
+
+**2. Behind Nginx Reverse Proxy**
+```env
+# Trust the Nginx server IP
+FORWARDED_ALLOW_IPS=127.0.0.1
+```
+
+**3. Behind Cloudflare**
+```env
+# Trust Cloudflare IP ranges (example - check current Cloudflare IPs)
+FORWARDED_ALLOW_IPS=173.245.48.0/20,103.21.244.0/22,103.22.200.0/22
+```
+
+**4. Behind AWS Application Load Balancer**
+```env
+# Trust the VPC subnet where ALB is deployed
+FORWARDED_ALLOW_IPS=10.0.0.0/8
+```
+
+**5. Docker with Host Network**
+```env
+# Trust the Docker host
+FORWARDED_ALLOW_IPS=172.17.0.1
+```
+
+**6. Kubernetes with Ingress**
+```env
+# Trust the ingress controller pod network
+FORWARDED_ALLOW_IPS=10.244.0.0/16
+```
+
+#### Best Practices
+
+1. **Principle of Least Privilege**: Only trust the specific IP addresses of your proxy servers
+2. **Regular Updates**: Keep your trusted IP list updated when infrastructure changes
+3. **Monitor Logs**: Watch for unexpected forwarded headers from untrusted sources
+4. **Test Configuration**: Verify that client IPs are correctly detected after configuration changes
+
+#### Troubleshooting
+
+**Problem**: Client IP always shows as proxy IP
+- **Solution**: Add your proxy server's IP to `FORWARDED_ALLOW_IPS`
+
+**Problem**: Security warnings about untrusted forwarded headers
+- **Solution**: Restrict `FORWARDED_ALLOW_IPS` to only include your actual proxy servers
+
+**Problem**: IP-based restrictions not working correctly
+- **Solution**: Verify that forwarded headers are being processed by checking the trusted IP configuration
+
+#### Example Nginx Configuration
+
+When using Nginx as a reverse proxy, ensure it's properly setting forwarded headers:
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+    
+    location / {
+        proxy_pass http://127.0.0.1:8888;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Then configure MediaFlow Proxy to trust Nginx:
+```env
+FORWARDED_ALLOW_IPS=127.0.0.1
+```
+
+### Reverse Proxy Configuration
+
+MediaFlow Proxy is commonly deployed behind reverse proxies for SSL termination, load balancing, and additional security. Here are detailed configurations for popular reverse proxy solutions.
+
+#### Nginx Configuration
+
+**Basic Nginx Configuration:**
+
+```nginx
+server {
+    listen 80;
+    server_name mediaflow.yourdomain.com;
+    
+    # Redirect HTTP to HTTPS
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name mediaflow.yourdomain.com;
+    
+    # SSL Configuration
+    ssl_certificate /path/to/your/certificate.crt;
+    ssl_certificate_key /path/to/your/private.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    
+    # Security Headers
+    add_header X-Frame-Options DENY;
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    
+    # Client settings for streaming
+    client_max_body_size 0;
+    client_body_timeout 60s;
+    client_header_timeout 60s;
+    
+    location / {
+        # Proxy settings
+        proxy_pass http://127.0.0.1:8888;
+        proxy_http_version 1.1;
+        proxy_cache_bypass $http_upgrade;
+        
+        # Headers for forwarded information
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        
+        # Headers for streaming support
+        proxy_set_header Range $http_range;
+        proxy_set_header If-Range $http_if_range;
+        proxy_set_header Connection "";
+        
+        # Timeout settings for streaming
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        
+        # Disable buffering for streaming
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_max_temp_file_size 0;
+        
+        # Handle redirects
+        proxy_redirect off;
+    }
+    
+    # Optional: Specific location for streaming endpoints with extended timeouts
+    location ~* ^/proxy/(stream|hls|mpd)/ {
+        proxy_pass http://127.0.0.1:8888;
+        proxy_http_version 1.1;
+        
+        # Extended timeouts for large streams
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 600s;
+        proxy_read_timeout 600s;
+        
+        # Streaming optimizations
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_max_temp_file_size 0;
+        
+        # Forward all necessary headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Range $http_range;
+        proxy_set_header If-Range $http_if_range;
+        proxy_set_header Connection "";
+    }
+    
+    # Access and error logs
+    access_log /var/log/nginx/mediaflow_access.log;
+    error_log /var/log/nginx/mediaflow_error.log;
+}
+```
+
+**MediaFlow Proxy Configuration for Nginx:**
+```env
+# Trust Nginx server
+FORWARDED_ALLOW_IPS=127.0.0.1
+
+# Other recommended settings
+API_PASSWORD=your_secure_password
+```
+
+#### Nginx Proxy Manager Configuration
+
+Nginx Proxy Manager provides a web-based interface for managing Nginx reverse proxy configurations.
+
+**Step 1: Create Proxy Host**
+
+In the Nginx Proxy Manager web interface:
+
+**Details Tab:**
+- **Domain Names**: `mediaflow.yourdomain.com`
+- **Scheme**: `http`
+- **Forward Hostname/IP**: `127.0.0.1` (or MediaFlow Proxy container IP)
+- **Forward Port**: `8888`
+- **Cache Assets**: ❌ (disabled)
+- **Block Common Exploits**: ❌ (disabled)
+- **Websockets Support**: ❌ (not required)
+- **Access List**: None (unless you need IP restrictions)
+
+**Step 2: SSL Configuration**
+
+**SSL Tab:**
+- **SSL Certificate**: Select your certificate (Let's Encrypt recommended)
+- **Force SSL**: ✅ (redirect HTTP to HTTPS)
+- **HTTP/2 Support**: ✅ (recommended for performance)
+- **HSTS Enabled**: ✅ (recommended for security)
+- **HSTS Subdomains**: ✅ (if applicable)
+
+**Step 3: Advanced Configuration**
+
+**Advanced Tab - Custom Nginx Configuration:**
+
+```nginx
+# Headers for forwarded information
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Host $host;
+proxy_set_header X-Forwarded-Port $server_port;
+
+# Headers for streaming support
+proxy_set_header Range $http_range;
+proxy_set_header If-Range $http_if_range;
+proxy_set_header Connection "";
+
+# Timeout settings for streaming
+proxy_connect_timeout 60s;
+proxy_send_timeout 300s;
+proxy_read_timeout 300s;
+
+# Disable buffering for streaming
+proxy_buffering off;
+proxy_request_buffering off;
+proxy_max_temp_file_size 0;
+
+# Client settings
+client_max_body_size 0;
+client_body_timeout 60s;
+client_header_timeout 60s;
+
+# Handle redirects
+proxy_redirect off;
+
+# HTTP version
+proxy_http_version 1.1;
+
+# Security headers
+add_header X-Frame-Options DENY always;
+add_header X-Content-Type-Options nosniff always;
+add_header X-XSS-Protection "1; mode=block" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+# Hide server information
+proxy_hide_header X-Powered-By;
+server_tokens off;
+```
+
+**Step 4: MediaFlow Proxy Configuration**
+
+Configure MediaFlow Proxy to trust Nginx Proxy Manager:
+
+**If running on the same server:**
+```env
+FORWARDED_ALLOW_IPS=127.0.0.1
+```
+
+**If running in Docker with custom network:**
+```env
+# Use the Docker network range
+FORWARDED_ALLOW_IPS=172.18.0.0/16
+```
+
+**If Nginx Proxy Manager is on a different server:**
+```env
+# Replace with actual Nginx Proxy Manager IP
+FORWARDED_ALLOW_IPS=10.0.0.5
+```
+
+**Step 5: Docker Compose Example**
+
+Complete Docker Compose setup with Nginx Proxy Manager:
+
+```yaml
+version: '3.8'
+
+services:
+  nginx-proxy-manager:
+    image: 'jc21/nginx-proxy-manager:latest'
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '81:81'  # Admin interface
+    volumes:
+      - ./npm-data:/data
+      - ./npm-letsencrypt:/etc/letsencrypt
+    networks:
+      - proxy-network
+
+  mediaflow-proxy:
+    image: 'mhdzumair/mediaflow-proxy:latest'
+    restart: unless-stopped
+    ports:
+      - '8888:8888'
+    environment:
+      - API_PASSWORD=your_secure_password
+      - FORWARDED_ALLOW_IPS=172.18.0.0/16
+    networks:
+      - proxy-network
+
+networks:
+  proxy-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.18.0.0/16
+```
+
+#### Important Notes for Nginx Proxy Manager
+
+**Block Common Exploits Setting:**
+
+The "Block Common Exploits" feature in Nginx Proxy Manager provides automatic protection against common web attacks but may occasionally block legitimate streaming URLs that contain special characters. 
+
+**What it blocks:**
+- Path traversal attempts (`../`, `..%2F`)
+- SQL injection patterns
+- XSS attempts
+- Suspicious file extensions
+- Very long URLs (>2000 characters)
+- Base64-like patterns
+
+**Recommendation:**
+- **Enable it initially** for security
+- **Monitor logs** for false positives
+- **Disable only if necessary** for specific streaming services
+
+**If you experience issues with legitimate URLs being blocked:**
+
+1. **Check the logs** in Nginx Proxy Manager for 403 errors
+2. **Test problematic URLs** directly
+3. **Consider disabling** "Block Common Exploits" if it interferes with streaming
+4. **Implement alternative security** measures (Cloudflare WAF, fail2ban, etc.)
+
+#### Troubleshooting Reverse Proxy Issues
+
+**Problem: MediaFlow Proxy shows proxy IP instead of client IP**
+- **Solution**: Verify `FORWARDED_ALLOW_IPS` includes your proxy server IP
+- **Check**: Ensure proxy is sending `X-Forwarded-For` headers
+
+**Problem: Streaming timeouts or interruptions**
+- **Solution**: Increase timeout values in proxy configuration
+- **Check**: Disable proxy buffering with `proxy_buffering off`
+
+**Problem: Large file uploads fail**
+- **Solution**: Set `client_max_body_size 0` in Nginx configuration
+- **Check**: Verify `proxy_request_buffering off` is set
+
+**Problem: SSL/HTTPS issues**
+- **Solution**: Ensure `X-Forwarded-Proto` header is properly set
+- **Check**: Verify SSL certificates are valid and properly configured
+
+**Problem: 502/504 Gateway errors**
+- **Solution**: Check MediaFlow Proxy is running and accessible
+- **Check**: Verify network connectivity between proxy and MediaFlow Proxy
+- **Check**: Review timeout settings in proxy configuration
 
 ### Speed Test Feature
 
