@@ -183,8 +183,6 @@ FORWARDED_ALLOW_IPS=10.0.0.1,192.168.1.100
 # Trust all IPs (use with caution)
 FORWARDED_ALLOW_IPS=*
 
-# Trust IP ranges (CIDR notation)
-FORWARDED_ALLOW_IPS=10.0.0.0/8,172.16.0.0/12
 ```
 
 **Uvicorn Command Line Parameter:**
@@ -216,13 +214,13 @@ FORWARDED_ALLOW_IPS=127.0.0.1
 **3. Behind Cloudflare**
 ```env
 # Trust Cloudflare IP ranges (example - check current Cloudflare IPs)
-FORWARDED_ALLOW_IPS=173.245.48.0/20,103.21.244.0/22,103.22.200.0/22
+FORWARDED_ALLOW_IPS=173.245.48.0,103.21.244.0,103.22.200.0
 ```
 
 **4. Behind AWS Application Load Balancer**
 ```env
 # Trust the VPC subnet where ALB is deployed
-FORWARDED_ALLOW_IPS=10.0.0.0/8
+FORWARDED_ALLOW_IPS=10.0.0.0
 ```
 
 **5. Docker with Host Network**
@@ -231,10 +229,18 @@ FORWARDED_ALLOW_IPS=10.0.0.0/8
 FORWARDED_ALLOW_IPS=172.17.0.1
 ```
 
-**6. Kubernetes with Ingress**
+**6. Docker Compose with Nginx in Same Network**
+```env
+# Trust the Docker network range (when nginx and mediaflow-proxy are in same docker network)
+FORWARDED_ALLOW_IPS=172.20.0.0
+# Or trust all Docker IPs (less secure but simpler for development)
+FORWARDED_ALLOW_IPS=*
+```
+
+**7. Kubernetes with Ingress**
 ```env
 # Trust the ingress controller pod network
-FORWARDED_ALLOW_IPS=10.244.0.0/16
+FORWARDED_ALLOW_IPS=10.244.0.0
 ```
 
 #### Best Practices
@@ -254,6 +260,10 @@ FORWARDED_ALLOW_IPS=10.244.0.0/16
 
 **Problem**: IP-based restrictions not working correctly
 - **Solution**: Verify that forwarded headers are being processed by checking the trusted IP configuration
+
+**Problem**: Links return 302 redirects when nginx is in the same Docker network
+- **Solution**: Set `FORWARDED_ALLOW_IPS=*` or specify the Docker network (e.g., `FORWARDED_ALLOW_IPS=172.20.0.0`)
+- **Note**: When nginx and MediaFlow Proxy run in the same Docker network, you must configure `FORWARDED_ALLOW_IPS` to trust the Docker network IP range, otherwise proxy links will not work correctly
 
 #### Example Nginx Configuration
 
