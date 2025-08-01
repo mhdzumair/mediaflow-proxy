@@ -2,7 +2,7 @@ import json
 import logging
 import urllib.parse
 from typing import Iterator, Dict, Optional
-from fastapi import APIRouter, Request, Response, HTTPException, Query
+from fastapi import APIRouter, Request, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from starlette.responses import RedirectResponse
 import httpx
