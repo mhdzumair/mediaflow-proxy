@@ -184,9 +184,9 @@ FORWARDED_ALLOW_IPS=10.0.0.1,192.168.1.100
 FORWARDED_ALLOW_IPS=*
 
 ```
-# ⚠️ SECURITY WARNING: Setting FORWARDED_ALLOW_IPS=* disables IP spoofing protection
-# and should ONLY be used in trusted LAN environments or development setups.
-# In production, always specify the actual IP addresses of your proxy servers.
+> **⚠️ Security warning**  
+> Setting `FORWARDED_ALLOW_IPS=*` disables IP-spoofing protection and must **only** be used in trusted LAN or dev environments.  
+> In production, always list the concrete IPs of your reverse-proxy servers.
 
 **Uvicorn Command Line Parameter:**
 ```bash
@@ -649,9 +649,9 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
    ```
    uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888 --workers 4 --forwarded-allow-ips "*"
    ```
-   
-  **Note** 
-  Omit `--forwarded-allow-ips "*"` when running locally.
+
+   > **Note**
+   > > Omit `--forwarded-allow-ips "*"` when running locally.
 
 #### Using git & poetry
 
@@ -679,9 +679,9 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
    ```
    poetry run uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888 --workers 4 --forwarded-allow-ips "*"
    ```
-   
-  **Note** 
-  Omit `--forwarded-allow-ips "*"` when running locally.
+
+   > **Note**
+   > > Omit `--forwarded-allow-ips "*"` when running locally.
 
 #### Build and Run Docker Image Locally
 
