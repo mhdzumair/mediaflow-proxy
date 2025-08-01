@@ -646,7 +646,9 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
    ```
    uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888 --workers 4 --forwarded-allow-ips "*"
    ```
-  remove --forwarded-allow-ips "*" if you are on localhost
+   
+  **Note** 
+  Omit `--forwarded-allow-ips "*"` when running locally.
 
 #### Using git & poetry
 
@@ -674,7 +676,9 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
    ```
    poetry run uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888 --workers 4 --forwarded-allow-ips "*"
    ```
-  remove --forwarded-allow-ips "*" if you are on localhost
+   
+  **Note** 
+  Omit `--forwarded-allow-ips "*"` when running locally.
 
 #### Build and Run Docker Image Locally
 
