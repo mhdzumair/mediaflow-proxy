@@ -184,6 +184,9 @@ FORWARDED_ALLOW_IPS=10.0.0.1,192.168.1.100
 FORWARDED_ALLOW_IPS=*
 
 ```
+# ⚠️ SECURITY WARNING: Setting FORWARDED_ALLOW_IPS=* disables IP spoofing protection
+# and should ONLY be used in trusted LAN environments or development setups.
+# In production, always specify the actual IP addresses of your proxy servers.
 
 **Uvicorn Command Line Parameter:**
 ```bash
