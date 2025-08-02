@@ -1,3 +1,5 @@
+import ssl
+import certifi
 import re
 import base64
 from typing import Any, Dict, Optional
@@ -62,7 +64,8 @@ class DLHDExtractor(BaseExtractor):
                 'Referer': baseurl,
                 'Origin': daddy_origin
             }
-            async with httpx.AsyncClient(timeout=15, follow_redirects=True, verify=False) as client:
+            ssl_context = ssl.create_default_context(cafile=certifi.where())
+            async with httpx.AsyncClient(timeout=15, follow_redirects=True, verify=ssl_context) as client:
                 # 1. Richiesta alla pagina stream/cast/player/watch
                 resp1 = await client.get(stream_url, headers=daddylive_headers)
                 resp1.raise_for_status()
