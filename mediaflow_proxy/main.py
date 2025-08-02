@@ -10,7 +10,7 @@ from starlette.staticfiles import StaticFiles
 
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.middleware import UIAccessControlMiddleware
-from mediaflow_proxy.routes import proxy_router, extractor_router, speedtest_router
+from mediaflow_proxy.routes import proxy_router, extractor_router, speedtest_router, playlist_builder_router
 from mediaflow_proxy.schemas import GenerateUrlRequest, GenerateMultiUrlRequest, MultiUrlRequestItem
 from mediaflow_proxy.utils.crypto_utils import EncryptionHandler, EncryptionMiddleware
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
@@ -159,6 +159,7 @@ async def generate_urls(request: GenerateMultiUrlRequest):
 app.include_router(proxy_router, prefix="/proxy", tags=["proxy"], dependencies=[Depends(verify_api_key)])
 app.include_router(extractor_router, prefix="/extractor", tags=["extractors"], dependencies=[Depends(verify_api_key)])
 app.include_router(speedtest_router, prefix="/speedtest", tags=["speedtest"], dependencies=[Depends(verify_api_key)])
+app.include_router(playlist_builder_router, prefix="/playlist", tags=["playlist"])
 
 static_path = resources.files("mediaflow_proxy").joinpath("static")
 app.mount("/", StaticFiles(directory=str(static_path), html=True), name="static")

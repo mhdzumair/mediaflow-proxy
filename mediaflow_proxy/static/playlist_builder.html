@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MFP Playlist Builder</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
+        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; text-align: center; margin-bottom: 30px; }
+        h2 { color: #2c5aa0; border-bottom: 2px solid #2c5aa0; padding-bottom: 5px; text-align: left; margin-top: 30px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
+        input[type="text"], input[type="url"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        .btn { display: inline-block; padding: 10px 20px; background: #2c5aa0; color: white; text-decoration: none; border-radius: 5px; margin: 5px; cursor: pointer; border: none; font-size: 16px; }
+        .btn:hover { background: #1e3d6f; }
+        .btn-add { background-color: #28a745; }
+        .btn-remove { background-color: #dc3545; padding: 5px 10px; font-size: 12px; }
+        .playlist-entry { background: #f8f9fa; padding: 20px; border-radius: 5px; margin-bottom: 15px; border-left: 4px solid #17a2b8; position: relative; }
+        .output-area { margin-top: 20px; }
+        #generated-url { background: #e9ecef; padding: 10px; border: 1px solid #ced4da; border-radius: 4px; font-family: 'Courier New', monospace; word-break: break-all; min-height: 50px; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔗 MFP Playlist Builder</h1>
+        
+        <div class="form-group">
+            <label for="server-address">MFP Server Address</label>
+            <input type="text" id="server-address" placeholder="Current server address" value="" readonly style="background-color: #e9ecef;">
+        </div>
+
+        <div class="form-group">
+            <label for="api-password">MFP API Password</label>
+            <input type="text" id="api-password" placeholder="API password for MFP">
+        </div>
+
+        <h2>Playlists to Merge</h2>
+        <div id="playlist-container">
+            <!-- Playlists will be added here dynamically -->
+        </div>
+
+        <button type="button" class="btn btn-add" onclick="addPlaylistEntry()">Add Playlist</button>
+        <hr style="margin: 20px 0;">
+
+        <button type="button" class="btn" onclick="generateUrl()">Generate URL</button>
+
+        <div class="output-area">
+            <label for="generated-url">Generated URL</label>
+            <div id="generated-url">The URL will appear here...</div>
+            <button type="button" class="btn" onclick="copyUrl()">Copy URL</button>
+        </div>
+    </div>
+
+    <!-- Template for a single playlist -->
+    <template id="playlist-template">
+        <div class="playlist-entry">
+            <button type="button" class="btn btn-remove" style="position: absolute; top: 10px; right: 10px;" onclick="this.parentElement.remove()">Remove</button>
+            <div class="form-group">
+                <label>M3U Playlist URL</label>
+                <input type="url" class="playlist-url" placeholder="Ex: http://provider.com/playlist.m3u">
+            </div>
+        </div>
+    </template>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Set the default server address
+            document.getElementById('server-address').value = window.location.origin;
+            // Add a default playlist on startup
+            addPlaylistEntry();
+        });
+
+        function addPlaylistEntry() {
+            const template = document.getElementById('playlist-template').content.cloneNode(true);
+            document.getElementById('playlist-container').appendChild(template);
+        }
+
+        function generateUrl() {
+            let serverAddress = document.getElementById('server-address').value.trim();
+            if (serverAddress.endsWith('/')) {
+                serverAddress = serverAddress.slice(0, -1);
+            }
+            if (!serverAddress) {
+                alert('Server address not available. Please reload the page.');
+                return;
+            }
+
+            const apiPassword = document.getElementById('api-password').value.trim();
+            const entries = document.querySelectorAll('.playlist-entry');
+            const definitions = [];
+
+            // Single loop for URL collection and validation
+            for (const entry of entries) {
+                const playlistUrl = entry.querySelector('.playlist-url').value.trim();
+                if (playlistUrl) {
+                    if (playlistUrl.startsWith('http://') || playlistUrl.startsWith('https://')) {
+                        definitions.push(playlistUrl);
+                    } else {
+                        alert('Invalid URL: ' + playlistUrl + '. URLs must start with http:// or https://');
+                        return;
+                    }
+                }
+            }
+
+            if (definitions.length === 0) {
+                document.getElementById('generated-url').textContent = 'No valid playlist entered.';
+                return;
+            }
+             let finalUrl = serverAddress + '/playlist/playlist?d=' + definitions.join(';');
+            if (apiPassword) {
+                finalUrl += '&api_password=' + encodeURIComponent(apiPassword);
+            }
+            
+            document.getElementById('generated-url').textContent = finalUrl;
+        }
+
+        function copyUrl() {
+            const urlText = document.getElementById('generated-url').textContent;
+            if (urlText && !urlText.startsWith('The URL') && !urlText.startsWith('No valid')) {
+                navigator.clipboard.writeText(urlText).then(() => {
+                    alert('URL copied to clipboard!');
+                }).catch(err => {
+                    alert('Error copying: ' + err);
+                });
+            } else {
+                alert('No URL to copy.');
+            }
+        }
+    </script>
+</body>
+</html>
