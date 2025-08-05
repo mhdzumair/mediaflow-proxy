@@ -22,13 +22,14 @@ from mediaflow_proxy.schemas import (
     MPDManifestParams,
 )
 from mediaflow_proxy.utils.http_utils import get_proxy_headers, ProxyRequestHeaders
+from mediaflow_proxy.utils.base64_utils import process_potential_base64_url
 
 proxy_router = APIRouter()
 
 
 def sanitize_url(url: str) -> str:
     """
-    Sanitize URL to fix common encoding issues.
+    Sanitize URL to fix common encoding issues and handle base64 encoded URLs.
     
     Args:
         url (str): The URL to sanitize.
@@ -38,6 +39,9 @@ def sanitize_url(url: str) -> str:
     """
     logger = logging.getLogger(__name__)
     original_url = url
+    
+    # First, try to process potential base64 encoded URLs
+    url = process_potential_base64_url(url)
     
     # Fix malformed URLs where https%22// should be https://
     url = re.sub(r'https%22//', 'https://', url)
