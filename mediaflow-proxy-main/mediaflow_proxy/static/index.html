@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediaFlow Proxy</title>
+    <link rel="icon" href="/logo.png" type="image/x-icon">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+
+        header {
+            background-color: #90aacc;
+            color: #fff;
+            padding: 10px 0;
+            text-align: center;
+        }
+
+        header img {
+            width: 200px;
+            height: 200px;
+            vertical-align: middle;
+            border-radius: 15px;
+        }
+
+        header h1 {
+            display: inline;
+            margin-left: 20px;
+            font-size: 36px;
+        }
+
+        .feature {
+            background-color: #f4f4f4;
+            border-left: 4px solid #3498db;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+
+        .speed-test-section {
+            background-color: #e8f4fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+
+        .speed-test-links {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .speed-test-link {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #2196f3;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+
+        .speed-test-link:hover {
+            background-color: #1976d2;
+            color: white;
+        }
+
+        .speed-test-link.browser {
+            background-color: #4caf50;
+        }
+
+        .speed-test-link.browser:hover {
+            background-color: #388e3c;
+        }
+
+        a {
+            color: #3498db;
+        }
+    </style>
+</head>
+<body>
+<header>
+    <img src="/logo.png" alt="MediaFlow Proxy Logo">
+    <h1>MediaFlow Proxy</h1>
+</header>
+<p>A high-performance proxy server for streaming media, supporting HTTP(S), HLS, and MPEG-DASH with real-time DRM decryption.</p>
+
+<h2>Key Features</h2>
+<div class="feature">Convert MPEG-DASH streams (DRM-protected and non-protected) to HLS</div>
+<div class="feature">Support for Clear Key DRM-protected MPD DASH streams</div>
+<div class="feature">Handle both live and video-on-demand (VOD) DASH streams</div>
+<div class="feature">Proxy HTTP/HTTPS links with custom headers</div>
+<div class="feature">Proxy and modify HLS (M3U8) streams in real-time with custom headers and key URL modifications for bypassing some sneaky restrictions.</div>
+<div class="feature">HLS and DASH pre-buffering for improved streaming performance and reduced latency</div>
+<div class="feature">Protect against unauthorized access and network bandwidth abuses</div>
+
+<div class="speed-test-section">
+    <h3>🚀 Speed Test Tool</h3>
+    <p>Test your connection speed with debrid services to optimize your streaming experience:</p>
+    <div class="speed-test-links">
+        <a href="/speedtest" class="speed-test-link browser">Browser Speed Test</a>
+    </div>
+    <p style="margin-top: 10px; font-size: 14px; color: #666;">
+        <strong>Browser Speed Test:</strong> Tests your actual connection speed through MediaFlow proxy vs direct connection with support for multiple servers, interactive charts, and comprehensive analytics.
+    </p>
+</div>
+
+<div class="speed-test-section">
+    <h3>🔗 Playlist Builder</h3>
+    <p>Create and combine M3U playlists with automatic link rewriting for optimal streaming experience:</p>
+    <div class="speed-test-links">
+        <a href="/playlist/builder" class="speed-test-link browser">Playlist Builder</a>
+    </div>
+    <p style="margin-top: 10px; font-size: 14px; color: #666;">
+        <strong>Playlist Builder:</strong> Combine multiple M3U playlists, automatically rewrite links for optimal streaming, and support custom headers for enhanced compatibility.
+    </p>
+</div>
+
+<h2>Getting Started</h2>
+<p>Visit the <a href="https://github.com/mhdzumair/mediaflow-proxy">GitHub repository</a> for installation instructions and documentation.</p>
+
+<h2>Premium Hosted Service</h2>
+<p>For a hassle-free experience, check out <a href="https://store.elfhosted.com/product/mediaflow-proxy">premium hosted service on ElfHosted</a>.</p>
+
+<h2>API Documentation</h2>
+<p>Explore the <a href="/docs">Swagger UI</a> for comprehensive details about the API endpoints and their usage.</p>
+
+</body>
+</html>

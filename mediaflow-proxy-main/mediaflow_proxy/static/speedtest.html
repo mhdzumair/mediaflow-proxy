@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediaFlow Speed Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/speedtest.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    animation: {
+                        'pulse-slow': 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'bounce-slow': 'bounce 2s infinite',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .result-card {
+            transition: all 0.3s ease;
+        }
+
+        .result-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .server-input {
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateY(-10px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .metric-card {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        .metric-card.success {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+
+        .metric-card.warning {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        }
+
+        .metric-card.error {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 min-h-full">
+<!-- Theme Toggle -->
+<div class="fixed top-4 right-4 z-50">
+    <button id="themeToggle" class="p-2 rounded-full bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors">
+        <svg id="sunIcon" class="w-6 h-6 text-yellow-500 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+        </svg>
+        <svg id="moonIcon" class="w-6 h-6 text-gray-700 block dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+        </svg>
+    </button>
+</div>
+
+<main class="container mx-auto px-4 py-8">
+    <!-- Header -->
+    <div class="text-center mb-8">
+        <h1 class="text-4xl font-bold text-gray-800 dark:text-white mb-2">
+            🚀 MediaFlow Speed Test
+        </h1>
+        <p class="text-gray-600 dark:text-gray-300">
+            Compare your connection speed through MediaFlow proxy vs direct connection
+        </p>
+    </div>
+
+    <!-- Configuration View -->
+    <div id="configView" class="max-w-4xl mx-auto space-y-6">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+            <h2 class="text-2xl font-semibold text-gray-800 dark:text-white mb-6">Test Configuration</h2>
+
+            <form id="configForm" class="space-y-6">
+                <!-- Provider Selection -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-2">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Debrid Provider
+                        </label>
+                        <select id="provider"
+                                class="w-full px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="real_debrid">Real-Debrid</option>
+                            <option value="all_debrid">AllDebrid</option>
+                        </select>
+                    </div>
+
+                    <!-- API Key (for AllDebrid) -->
+                    <div id="apiKeySection" class="space-y-2 hidden">
+                        <label for="apiKey" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            AllDebrid API Key
+                        </label>
+                        <input
+                                type="password"
+                                id="apiKey"
+                                class="w-full px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                placeholder="Enter your AllDebrid API key"
+                        >
+                    </div>
+                </div>
+
+                <!-- Current Instance API Password -->
+                <div class="space-y-2">
+                    <label for="currentApiPassword" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Current MediaFlow API Password (if required)
+                    </label>
+                    <input
+                            type="password"
+                            id="currentApiPassword"
+                            class="w-full px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Enter API password for current instance"
+                    >
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                        Required to fetch test configuration if this instance has API password protection
+                    </p>
+                </div>
+
+                <!-- MediaFlow Servers -->
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            MediaFlow Servers to Test
+                        </label>
+                        <button
+                                type="button"
+                                id="addServerBtn"
+                                class="px-3 py-1 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                        >
+                            + Add Server
+                        </button>
+                    </div>
+
+                    <div id="serversContainer" class="space-y-3">
+                        <!-- Current server (auto-added) -->
+                        <div class="server-input grid grid-cols-1 md:grid-cols-3 gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <input
+                                    type="url"
+                                    placeholder="MediaFlow URL"
+                                    class="server-url w-full px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                    required
+                            >
+                            <input
+                                    type="text"
+                                    placeholder="Server Name (optional)"
+                                    class="server-name w-full px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                            >
+                            <div class="flex gap-2">
+                                <input
+                                        type="password"
+                                        placeholder="API Password (optional)"
+                                        class="server-password flex-1 px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                                >
+                                <button
+                                        type="button"
+                                        class="remove-server px-2 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 focus:outline-none text-sm hidden"
+                                >
+                                    ×
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CDN Location Selection -->
+                <div class="space-y-4">
+                    <h3 class="text-lg font-medium text-gray-800 dark:text-white">CDN Locations</h3>
+
+                    <!-- CDN Status and Selection Container -->
+                    <div id="cdnStatusContainer">
+                        <!-- Status message will be populated here -->
+                    </div>
+
+                    <div id="cdnSelection" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                        <!-- CDN checkboxes will be populated here -->
+                    </div>
+
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" id="refreshCdnBtn"
+                                class="px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg hover:from-green-600 hover:to-emerald-700 focus:outline-none focus:ring-2 focus:ring-green-500 transition-all duration-200 font-medium shadow-md">
+                            🔄 Refresh CDNs
+                        </button>
+                        <button type="button" id="selectAllCdn"
+                                class="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors text-sm font-medium">Select
+                            All
+                        </button>
+                        <button type="button" id="selectNoneCdn"
+                                class="px-3 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors text-sm font-medium">Select
+                            None
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Test Options -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-4">
+                        <h3 class="text-lg font-medium text-gray-800 dark:text-white">Test Options</h3>
+                        <div class="space-y-2">
+                            <div class="flex items-center space-x-2">
+                                <input type="checkbox" id="testProxy" checked class="rounded border-gray-300 dark:border-gray-600">
+                                <label for="testProxy" class="text-sm text-gray-700 dark:text-gray-300">
+                                    Test through MediaFlow proxy
+                                </label>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <input type="checkbox" id="testDirect" checked class="rounded border-gray-300 dark:border-gray-600">
+                                <label for="testDirect" class="text-sm text-gray-700 dark:text-gray-300">
+                                    Test direct connection (for comparison)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-4">
+                        <h3 class="text-lg font-medium text-gray-800 dark:text-white">Advanced Settings</h3>
+                        <div class="space-y-2">
+                            <label for="testDuration" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                Test Duration (seconds)
+                            </label>
+                            <input
+                                    type="number"
+                                    id="testDuration"
+                                    value="10"
+                                    min="5"
+                                    max="30"
+                                    class="w-full px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                        </div>
+                    </div>
+                </div>
+
+                <button
+                        type="submit"
+                        class="w-full px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-md hover:from-blue-600 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+                >
+                    🚀 Start Speed Test
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Testing View -->
+    <div id="testingView" class="max-w-6xl mx-auto space-y-6 hidden">
+        <!-- Progress Section -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+            <div class="text-center space-y-4">
+                <h2 class="text-2xl font-semibold text-gray-800 dark:text-white">Running Speed Tests</h2>
+                <div id="currentTest" class="text-gray-600 dark:text-gray-300">
+                    Initializing...
+                </div>
+                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
+                    <div id="progressBar" class="bg-gradient-to-r from-blue-500 to-purple-600 h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <div id="progressText" class="text-sm text-gray-500 dark:text-gray-400">
+                    0% complete
+                </div>
+                <button
+                        id="cancelTestBtn"
+                        class="mt-4 px-6 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
+                >
+                    ⏹️ Cancel Test
+                </button>
+            </div>
+        </div>
+
+        <!-- Live Results -->
+        <div id="liveResults" class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+            <!-- Results will be populated here -->
+        </div>
+    </div>
+
+    <!-- Results View -->
+    <div id="resultsView" class="max-w-7xl mx-auto space-y-6 hidden">
+        <!-- Key Metrics -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div id="bestProxyMetric" class="metric-card text-white p-4 rounded-lg text-center">
+                <div class="text-2xl font-bold" id="bestProxySpeed">-- Mbps</div>
+                <div class="text-sm opacity-90">Best Proxy Speed</div>
+                <div class="text-xs opacity-75 mt-1" id="bestProxyServer">--</div>
+            </div>
+            <div id="bestDirectMetric" class="metric-card text-white p-4 rounded-lg text-center">
+                <div class="text-2xl font-bold" id="bestDirectSpeed">-- Mbps</div>
+                <div class="text-sm opacity-90">Best Direct Speed</div>
+                <div class="text-xs opacity-75 mt-1" id="bestDirectLocation">--</div>
+            </div>
+            <div id="avgProxyMetric" class="metric-card text-white p-4 rounded-lg text-center">
+                <div class="text-2xl font-bold" id="avgProxySpeed">-- Mbps</div>
+                <div class="text-sm opacity-90">Avg Proxy Speed</div>
+                <div class="text-xs opacity-75 mt-1" id="proxyTestCount">-- tests</div>
+            </div>
+            <div id="speedDiffMetric" class="metric-card text-white p-4 rounded-lg text-center">
+                <div class="text-2xl font-bold" id="speedDifference">--%</div>
+                <div class="text-sm opacity-90">Speed Difference</div>
+                <div class="text-xs opacity-75 mt-1">Proxy vs Direct</div>
+            </div>
+        </div>
+
+        <!-- Server Comparison Metrics -->
+        <div id="serverMetrics" class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-6">
+            <h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-4">MediaFlow Server Performance</h3>
+            <div id="serverComparisonGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <!-- Server metrics will be populated here -->
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+                <h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-4">Speed Comparison by Location</h3>
+                <div class="relative h-64 w-full">
+                    <canvas id="speedChart"></canvas>
+                </div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+                <h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-4">Server Performance Overview</h3>
+                <div class="relative h-64 w-full">
+                    <canvas id="serverChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detailed Results -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+            <h2 class="text-2xl font-semibold text-gray-800 dark:text-white mb-4">Detailed Results</h2>
+            <div id="detailedResults" class="space-y-4">
+                <!-- Detailed results will be populated here -->
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="text-center">
+            <button
+                    id="runAgainBtn"
+                    class="px-6 py-3 bg-gradient-to-r from-green-500 to-blue-600 text-white rounded-md hover:from-green-600 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-all duration-200 font-medium"
+            >
+                🔄 Run Another Test
+            </button>
+        </div>
+    </div>
+</main>
+
+<script>
+    // Theme management
+    const themeToggle = document.getElementById('themeToggle');
+    const html = document.documentElement;
+
+    // Check for saved theme preference or default to light mode
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    html.classList.toggle('dark', savedTheme === 'dark');
+
+    themeToggle.addEventListener('click', () => {
+        html.classList.toggle('dark');
+        const newTheme = html.classList.contains('dark') ? 'dark' : 'light';
+        localStorage.setItem('theme', newTheme);
+    });
+</script>
+</body>
+</html>
