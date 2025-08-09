@@ -13,25 +13,27 @@ class DLHDExtractor(BaseExtractor):
         super().__init__(request_headers)
         # Default to HLS proxy endpoint
         self.mediaflow_endpoint = "hls_manifest_proxy"
+        # Cache for the resolved base URL to avoid repeated network calls
+        self._cached_base_url = None
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         """Extract DLHD stream URL and required headers (logica tvproxy adattata async, con fallback su endpoint alternativi)."""
         from urllib.parse import urlparse, quote_plus
 
         async def get_daddylive_base_url():
-            github_url = 'https://raw.githubusercontent.com/nzo66/dlhd_url/refs/heads/main/dlhd.xml'
+            if self._cached_base_url:
+                return self._cached_base_url
             try:
-                resp = await self._make_request(github_url)
-                content = resp.text
-                match = re.search(r'src\s*=\s*"([^"]*)"', content)
-                if match:
-                    base_url = match.group(1)
-                    if not base_url.endswith('/'):
-                        base_url += '/'
-                    return base_url
+                resp = await self._make_request("https://daddylive.sx/")
+                # resp.url is the final URL after redirects
+                base_url = str(resp.url)
+                if not base_url.endswith('/'):
+                    base_url += '/'
+                self._cached_base_url = base_url
+                return base_url
             except Exception:
-                pass
-            return "https://daddylive.sx/"
+                # Fallback to default if request fails
+                return "https://daddylive.sx/"
 
         def extract_channel_id(url):
             match_premium = re.search(r'/premium(\d+)/mono\.m3u8$', url)
@@ -64,7 +66,7 @@ class DLHDExtractor(BaseExtractor):
             # 2. Estrai link Player 2
             iframes = re.findall(r'<a[^>]*href="([^"]+)"[^>]*>\s*<button[^>]*>\s*Player\s*2\s*</button>', resp1.text)
             if not iframes:
-                raise ExtractorError("Nessun link Player 2 trovato")
+                raise ExtractorError("No Player 2 link found")
             url2 = iframes[0]
             url2 = baseurl + url2
             url2 = url2.replace('//cast', '/cast')
@@ -75,7 +77,7 @@ class DLHDExtractor(BaseExtractor):
             # 4. Estrai iframe
             iframes2 = re.findall(r'iframe src="([^"]*)', resp2.text)
             if not iframes2:
-                raise ExtractorError("Nessun iframe trovato nella pagina Player 2")
+                raise ExtractorError("No iframe found in Player 2 page")
             iframe_url = iframes2[0]
             resp3 = await self._make_request(iframe_url, headers=daddylive_headers)
             iframe_content = resp3.text
@@ -93,7 +95,7 @@ class DLHDExtractor(BaseExtractor):
             auth_host = extract_var(iframe_content, 'a')
             auth_php = extract_var(iframe_content, 'b')
             if not all([channel_key, auth_ts, auth_rnd, auth_sig, auth_host, auth_php]):
-                raise ExtractorError("Errore estrazione parametri: uno o più parametri non trovati")
+                raise ExtractorError("Error extracting parameters: one or more parameters not found")
             auth_sig = quote_plus(auth_sig)
             # 6. Richiesta auth
             auth_url = f'{auth_host}{auth_php}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
@@ -122,7 +124,7 @@ class DLHDExtractor(BaseExtractor):
             clean_url = url
             channel_id = extract_channel_id(clean_url)
             if not channel_id:
-                raise ExtractorError(f"Impossibile estrarre ID canale da {clean_url}")
+                raise ExtractorError(f"Unable to extract channel ID from {clean_url}")
 
             baseurl = await get_daddylive_base_url()
             endpoints = ["stream/", "cast/", "player/", "watch/"]
