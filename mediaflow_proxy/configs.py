@@ -21,7 +21,7 @@ class TransportConfig(BaseSettings):
     )
     all_proxy: bool = Field(False, description="Enable proxy for all routes by default")
     transport_routes: Dict[str, RouteConfig] = Field(
-        default_factory=dict, description="Pattern-based route configuration"
+        default_factory=dict, description="Pattern-based route configuration", alias="TRANSPORT_ROUTES"
     )
     timeout: int = Field(30, description="Timeout for HTTP requests in seconds")
 
