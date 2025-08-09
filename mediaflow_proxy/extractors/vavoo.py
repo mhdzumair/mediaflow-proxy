@@ -1,6 +1,5 @@
 import logging
 from typing import Any, Dict, Optional
-import httpx
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
 logger = logging.getLogger(__name__)
@@ -83,21 +82,20 @@ class VavooExtractor(BaseExtractor):
         }
         
         try:
-            async with httpx.AsyncClient(timeout=20) as client:
-                resp = await client.post(
-                    "https://www.vavoo.tv/api/app/ping",
-                    json=data,
-                    headers=headers
-                )
-                resp.raise_for_status()
-                result = resp.json()
-                addon_sig = result.get("addonSig")
-                if addon_sig:
-                    logger.info("Successfully obtained Vavoo authentication signature")
-                    return addon_sig
-                else:
-                    logger.warning("No addonSig in Vavoo API response")
-                    return None
+            resp = await self._make_request(
+                "https://www.vavoo.tv/api/app/ping",
+                method="POST",
+                json=data,
+                headers=headers
+            )
+            result = resp.json()
+            addon_sig = result.get("addonSig")
+            if addon_sig:
+                logger.info("Successfully obtained Vavoo authentication signature")
+                return addon_sig
+            else:
+                logger.warning("No addonSig in Vavoo API response")
+                return None
         except Exception as e:
             logger.exception(f"Failed to get Vavoo authentication signature: {str(e)}")
             return None
@@ -145,24 +143,27 @@ class VavooExtractor(BaseExtractor):
             "clientVersion": "3.1.21"
         }
         try:
-            async with httpx.AsyncClient(timeout=20) as client:
-                logger.info(f"Attempting to resolve Vavoo URL: {link}")
-                resp = await client.post("https://vavoo.to/mediahubmx-resolve.json", json=data, headers=headers)
-                resp.raise_for_status()
-                result = resp.json()
-                logger.info(f"Vavoo API response: {result}")
-                
-                if isinstance(result, list) and result and result[0].get("url"):
-                    resolved_url = result[0]["url"]
-                    logger.info(f"Successfully resolved Vavoo URL to: {resolved_url}")
-                    return resolved_url
-                elif isinstance(result, dict) and result.get("url"):
-                    resolved_url = result["url"]
-                    logger.info(f"Successfully resolved Vavoo URL to: {resolved_url}")
-                    return resolved_url
-                else:
-                    logger.warning(f"No URL found in Vavoo API response: {result}")
-                    return None
+            logger.info(f"Attempting to resolve Vavoo URL: {link}")
+            resp = await self._make_request(
+                "https://vavoo.to/mediahubmx-resolve.json",
+                method="POST",
+                json=data,
+                headers=headers
+            )
+            result = resp.json()
+            logger.info(f"Vavoo API response: {result}")
+            
+            if isinstance(result, list) and result and result[0].get("url"):
+                resolved_url = result[0]["url"]
+                logger.info(f"Successfully resolved Vavoo URL to: {resolved_url}")
+                return resolved_url
+            elif isinstance(result, dict) and result.get("url"):
+                resolved_url = result["url"]
+                logger.info(f"Successfully resolved Vavoo URL to: {resolved_url}")
+                return resolved_url
+            else:
+                logger.warning(f"No URL found in Vavoo API response: {result}")
+                return None
         except Exception as e:
             logger.exception(f"Vavoo resolution failed for URL {link}: {str(e)}")
             raise ExtractorError(f"Vavoo resolution failed: {str(e)}") from e

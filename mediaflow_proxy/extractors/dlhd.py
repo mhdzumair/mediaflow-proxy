@@ -16,22 +16,19 @@ class DLHDExtractor(BaseExtractor):
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         """Extract DLHD stream URL and required headers (logica tvproxy adattata async, con fallback su endpoint alternativi)."""
-        import httpx
         from urllib.parse import urlparse, quote_plus
 
         async def get_daddylive_base_url():
             github_url = 'https://raw.githubusercontent.com/nzo66/dlhd_url/refs/heads/main/dlhd.xml'
             try:
-                async with httpx.AsyncClient(timeout=10) as client:
-                    resp = await client.get(github_url)
-                    resp.raise_for_status()
-                    content = resp.text
-                    match = re.search(r'src\s*=\s*"([^"]*)"', content)
-                    if match:
-                        base_url = match.group(1)
-                        if not base_url.endswith('/'):
-                            base_url += '/'
-                        return base_url
+                resp = await self._make_request(github_url)
+                content = resp.text
+                match = re.search(r'src\s*=\s*"([^"]*)"', content)
+                if match:
+                    base_url = match.group(1)
+                    if not base_url.endswith('/'):
+                        base_url += '/'
+                    return base_url
             except Exception:
                 pass
             return "https://daddylive.sx/"
@@ -62,70 +59,64 @@ class DLHDExtractor(BaseExtractor):
                 'Referer': baseurl,
                 'Origin': daddy_origin
             }
-            async with httpx.AsyncClient(timeout=15, follow_redirects=True, verify=False) as client:
-                # 1. Richiesta alla pagina stream/cast/player/watch
-                resp1 = await client.get(stream_url, headers=daddylive_headers)
-                resp1.raise_for_status()
-                # 2. Estrai link Player 2
-                iframes = re.findall(r'<a[^>]*href="([^"]+)"[^>]*>\s*<button[^>]*>\s*Player\s*2\s*</button>', resp1.text)
-                if not iframes:
-                    raise ExtractorError("Nessun link Player 2 trovato")
-                url2 = iframes[0]
-                url2 = baseurl + url2
-                url2 = url2.replace('//cast', '/cast')
-                daddylive_headers['Referer'] = url2
-                daddylive_headers['Origin'] = url2
-                # 3. Richiesta alla pagina Player 2
-                resp2 = await client.get(url2, headers=daddylive_headers)
-                resp2.raise_for_status()
-                # 4. Estrai iframe
-                iframes2 = re.findall(r'iframe src="([^"]*)', resp2.text)
-                if not iframes2:
-                    raise ExtractorError("Nessun iframe trovato nella pagina Player 2")
-                iframe_url = iframes2[0]
-                resp3 = await client.get(iframe_url, headers=daddylive_headers)
-                resp3.raise_for_status()
-                iframe_content = resp3.text
-                # 5. Estrai parametri auth (robusto)
-                def extract_var(js, name):
-                    m = re.search(rf'var (?:__)?{name}\s*=\s*atob\("([^"]+)"\)', js)
-                    if m:
-                        return base64.b64decode(m.group(1)).decode('utf-8')
-                    return None
-                channel_key = re.search(r'channelKey\s*=\s*"([^"]+)"', iframe_content)
-                channel_key = channel_key.group(1) if channel_key else None
-                auth_ts = extract_var(iframe_content, 'c')
-                auth_rnd = extract_var(iframe_content, 'd')
-                auth_sig = extract_var(iframe_content, 'e')
-                auth_host = extract_var(iframe_content, 'a')
-                auth_php = extract_var(iframe_content, 'b')
-                if not all([channel_key, auth_ts, auth_rnd, auth_sig, auth_host, auth_php]):
-                    raise ExtractorError("Errore estrazione parametri: uno o più parametri non trovati")
-                auth_sig = quote_plus(auth_sig)
-                # 6. Richiesta auth
-                auth_url = f'{auth_host}{auth_php}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
-                auth_resp = await client.get(auth_url, headers=daddylive_headers)
-                auth_resp.raise_for_status()
-                # 7. Lookup server
-                host = re.findall('(?s)m3u8 =.*?:.*?:.*?".*?".*?"([^"]*)', iframe_content)[0]
-                server_lookup = re.findall(r'n fetchWithRetry\(\s*\'([^\']*)', iframe_content)[0]
-                server_lookup_url = f"https://{urlparse(iframe_url).netloc}{server_lookup}{channel_key}"
-                lookup_resp = await client.get(server_lookup_url, headers=daddylive_headers)
-                lookup_resp.raise_for_status()
-                server_data = lookup_resp.json()
-                server_key = server_data['server_key']
-                referer_raw = f'https://{urlparse(iframe_url).netloc}'
-                clean_m3u8_url = f'https://{server_key}{host}{server_key}/{channel_key}/mono.m3u8'
-                stream_headers = {
-                    'User-Agent': daddylive_headers['User-Agent'],
-                    'Referer': referer_raw,
-                    'Origin': referer_raw
-                }
-                return {
-                    "destination_url": clean_m3u8_url,
-                    "request_headers": stream_headers,
-                    "mediaflow_endpoint": self.mediaflow_endpoint,
-                }
+            # 1. Richiesta alla pagina stream/cast/player/watch
+            resp1 = await self._make_request(stream_url, headers=daddylive_headers)
+            # 2. Estrai link Player 2
+            iframes = re.findall(r'<a[^>]*href="([^"]+)"[^>]*>\s*<button[^>]*>\s*Player\s*2\s*</button>', resp1.text)
+            if not iframes:
+                raise ExtractorError("Nessun link Player 2 trovato")
+            url2 = iframes[0]
+            url2 = baseurl + url2
+            url2 = url2.replace('//cast', '/cast')
+            daddylive_headers['Referer'] = url2
+            daddylive_headers['Origin'] = url2
+            # 3. Richiesta alla pagina Player 2
+            resp2 = await self._make_request(url2, headers=daddylive_headers)
+            # 4. Estrai iframe
+            iframes2 = re.findall(r'iframe src="([^"]*)', resp2.text)
+            if not iframes2:
+                raise ExtractorError("Nessun iframe trovato nella pagina Player 2")
+            iframe_url = iframes2[0]
+            resp3 = await self._make_request(iframe_url, headers=daddylive_headers)
+            iframe_content = resp3.text
+            # 5. Estrai parametri auth (robusto)
+            def extract_var(js, name):
+                m = re.search(rf'var (?:__)?{name}\s*=\s*atob\("([^"]+)"\)', js)
+                if m:
+                    return base64.b64decode(m.group(1)).decode('utf-8')
+                return None
+            channel_key = re.search(r'channelKey\s*=\s*"([^"]+)"', iframe_content)
+            channel_key = channel_key.group(1) if channel_key else None
+            auth_ts = extract_var(iframe_content, 'c')
+            auth_rnd = extract_var(iframe_content, 'd')
+            auth_sig = extract_var(iframe_content, 'e')
+            auth_host = extract_var(iframe_content, 'a')
+            auth_php = extract_var(iframe_content, 'b')
+            if not all([channel_key, auth_ts, auth_rnd, auth_sig, auth_host, auth_php]):
+                raise ExtractorError("Errore estrazione parametri: uno o più parametri non trovati")
+            auth_sig = quote_plus(auth_sig)
+            # 6. Richiesta auth
+            auth_url = f'{auth_host}{auth_php}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
+            auth_resp = await self._make_request(auth_url, headers=daddylive_headers)
+            # 7. Lookup server
+            host = re.findall('(?s)m3u8 =.*?:.*?:.*?".*?".*?"([^"]*)', iframe_content)[0]
+            server_lookup = re.findall(r'n fetchWithRetry\(\s*\'([^\']*)', iframe_content)[0]
+            server_lookup_url = f"https://{urlparse(iframe_url).netloc}{server_lookup}{channel_key}"
+            lookup_resp = await self._make_request(server_lookup_url, headers=daddylive_headers)
+            server_data = lookup_resp.json()
+            server_key = server_data['server_key']
+            referer_raw = f'https://{urlparse(iframe_url).netloc}'
+            clean_m3u8_url = f'https://{server_key}{host}{server_key}/{channel_key}/mono.m3u8'
+            stream_headers = {
+                'User-Agent': daddylive_headers['User-Agent'],
+                'Referer': referer_raw,
+                'Origin': referer_raw
+            }
+            return {
+                "destination_url": clean_m3u8_url,
+                "request_headers": stream_headers,
+                "mediaflow_endpoint": self.mediaflow_endpoint,
+            }
 
         try:
             clean_url = url
