@@ -8,4 +8,3 @@ services:
     environment:
       API_PASSWORD: mfp
       FORWARDED_ALLOW_IPS: "*"
-      TRANSPORT_ROUTES: '{"all://*.ichigotv.net": {"verify_ssl": false}, "all://ichigotv.net": {"verify_ssl": false}, "all://jxoplay.xyz": {"verify_ssl": false}}'
