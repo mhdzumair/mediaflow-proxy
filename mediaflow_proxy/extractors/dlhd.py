@@ -1,9 +1,12 @@
 import re
 import base64
+import logging
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse, quote, urlunparse
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
+
+logger = logging.getLogger(__name__)
 
 
 class DLHDExtractor(BaseExtractor):
@@ -15,6 +18,49 @@ class DLHDExtractor(BaseExtractor):
         self.mediaflow_endpoint = "hls_manifest_proxy"
         # Cache for the resolved base URL to avoid repeated network calls
         self._cached_base_url = None
+        # Store iframe context for newkso.ru requests
+        self._iframe_context = None
+
+    def _get_headers_for_url(self, url: str, base_headers: dict) -> dict:
+        """Get appropriate headers for the given URL, applying newkso.ru specific headers if needed."""
+        headers = base_headers.copy()
+        
+        # Check if URL contains newkso.ru domain
+        parsed_url = urlparse(url)
+        if "newkso.ru" in parsed_url.netloc:
+            # Use iframe URL as referer if available, otherwise use the newkso domain itself
+            if self._iframe_context:
+                iframe_origin = f"https://{urlparse(self._iframe_context).netloc}"
+                newkso_headers = {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+                    'Referer': self._iframe_context,
+                    'Origin': iframe_origin
+                }
+                logger.info(f"Applied newkso.ru specific headers with iframe context for URL: {url}")
+                logger.debug(f"Headers applied: {newkso_headers}")
+            else:
+                # Fallback to newkso domain itself
+                newkso_origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
+                newkso_headers = {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+                    'Referer': newkso_origin,
+                    'Origin': newkso_origin
+                }
+                logger.info(f"Applied newkso.ru specific headers (fallback) for URL: {url}")
+                logger.debug(f"Headers applied: {newkso_headers}")
+            
+            headers.update(newkso_headers)
+        
+        return headers
+
+    async def _make_request(self, url: str, method: str = "GET", headers: dict = None, **kwargs):
+        """Override _make_request to apply newkso.ru specific headers when needed."""
+        request_headers = headers or {}
+        
+        # Apply newkso.ru specific headers if the URL contains newkso.ru
+        final_headers = self._get_headers_for_url(url, request_headers)
+        
+        return await super()._make_request(url, method, final_headers, **kwargs)
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         """Extract DLHD stream URL and required headers (logica tvproxy adattata async, con fallback su endpoint alternativi)."""
@@ -79,6 +125,8 @@ class DLHDExtractor(BaseExtractor):
             if not iframes2:
                 raise ExtractorError("No iframe found in Player 2 page")
             iframe_url = iframes2[0]
+            # Store iframe context for newkso.ru requests
+            self._iframe_context = iframe_url
             resp3 = await self._make_request(iframe_url, headers=daddylive_headers)
             iframe_content = resp3.text
             # 5. Estrai parametri auth (robusto)
@@ -109,11 +157,24 @@ class DLHDExtractor(BaseExtractor):
             server_key = server_data['server_key']
             referer_raw = f'https://{urlparse(iframe_url).netloc}'
             clean_m3u8_url = f'https://{server_key}{host}{server_key}/{channel_key}/mono.m3u8'
-            stream_headers = {
-                'User-Agent': daddylive_headers['User-Agent'],
-                'Referer': referer_raw,
-                'Origin': referer_raw
-            }
+            
+            # Check if the final stream URL is on newkso.ru domain
+            if "newkso.ru" in clean_m3u8_url:
+                # For newkso.ru streams, use iframe URL as referer
+                stream_headers = {
+                    'User-Agent': daddylive_headers['User-Agent'],
+                    'Referer': iframe_url,
+                    'Origin': referer_raw
+                }
+                logger.info(f"Applied iframe-specific headers for newkso.ru stream URL: {clean_m3u8_url}")
+                logger.debug(f"Stream headers for newkso.ru: {stream_headers}")
+            else:
+                # For other domains, use the original logic
+                stream_headers = {
+                    'User-Agent': daddylive_headers['User-Agent'],
+                    'Referer': referer_raw,
+                    'Origin': referer_raw
+                }
             return {
                 "destination_url": clean_m3u8_url,
                 "request_headers": stream_headers,
