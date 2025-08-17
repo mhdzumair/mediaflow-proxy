@@ -29,7 +29,7 @@ class BaseExtractor(ABC):
         """Make HTTP request with error handling."""
         try:
             async with create_httpx_client() as client:
-                request_headers = self.base_headers
+                request_headers = self.base_headers.copy()
                 request_headers.update(headers or {})
                 response = await client.request(
                     method,
@@ -40,9 +40,9 @@ class BaseExtractor(ABC):
                 response.raise_for_status()
                 return response
         except httpx.HTTPError as e:
-            raise ExtractorError(f"HTTP request failed: {str(e)}")
+            raise ExtractorError(f"HTTP request failed for URL {url}: {str(e)}")
         except Exception as e:
-            raise ExtractorError(f"Request failed: {str(e)}")
+            raise ExtractorError(f"Request failed for URL {url}: {str(e)}")
 
     @abstractmethod
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:

@@ -25,6 +25,9 @@ class GenerateUrlRequest(BaseModel):
     )
     ip: Optional[IPvAnyAddress] = Field(None, description="The IP address to restrict the URL to.")
     filename: Optional[str] = Field(None, description="Filename to be preserved for media players like Infuse.")
+    base64_encode_destination: Optional[bool] = Field(
+        False, description="Whether to encode the destination URL in base64 format before processing."
+    )
 
 
 class MultiUrlRequestItem(BaseModel):

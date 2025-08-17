@@ -1,0 +1,15 @@
+version: "3.9"
+
+services:
+  mediaflow_proxy:
+    container_name: MediaflowProxy
+    build: .
+    ports:
+      - "8888:8888"
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      - PORT=8888
+    env_file:
+      - stack.env
+    restart: unless-stopped

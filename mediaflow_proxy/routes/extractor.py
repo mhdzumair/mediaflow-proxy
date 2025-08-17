@@ -14,6 +14,7 @@ from mediaflow_proxy.utils.http_utils import (
     ProxyRequestHeaders,
     get_proxy_headers,
 )
+from mediaflow_proxy.utils.base64_utils import process_potential_base64_url
 
 extractor_router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -28,6 +29,10 @@ async def extract_url(
 ):
     """Extract clean links from various video hosting services."""
     try:
+        # Process potential base64 encoded destination URL
+        processed_destination = process_potential_base64_url(extractor_params.destination)
+        extractor_params.destination = processed_destination
+        
         cache_key = f"{extractor_params.host}_{extractor_params.model_dump_json()}"
         response = await get_cached_extractor_result(cache_key)
         if not response:
