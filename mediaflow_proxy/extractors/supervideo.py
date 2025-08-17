@@ -14,12 +14,10 @@ class SupervideoExtractor(BaseExtractor):
         self.mediaflow_endpoint = "hls_manifest_proxy"
         
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
-        #Init headers needed for the request.
         headers  = {'Accept': '*/*', 'Connection': 'keep-alive', 'User-Agent': 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.71 Mobile Safari/537.36', 'user-agent': 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.71 Mobile Safari/537.36'}
+        pattern = r'file:"(.*?)"'
 
-        
-        """Extract Supervideo URL."""
-        final_url = await eval_solver(self,url,headers)
+        final_url = await eval_solver(self, url, headers, pattern)
 
         self.base_headers["referer"] = url
         return {
