@@ -6,7 +6,7 @@ VERSION_NEW ?=
 CONTRIBUTORS ?= $(shell git log --pretty=format:'%an' $(VERSION_OLD)..$(VERSION_NEW) | sort | uniq)
 
 # Claude API settings
-CLAUDE_MODEL ?= claude-3-7-sonnet-20250219
+CLAUDE_MODEL ?= claude-sonnet-4-20250514
 MAX_TOKENS ?= 1024
 ANTHROPIC_VERSION ?= 2023-06-01
 
