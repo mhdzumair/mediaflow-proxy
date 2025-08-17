@@ -10,10 +10,11 @@ from starlette.staticfiles import StaticFiles
 
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.middleware import UIAccessControlMiddleware
-from mediaflow_proxy.routes import proxy_router, extractor_router, speedtest_router
+from mediaflow_proxy.routes import proxy_router, extractor_router, speedtest_router, playlist_builder_router
 from mediaflow_proxy.schemas import GenerateUrlRequest, GenerateMultiUrlRequest, MultiUrlRequestItem
 from mediaflow_proxy.utils.crypto_utils import EncryptionHandler, EncryptionMiddleware
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
+from mediaflow_proxy.utils.base64_utils import encode_url_to_base64, decode_base64_url, is_base64_url
 
 logging.basicConfig(level=settings.log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 app = FastAPI()
@@ -99,10 +100,15 @@ async def generate_url(request: GenerateUrlRequest):
     # Convert IP to string if provided
     ip_str = str(request.ip) if request.ip else None
 
+    # Handle base64 encoding of destination URL if requested
+    destination_url = request.destination_url
+    if request.base64_encode_destination and destination_url:
+        destination_url = encode_url_to_base64(destination_url)
+
     encoded_url = encode_mediaflow_proxy_url(
         mediaflow_proxy_url=request.mediaflow_proxy_url,
         endpoint=request.endpoint,
-        destination_url=request.destination_url,
+        destination_url=destination_url,
         query_params=query_params,
         request_headers=request.request_headers,
         response_headers=request.response_headers,
@@ -156,9 +162,83 @@ async def generate_urls(request: GenerateMultiUrlRequest):
     return {"urls": encoded_urls}
 
 
+@app.post(
+    "/base64/encode",
+    description="Encode a URL to base64 format",
+    response_description="Returns the base64 encoded URL",
+    tags=["base64"],
+)
+async def encode_url_base64(url: str):
+    """
+    Encode a URL to base64 format.
+    
+    Args:
+        url (str): The URL to encode.
+        
+    Returns:
+        dict: A dictionary containing the encoded URL.
+    """
+    try:
+        encoded_url = encode_url_to_base64(url)
+        return {"encoded_url": encoded_url, "original_url": url}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to encode URL: {str(e)}")
+
+
+@app.post(
+    "/base64/decode",
+    description="Decode a base64 encoded URL",
+    response_description="Returns the decoded URL",
+    tags=["base64"],
+)
+async def decode_url_base64(encoded_url: str):
+    """
+    Decode a base64 encoded URL.
+    
+    Args:
+        encoded_url (str): The base64 encoded URL to decode.
+        
+    Returns:
+        dict: A dictionary containing the decoded URL.
+    """
+    decoded_url = decode_base64_url(encoded_url)
+    if decoded_url is None:
+        raise HTTPException(status_code=400, detail="Invalid base64 encoded URL")
+    
+    return {"decoded_url": decoded_url, "encoded_url": encoded_url}
+
+
+@app.get(
+    "/base64/check",
+    description="Check if a string appears to be a base64 encoded URL",
+    response_description="Returns whether the string is likely base64 encoded",
+    tags=["base64"],
+)
+async def check_base64_url(url: str):
+    """
+    Check if a string appears to be a base64 encoded URL.
+    
+    Args:
+        url (str): The string to check.
+        
+    Returns:
+        dict: A dictionary indicating if the string is likely base64 encoded.
+    """
+    is_base64 = is_base64_url(url)
+    result = {"url": url, "is_base64": is_base64}
+    
+    if is_base64:
+        decoded_url = decode_base64_url(url)
+        if decoded_url:
+            result["decoded_url"] = decoded_url
+    
+    return result
+
+
 app.include_router(proxy_router, prefix="/proxy", tags=["proxy"], dependencies=[Depends(verify_api_key)])
 app.include_router(extractor_router, prefix="/extractor", tags=["extractors"], dependencies=[Depends(verify_api_key)])
 app.include_router(speedtest_router, prefix="/speedtest", tags=["speedtest"], dependencies=[Depends(verify_api_key)])
+app.include_router(playlist_builder_router, prefix="/playlist", tags=["playlist"])
 
 static_path = resources.files("mediaflow_proxy").joinpath("static")
 app.mount("/", StaticFiles(directory=str(static_path), html=True), name="static")

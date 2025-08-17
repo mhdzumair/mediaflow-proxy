@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import math
 import time
@@ -7,6 +8,8 @@ from fastapi import Request, Response, HTTPException
 from mediaflow_proxy.drm.decrypter import decrypt_segment
 from mediaflow_proxy.utils.crypto_utils import encryption_handler
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url, get_original_scheme, ProxyRequestHeaders
+from mediaflow_proxy.utils.dash_prebuffer import dash_prebuffer
+from mediaflow_proxy.configs import settings
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +31,23 @@ async def process_manifest(
         Response: The HLS manifest as an HTTP response.
     """
     hls_content = build_hls(mpd_dict, request, key_id, key)
+    
+    # Start DASH pre-buffering in background if enabled
+    if settings.enable_dash_prebuffer:
+        # Extract headers for pre-buffering
+        headers = {}
+        for key, value in request.query_params.items():
+            if key.startswith("h_"):
+                headers[key[2:]] = value
+        
+        # Get the original MPD URL from the request
+        mpd_url = request.query_params.get("d", "")
+        if mpd_url:
+            # Start pre-buffering in background
+            asyncio.create_task(
+                dash_prebuffer.prebuffer_dash_manifest(mpd_url, headers)
+            )
+    
     return Response(content=hls_content, media_type="application/vnd.apple.mpegurl", headers=proxy_headers.response)
 
 

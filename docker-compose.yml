@@ -1,11 +1,10 @@
-services:
-  mediaflow-proxy:
+services:  
+  mfp:
+    build: https://github.com/nzo66/mediaflow-proxy.git#main
+    container_name: mfp
+    restart: unless-stopped
     ports:
-      - "8888:8888"
-    env_file:
-      - .env
-    restart: always
-    logging:
-      options:
-        max-size: 1g
-    image: mhdzumair/mediaflow-proxy:latest
+      - '8888:8888'
+    environment:
+      API_PASSWORD: mfp
+      FORWARDED_ALLOW_IPS: "*"
