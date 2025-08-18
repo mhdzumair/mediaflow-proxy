@@ -1,6 +1,7 @@
 import re
 import base64
 import logging
+import json
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse, quote, urlunparse
 
@@ -131,19 +132,48 @@ class DLHDExtractor(BaseExtractor):
             iframe_content = resp3.text
             # 5. Estrai parametri auth (robusto)
             def extract_var(js, name):
-                m = re.search(rf'var (?:__)?{name}\s*=\s*atob\("([^"]+)"\)', js)
+                m = re.search(rf'var (?:__)?{name}\s*=\s*atob\(["\']([^"\']+)["\']\)', js)
                 if m:
-                    return base64.b64decode(m.group(1)).decode('utf-8')
+                    try:
+                        return base64.b64decode(m.group(1)).decode('utf-8')
+                    except Exception:
+                        return None
                 return None
-            channel_key = re.search(r'channelKey\s*=\s*"([^"]+)"', iframe_content)
-            channel_key = channel_key.group(1) if channel_key else None
-            auth_ts = extract_var(iframe_content, 'c')
-            auth_rnd = extract_var(iframe_content, 'd')
-            auth_sig = extract_var(iframe_content, 'e')
+            channel_key_match = re.search(r'channelKey\s*=\s*"([^"]+)"', iframe_content)
+            channel_key = channel_key_match.group(1) if channel_key_match else None
+
+            # New BUNDLE-based auth extraction
+            auth_ts = auth_rnd = auth_sig = None
+            bundle_match = re.search(r'const\s+BUNDLE\s*=\s*"([^"]+)"', iframe_content)
+            if not bundle_match:
+                bundle_match = re.search(r"const\s+BUNDLE\s*=\s*'([^']+)'", iframe_content)
+            if bundle_match:
+                try:
+                    bundle64 = bundle_match.group(1)
+                    logger.debug("Found BUNDLE (trunc): %s...", bundle64[:40])
+                    bundle_json_str = base64.b64decode(bundle64 + '==').decode('utf-8', errors='replace')
+                    bundle_data = json.loads(bundle_json_str)
+                    auth_ts = base64.b64decode(bundle_data.get('b_ts', '') + '==').decode('utf-8') if 'b_ts' in bundle_data else None
+                    auth_rnd = base64.b64decode(bundle_data.get('b_rnd', '') + '==').decode('utf-8') if 'b_rnd' in bundle_data else None
+                    auth_sig = base64.b64decode(bundle_data.get('b_sig', '') + '==').decode('utf-8') if 'b_sig' in bundle_data else None
+                    if all([auth_ts, auth_rnd, auth_sig]):
+                        logger.info("Auth params extracted via BUNDLE")
+                    else:
+                        logger.warning("BUNDLE present but missing one of b_ts/b_rnd/b_sig")
+                except Exception as e:
+                    logger.warning("Failed to parse BUNDLE: %r", e)
+
+            # Fallback to legacy atob single vars if BUNDLE not used or failed
+            if not (auth_ts and auth_rnd and auth_sig):
+                auth_ts = extract_var(iframe_content, 'c')
+                auth_rnd = extract_var(iframe_content, 'd')
+                auth_sig = extract_var(iframe_content, 'e')
+
             auth_host = extract_var(iframe_content, 'a')
             auth_php = extract_var(iframe_content, 'b')
+
             if not all([channel_key, auth_ts, auth_rnd, auth_sig, auth_host, auth_php]):
-                raise ExtractorError("Error extracting parameters: one or more parameters not found")
+                raise ExtractorError("Error extracting parameters: one or more parameters not found (BUNDLE/legacy)")
             auth_sig = quote_plus(auth_sig)
             # 6. Richiesta auth
             auth_url = f'{auth_host}{auth_php}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
@@ -240,6 +270,25 @@ class DLHDExtractor(BaseExtractor):
             if not channel_key_match:
                 return {}
             channel_key = channel_key_match.group(1)
+
+            # First try new BUNDLE method
+            bundle_match = re.search(r'const\s+BUNDLE\s*=\s*"([^"]+)"', html_content)
+            if not bundle_match:
+                bundle_match = re.search(r"const\s+BUNDLE\s*=\s*'([^']+)'", html_content)
+            if bundle_match:
+                try:
+                    bundle64 = bundle_match.group(1)
+                    bundle_json_str = base64.b64decode(bundle64 + '==').decode('utf-8', errors='replace')
+                    bundle_data = json.loads(bundle_json_str)
+                    if all(k in bundle_data for k in ('b_ts','b_rnd','b_sig')):
+                        return {
+                            "channel_key": channel_key,
+                            "auth_ts": base64.b64decode(bundle_data['b_ts'] + '==').decode('utf-8'),
+                            "auth_rnd": base64.b64decode(bundle_data['b_rnd'] + '==').decode('utf-8'),
+                            "auth_sig": base64.b64decode(bundle_data['b_sig'] + '==').decode('utf-8'),
+                        }
+                except Exception:
+                    pass
 
             # New pattern with atob
             auth_ts_match = re.search(r'var\s+__c\s*=\s*atob\([\'"]([^\'"]+)[\'"]\)', html_content)
