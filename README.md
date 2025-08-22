@@ -720,7 +720,7 @@ Ideal for users who want a reliable, plug-and-play solution without the technica
 4. Go to the "Settings" tab and create a new secret with the name `API_PASSWORD` and set the value to your desired password.
 5. Go to the "Files" tab and create a new file with the name `Dockerfile` and paste the following content. After that, replace `YourUsername/YourRepoName` in the Dockerfile with your username and the name of your fork. Finally, click on "Commit" to save the changes. Remember, your space might get banned if instead of using your fork, you use the main repo.
     ```dockerfile
-    FROM python:3.10-slim-buster
+    FROM python:3.10-slim-bookworm
 
     WORKDIR /app
 
