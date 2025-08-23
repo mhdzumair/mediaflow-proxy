@@ -129,34 +129,213 @@ class DLHDExtractor(BaseExtractor):
             self._iframe_context = iframe_url
             resp3 = await self._make_request(iframe_url, headers=daddylive_headers)
             iframe_content = resp3.text
-            # 5. Estrai parametri auth (robusto)
-            def extract_var(js, name):
-                m = re.search(rf'var (?:__)?{name}\s*=\s*atob\("([^"]+)"\)', js)
-                if m:
-                    return base64.b64decode(m.group(1)).decode('utf-8')
+            # 5. Estrai parametri auth (robusto) - Handle both old and new formats
+            def extract_var_old_format(js, name):
+                # Try multiple patterns for variable extraction (old format)
+                patterns = [
+                    rf'var (?:__)?{name}\s*=\s*atob\("([^"]+)"\)',
+                    rf'var (?:__)?{name}\s*=\s*atob\(\'([^\']+)\'\)',
+                    rf'(?:var\s+)?(?:__)?{name}\s*=\s*atob\s*\(\s*["\']([^"\']+)["\']\s*\)',
+                    rf'(?:let|const)\s+(?:__)?{name}\s*=\s*atob\s*\(\s*["\']([^"\']+)["\']\s*\)'
+                ]
+                for pattern in patterns:
+                    m = re.search(pattern, js)
+                    if m:
+                        try:
+                            return base64.b64decode(m.group(1)).decode('utf-8')
+                        except Exception as decode_error:
+                            logger.warning(f"Failed to decode base64 for variable {name}: {decode_error}")
+                            continue
                 return None
-            channel_key = re.search(r'channelKey\s*=\s*"([^"]+)"', iframe_content)
-            channel_key = channel_key.group(1) if channel_key else None
-            auth_ts = extract_var(iframe_content, 'c')
-            auth_rnd = extract_var(iframe_content, 'd')
-            auth_sig = extract_var(iframe_content, 'e')
-            auth_host = extract_var(iframe_content, 'a')
-            auth_php = extract_var(iframe_content, 'b')
-            if not all([channel_key, auth_ts, auth_rnd, auth_sig, auth_host, auth_php]):
-                raise ExtractorError("Error extracting parameters: one or more parameters not found")
+            
+            def extract_bundle_format(js):
+                """Extract parameters from new BUNDLE format"""
+                try:
+                    # Look for BUNDLE variable
+                    bundle_patterns = [
+                        r'const\s+BUNDLE\s*=\s*["\']([^"\']+)["\']',
+                        r'var\s+BUNDLE\s*=\s*["\']([^"\']+)["\']',
+                        r'let\s+BUNDLE\s*=\s*["\']([^"\']+)["\']'
+                    ]
+                    
+                    bundle_data = None
+                    for pattern in bundle_patterns:
+                        match = re.search(pattern, js)
+                        if match:
+                            bundle_data = match.group(1)
+                            break
+                    
+                    if not bundle_data:
+                        return None
+                    
+                    # Decode the bundle (base64 -> JSON -> decode each field)
+                    import json
+                    bundle_json = base64.b64decode(bundle_data).decode('utf-8')
+                    bundle_obj = json.loads(bundle_json)
+                    
+                    # Decode each base64 field
+                    decoded_bundle = {}
+                    for key, value in bundle_obj.items():
+                        try:
+                            decoded_bundle[key] = base64.b64decode(value).decode('utf-8')
+                        except Exception as e:
+                            logger.warning(f"Failed to decode bundle field {key}: {e}")
+                            decoded_bundle[key] = value
+                    
+                    return decoded_bundle
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to extract bundle format: {e}")
+                    return None
+            
+            # Try multiple patterns for channel key extraction
+            channel_key = None
+            channel_key_patterns = [
+                r'const\s+CHANNEL_KEY\s*=\s*["\']([^"\']+)["\']',
+                r'var\s+CHANNEL_KEY\s*=\s*["\']([^"\']+)["\']',
+                r'let\s+CHANNEL_KEY\s*=\s*["\']([^"\']+)["\']',
+                r'channelKey\s*=\s*["\']([^"\']+)["\']',
+                r'var\s+channelKey\s*=\s*["\']([^"\']+)["\']',
+                r'(?:let|const)\s+channelKey\s*=\s*["\']([^"\']+)["\']'
+            ]
+            for pattern in channel_key_patterns:
+                match = re.search(pattern, iframe_content)
+                if match:
+                    channel_key = match.group(1)
+                    break
+            
+            # Try new bundle format first
+            bundle_data = extract_bundle_format(iframe_content)
+            if bundle_data:
+                logger.info("Using new BUNDLE format for parameter extraction")
+                auth_host = bundle_data.get('b_host')
+                auth_php = bundle_data.get('b_script')
+                auth_ts = bundle_data.get('b_ts')
+                auth_rnd = bundle_data.get('b_rnd')
+                auth_sig = bundle_data.get('b_sig')
+                logger.debug(f"Bundle data extracted: {bundle_data}")
+            else:
+                logger.info("Falling back to old format for parameter extraction")
+                # Fall back to old format
+                auth_ts = extract_var_old_format(iframe_content, 'c')
+                auth_rnd = extract_var_old_format(iframe_content, 'd')
+                auth_sig = extract_var_old_format(iframe_content, 'e')
+                auth_host = extract_var_old_format(iframe_content, 'a')
+                auth_php = extract_var_old_format(iframe_content, 'b')
+            
+            # Log what we found for debugging
+            logger.debug(f"Extracted parameters: channel_key={channel_key}, auth_ts={auth_ts}, auth_rnd={auth_rnd}, auth_sig={auth_sig}, auth_host={auth_host}, auth_php={auth_php}")
+            
+            # Check which parameters are missing
+            missing_params = []
+            if not channel_key:
+                missing_params.append('channel_key/CHANNEL_KEY')
+            if not auth_ts:
+                missing_params.append('auth_ts (var c / b_ts)')
+            if not auth_rnd:
+                missing_params.append('auth_rnd (var d / b_rnd)')
+            if not auth_sig:
+                missing_params.append('auth_sig (var e / b_sig)')
+            if not auth_host:
+                missing_params.append('auth_host (var a / b_host)')
+            if not auth_php:
+                missing_params.append('auth_php (var b / b_script)')
+            
+            if missing_params:
+                logger.error(f"Missing parameters: {', '.join(missing_params)}")
+                # Log a portion of the iframe content for debugging (first 2000 chars)
+                logger.debug(f"Iframe content sample: {iframe_content[:2000]}")
+                raise ExtractorError(f"Error extracting parameters: missing {', '.join(missing_params)}")
             auth_sig = quote_plus(auth_sig)
             # 6. Richiesta auth
             auth_url = f'{auth_host}{auth_php}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
             auth_resp = await self._make_request(auth_url, headers=daddylive_headers)
-            # 7. Lookup server
-            host = re.findall('(?s)m3u8 =.*?:.*?:.*?".*?".*?"([^"]*)', iframe_content)[0]
-            server_lookup = re.findall(r'n fetchWithRetry\(\s*\'([^\']*)', iframe_content)[0]
+            # 7. Lookup server - Extract host parameter
+            host = None
+            host_patterns = [
+                r'(?s)m3u8 =.*?:.*?:.*?".*?".*?"([^"]*)',  # Original pattern
+                r'm3u8\s*=.*?"([^"]*)"',  # Simplified m3u8 pattern
+                r'host["\']?\s*[:=]\s*["\']([^"\']*)',  # host: or host= pattern
+                r'["\']([^"\']*\.newkso\.ru[^"\']*)',  # Direct newkso.ru pattern
+                r'["\']([^"\']*\/premium\d+[^"\']*)',  # premium path pattern
+                r'url.*?["\']([^"\']*newkso[^"\']*)',  # URL with newkso
+            ]
+            
+            for pattern in host_patterns:
+                matches = re.findall(pattern, iframe_content)
+                if matches:
+                    host = matches[0]
+                    logger.debug(f"Found host with pattern '{pattern}': {host}")
+                    break
+            
+            if not host:
+                logger.error("Failed to extract host from iframe content")
+                logger.debug(f"Iframe content for host extraction: {iframe_content[:2000]}")
+                # Try to find any newkso.ru related URLs
+                potential_hosts = re.findall(r'["\']([^"\']*newkso[^"\']*)', iframe_content)
+                if potential_hosts:
+                    logger.debug(f"Potential host URLs found: {potential_hosts}")
+                raise ExtractorError("Failed to extract host parameter")
+            
+            # Extract server lookup URL from fetchWithRetry call (dynamic extraction)
+            server_lookup = None
+            
+            # Look for the server_lookup.php pattern in JavaScript
+            if "fetchWithRetry('/server_lookup.php?channel_id='" in iframe_content:
+                server_lookup = '/server_lookup.php?channel_id='
+                logger.debug('Found server lookup URL: /server_lookup.php?channel_id=')
+            elif '/server_lookup.php' in iframe_content:
+                # Try to extract the full path
+                js_lines = iframe_content.split('\n')
+                for js_line in js_lines:
+                    if 'server_lookup.php' in js_line and 'fetchWithRetry' in js_line:
+                        # Extract the URL from the fetchWithRetry call
+                        start = js_line.find("'")
+                        if start != -1:
+                            end = js_line.find("'", start + 1)
+                            if end != -1:
+                                potential_url = js_line[start+1:end]
+                                if 'server_lookup' in potential_url:
+                                    server_lookup = potential_url
+                                    logger.debug(f'Extracted server lookup URL: {server_lookup}')
+                                    break
+            
+            if not server_lookup:
+                logger.error('Failed to extract server lookup URL from iframe content')
+                logger.debug(f'Iframe content sample: {iframe_content[:2000]}')
+                raise ExtractorError('Failed to extract server lookup URL')
+            
             server_lookup_url = f"https://{urlparse(iframe_url).netloc}{server_lookup}{channel_key}"
-            lookup_resp = await self._make_request(server_lookup_url, headers=daddylive_headers)
-            server_data = lookup_resp.json()
-            server_key = server_data['server_key']
+            logger.debug(f"Server lookup URL: {server_lookup_url}")
+            
+            try:
+                lookup_resp = await self._make_request(server_lookup_url, headers=daddylive_headers)
+                server_data = lookup_resp.json()
+                server_key = server_data.get('server_key')
+                if not server_key:
+                    logger.error(f"No server_key in response: {server_data}")
+                    raise ExtractorError("Failed to get server key from lookup response")
+                
+                logger.info(f"Server lookup successful - Server key: {server_key}")
+            except Exception as lookup_error:
+                logger.error(f"Server lookup request failed: {lookup_error}")
+                raise ExtractorError(f"Server lookup failed: {str(lookup_error)}")
+            
             referer_raw = f'https://{urlparse(iframe_url).netloc}'
-            clean_m3u8_url = f'https://{server_key}{host}{server_key}/{channel_key}/mono.m3u8'
+            
+            # Extract URL construction logic dynamically from JavaScript
+            # Simple approach: look for newkso.ru URLs and construct based on server_key
+            
+            # Check if we have the special case server_key
+            if server_key == 'top1/cdn':
+                clean_m3u8_url = f'https://top1.newkso.ru/top1/cdn/{channel_key}/mono.m3u8'
+                logger.info(f'Using special case URL for server_key \'top1/cdn\': {clean_m3u8_url}')
+            else:
+                clean_m3u8_url = f'https://{server_key}new.newkso.ru/{server_key}/{channel_key}/mono.m3u8'
+                logger.info(f'Using general case URL for server_key \'{server_key}\': {clean_m3u8_url}')
+            
+            logger.info(f'Generated stream URL: {clean_m3u8_url}')
+            logger.debug(f'Server key: {server_key}, Channel key: {channel_key}')
             
             # Check if the final stream URL is on newkso.ru domain
             if "newkso.ru" in clean_m3u8_url:
