@@ -155,13 +155,11 @@ async def eval_solver(self, url: str, headers: dict[str, str] | None, patterns: 
                     match = re.search(pattern, unpacked_code)
                     if match:
                         extracted_url = match.group(1)
-                        if extracted_url.startswith("//"):
-                            extracted_url = urlparse(url).scheme + ":" + extracted_url
-                        elif not extracted_url.startswith("http"):
+                        if not urlparse(extracted_url).scheme:
                             extracted_url = urljoin(url, extracted_url)
 
                         return extracted_url
-        raise UnpackingError("p.a.c.k.e.r script detected but none of the provided patterns matched.")
+        raise UnpackingError("No p.a.c.k.e.d JS found or no pattern matched.")
     except Exception as e:
         logger.exception("Eval solver error for %s", url)
         raise UnpackingError("Error in eval_solver") from e
