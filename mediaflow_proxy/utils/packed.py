@@ -142,7 +142,7 @@ class UnpackingError(Exception):
 
 
 
-async def eval_solver(self, url: str, headers, pattern: str) -> str:
+async def eval_solver(self, url: str, headers, patterns: list[str]) -> str:
     try:
         response = await self._make_request(url, headers=headers)
         soup = BeautifulSoup(response.text, "lxml",parse_only=SoupStrainer("script"))
@@ -150,10 +150,11 @@ async def eval_solver(self, url: str, headers, pattern: str) -> str:
         for i in script_all:
             if detect(i.text):
                 unpacked_code = unpack(i.text)
-                match = re.search(pattern, unpacked_code)
-                if match:
-                    m3u8_url = match.group(1)
-                    return m3u8_url
+                for pattern in patterns:
+                    match = re.search(pattern, unpacked_code)
+                    if match:
+                        m3u8_url = match.group(1)
+                        return m3u8_url
     except Exception as e:
         logger.error("Eval solver error\n",e)
         raise Exception("Error in eval_solver")
