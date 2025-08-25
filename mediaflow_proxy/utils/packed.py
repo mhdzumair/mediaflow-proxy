@@ -14,6 +14,7 @@
 
 import re
 from bs4 import BeautifulSoup, SoupStrainer
+from urllib.parse import urljoin
 import logging
 
 
@@ -154,6 +155,11 @@ async def eval_solver(self, url: str, headers, patterns: list[str]) -> str:
                     match = re.search(pattern, unpacked_code)
                     if match:
                         m3u8_url = match.group(1)
+                        if m3u8_url.startswith('//'):
+                            m3u8_url = "https:" + m3u8_url
+                        elif m3u8_url.startswith('/'):
+                            m3u8_url = urljoin(url, m3u8_url)
+
                         return m3u8_url
     except Exception as e:
         logger.error("Eval solver error\n",e)
