@@ -14,9 +14,9 @@ class FastreamExtractor(BaseExtractor):
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         headers  = {'Accept': '*/*', 'Connection': 'keep-alive','Accept-Language': 'en-US,en;q=0.5','Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'user-agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0'}
-        pattern = r'file:"(.*?)"'
+        patterns = [r'file:"(.*?)"']
 
-        final_url = await eval_solver(self, url, headers, pattern)
+        final_url = await eval_solver(self, url, headers, patterns)
 
         self.base_headers["referer"] = f'https://{url.replace("https://","").split("/")[0]}/'
         self.base_headers["origin"] = f'https://{url.replace("https://","").split("/")[0]}'
