@@ -143,7 +143,7 @@ class UnpackingError(Exception):
 
 
 
-async def eval_solver(self, url: str, headers, patterns: list[str]) -> str:
+async def eval_solver(self, url: str, headers: dict[str, str] | None, patterns: list[str]) -> str:
     try:
         response = await self._make_request(url, headers=headers)
         soup = BeautifulSoup(response.text, "lxml",parse_only=SoupStrainer("script"))
@@ -154,14 +154,14 @@ async def eval_solver(self, url: str, headers, patterns: list[str]) -> str:
                 for pattern in patterns:
                     match = re.search(pattern, unpacked_code)
                     if match:
-                        m3u8_url = match.group(1)
-                        if m3u8_url.startswith("//"):
-                            m3u8_url = urlparse(url).scheme + ":" + m3u8_url
-                        elif not m3u8_url.startswith("http"):
-                            m3u8_url = urljoin(url, m3u8_url)
+                        extracted_url = match.group(1)
+                        if extracted_url.startswith("//"):
+                            extracted_url = urlparse(url).scheme + ":" + extracted_url
+                        elif not extracted_url.startswith("http"):
+                            extracted_url = urljoin(url, extracted_url)
 
-                        return m3u8_url
+                        return extracted_url
         raise UnpackingError("p.a.c.k.e.r script detected but none of the provided patterns matched.")
     except Exception as e:
-        logger.exception("Eval solver error")
+        logger.exception("Eval solver error for %s", url)
         raise UnpackingError("Error in eval_solver") from e
