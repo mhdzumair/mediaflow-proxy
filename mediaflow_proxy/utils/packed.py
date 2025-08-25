@@ -161,6 +161,7 @@ async def eval_solver(self, url: str, headers, patterns: list[str]) -> str:
                             m3u8_url = urljoin(url, m3u8_url)
 
                         return m3u8_url
+        raise UnpackingError("p.a.c.k.e.r script detected but none of the provided patterns matched.")
     except Exception as e:
-        logger.error("Eval solver error\n",e)
-        raise Exception("Error in eval_solver")
+        logger.exception("Eval solver error")
+        raise UnpackingError("Error in eval_solver") from e
