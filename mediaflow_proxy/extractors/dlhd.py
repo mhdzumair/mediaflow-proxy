@@ -162,24 +162,31 @@ class DLHDExtractor(BaseExtractor):
                 return None
 
             def extract_bundle_format(js):
-                """Extract parameters from new BUNDLE format"""
+                """Extract parameters from new XJZ/PWAROS format"""
                 try:
-                    # Look for XJZ or BUNDLE variable - Pattern aggiornati per il nuovo formato
-                    bundle_patterns = [
-                        r'const\s+XJZ\s*=\s*["\']([^"\']+)["\']',  # Nuovo pattern per XJZ
-                        r'const\s+PWAROS\s*=\s*JSON\.parse\(atob\(["\']([^"\']+)["\']\)\)',  # Pattern alternativo
-                        r'const\s+BUNDLE\s*=\s*["\']([^"\']+)["\']',
-                        r'var\s+BUNDLE\s*=\s*["\']([^"\']+)["\']',
-                        r'let\s+BUNDLE\s*=\s*["\']([^"\']+)["\']'
+                    # Look for XJZ variable pattern
+                    xjz_patterns = [
+                        r'const\s+XJZ\s*=\s*["\']([^"\']+)["\']',
+                        r'var\s+XJZ\s*=\s*["\']([^"\']+)["\']',
+                        r'let\s+XJZ\s*=\s*["\']([^"\']+)["\']'
                     ]
                     
                     bundle_data = None
-                    for pattern in bundle_patterns:
+                    for pattern in xjz_patterns:
                         match = re.search(pattern, js)
                         if match:
                             bundle_data = match.group(1)
-                            logger.debug(f"Found bundle data with pattern: {pattern}")
+                            logger.debug(f"Found XJZ data with pattern: {pattern}")
                             break
+                    
+                    if not bundle_data:
+                        logger.debug("No XJZ pattern found, looking for PWAROS...")
+                        # Look for PWAROS parsing pattern
+                        pwaros_pattern = r'const\s+PWAROS\s*=\s*JSON\.parse\(atob\(["\']([^"\']+)["\']\)\)'
+                        match = re.search(pwaros_pattern, js)
+                        if match:
+                            bundle_data = match.group(1)
+                            logger.debug("Found PWAROS pattern")
                     
                     if not bundle_data:
                         return None
@@ -198,10 +205,11 @@ class DLHDExtractor(BaseExtractor):
                             logger.warning(f"Failed to decode bundle field {key}: {e}")
                             decoded_bundle[key] = value
                     
+                    logger.debug(f"Decoded bundle: {decoded_bundle}")
                     return decoded_bundle
                     
                 except Exception as e:
-                    logger.warning(f"Failed to extract bundle format: {e}")
+                    logger.warning(f"Failed to extract XJZ/PWAROS format: {e}")
                     return None
 
             # Try multiple patterns for channel key extraction - Pattern aggiornati
@@ -526,3 +534,4 @@ class DLHDExtractor(BaseExtractor):
 
         except Exception:
             return None
+
