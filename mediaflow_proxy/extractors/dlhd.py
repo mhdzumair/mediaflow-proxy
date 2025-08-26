@@ -277,8 +277,9 @@ class DLHDExtractor(BaseExtractor):
             
             # 6. Richiesta auth
             auth_url = f'{auth_host}{auth_php}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
-            auth_resp = await self._make_request(auth_url, headers=daddylive_headers)
-
+            # Skip auth request as it returns 404
+            logger.info("Skipping auth request (404 error), proceeding to server lookup")
+            # auth_resp = await self._make_request(auth_url, headers=daddylive_headers)
             # 7. Lookup server - Extract host parameter
             host = None
             host_patterns = [
@@ -534,4 +535,5 @@ class DLHDExtractor(BaseExtractor):
 
         except Exception:
             return None
+
 
