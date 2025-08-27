@@ -276,6 +276,13 @@ class DLHDExtractor(BaseExtractor):
                 raise ExtractorError(f"Error extracting parameters: missing {', '.join(missing_params)}")
             auth_sig = quote_plus(auth_sig)
             # 6. Richiesta auth
+            # Se il sito fornisce ancora /a.php ma ora serve /auth.php, sostituisci
+            # Normalize and robustly replace any variant of a.php with /auth.php
+            if auth_php:
+                normalized_auth_php = auth_php.strip().lstrip('/')
+                if normalized_auth_php == 'a.php':
+                    logger.info("Sostituisco qualunque variante di a.php con /auth.php per compatibilità.")
+                    auth_php = '/auth.php'
             # Unisci host e script senza doppio slash
             if auth_host.endswith('/') and auth_php.startswith('/'):
                 auth_url = f'{auth_host[:-1]}{auth_php}'
