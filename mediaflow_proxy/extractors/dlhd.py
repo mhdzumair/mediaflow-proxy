@@ -276,7 +276,14 @@ class DLHDExtractor(BaseExtractor):
                 raise ExtractorError(f"Error extracting parameters: missing {', '.join(missing_params)}")
             auth_sig = quote_plus(auth_sig)
             # 6. Richiesta auth
-            auth_url = f'{auth_host}{auth_php}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
+            # Unisci host e script senza doppio slash
+            if auth_host.endswith('/') and auth_php.startswith('/'):
+                auth_url = f'{auth_host[:-1]}{auth_php}'
+            elif not auth_host.endswith('/') and not auth_php.startswith('/'):
+                auth_url = f'{auth_host}/{auth_php}'
+            else:
+                auth_url = f'{auth_host}{auth_php}'
+            auth_url = f'{auth_url}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
             auth_resp = await self._make_request(auth_url, headers=daddylive_headers)
             # 7. Lookup server - Extract host parameter
             host = None
