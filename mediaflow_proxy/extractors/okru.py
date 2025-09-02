@@ -22,7 +22,11 @@ class OkruExtractor(BaseExtractor):
             data_options = div.get("data-options")
             data = json.loads(data_options)
             metadata = json.loads(data["flashvars"]["metadata"])
-            final_url = metadata["hlsMasterPlaylistUrl"]
+            print(metadata)
+            if "hlsMasterPlaylistUrl" in metadata:
+                final_url = metadata["hlsMasterPlaylistUrl"]
+            elif "hlsManifestUrl"in metadata:
+                final_url = metadata["hlsManifestUrl"]        
 
             self.base_headers["referer"] = url
             return {
