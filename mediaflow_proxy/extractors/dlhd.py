@@ -375,6 +375,15 @@ class DLHDExtractor(BaseExtractor):
             else:
                 clean_m3u8_url = f'https://{server_key}new.newkso.ru/{server_key}/{channel_key}/mono.m3u8'
                 logger.info(f'Using general case URL for server_key \'{server_key}\': {clean_m3u8_url}')
+
+            # Ensure the final URL ends with .m3u8, replacing any other extension
+            parsed_url = urlparse(clean_m3u8_url)
+            path = parsed_url.path
+            if not path.endswith('.m3u8'):
+                # Replace the extension with .m3u8
+                new_path = re.sub(r'\.\w+$', '.m3u8', path)
+                clean_m3u8_url = urlunparse(parsed_url._replace(path=new_path))
+                logger.info(f"Corrected stream URL to end with .m3u8: {clean_m3u8_url}")
             
             logger.info(f'Generated stream URL: {clean_m3u8_url}')
             logger.debug(f'Server key: {server_key}, Channel key: {channel_key}')
