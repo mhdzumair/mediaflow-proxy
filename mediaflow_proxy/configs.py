@@ -40,6 +40,11 @@ class TransportConfig(BaseSettings):
                 verify=route.verify_ssl, proxy=route.proxy_url or self.proxy_url if route.proxy else None
             )
 
+        # Hardcoded configuration for jxoplay.xyz domain - SSL verification disabled
+        mounts["all://jxoplay.xyz"] = transport_cls(
+            verify=False, proxy=self.proxy_url if self.all_proxy else None
+        )
+
         # Set default proxy for all routes if enabled
         if self.all_proxy:
             mounts["all://"] = transport_cls(proxy=self.proxy_url)
