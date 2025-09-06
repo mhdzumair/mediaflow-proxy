@@ -375,15 +375,6 @@ class DLHDExtractor(BaseExtractor):
             else:
                 clean_m3u8_url = f'https://{server_key}new.newkso.ru/{server_key}/{channel_key}/mono.m3u8'
                 logger.info(f'Using general case URL for server_key \'{server_key}\': {clean_m3u8_url}')
-
-            # Ensure the final URL ends with .m3u8, replacing any other extension
-            parsed_url = urlparse(clean_m3u8_url)
-            path = parsed_url.path
-            if not path.endswith('.m3u8'):
-                # Replace the extension with .m3u8
-                new_path = re.sub(r'\.\w+$', '.m3u8', path)
-                clean_m3u8_url = urlunparse(parsed_url._replace(path=new_path))
-                logger.info(f"Corrected stream URL to end with .m3u8: {clean_m3u8_url}")
             
             logger.info(f'Generated stream URL: {clean_m3u8_url}')
             logger.debug(f'Server key: {server_key}, Channel key: {channel_key}')
@@ -405,40 +396,6 @@ class DLHDExtractor(BaseExtractor):
                     'Referer': referer_raw,
                     'Origin': referer_raw
                 }
-
-            # Fetch the M3U8 to check for a JS key and extract it
-            try:
-                m3u8_resp = await self._make_request(clean_m3u8_url, headers=stream_headers)
-                m3u8_content = m3u8_resp.text
-                key_uri_match = re.search(r'#EXT-X-KEY:METHOD=AES-128,URI="([^"]+\.js)"', m3u8_content)
-                if key_uri_match:
-                    # Dynamically determine the domain for the key file
-                    key_file_url = key_uri_match.group(1)
-                    key_file_domain = urlparse(key_file_url).netloc
-                    logger.info(f"Key file domain detected: {key_file_domain}")
-
-                    js_key_url = key_uri_match.group(1)
-                    logger.info(f"Found JS key URL in M3U8: {js_key_url}")
-                    
-                    # Fetch the JS file
-                    js_resp = await self._make_request(js_key_url, headers=stream_headers)
-                    js_content = js_resp.text
-                    
-                    # Extract the key from the JS content
-                    key_match = re.search(r'var\s+key\s*=\s*\[([^\]]+)\]', js_content)
-                    if key_match:
-                        key_bytes_str = key_match.group(1).split(',')
-                        aes_key = bytes([int(b) for b in key_bytes_str]).hex()
-                        logger.info(f"Extracted AES key from JS: {aes_key}")
-                        return {
-                            "destination_url": clean_m3u8_url,
-                            "request_headers": stream_headers,
-                            "mediaflow_endpoint": self.mediaflow_endpoint,
-                            "key": aes_key,  # Pass the extracted key
-                        }
-            except Exception as m3u8_exc:
-                logger.warning(f"Could not pre-process M3U8 to find JS key: {m3u8_exc}")
-
             return {
                 "destination_url": clean_m3u8_url,
                 "request_headers": stream_headers,
