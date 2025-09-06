@@ -403,6 +403,11 @@ class DLHDExtractor(BaseExtractor):
                 m3u8_content = m3u8_resp.text
                 key_uri_match = re.search(r'#EXT-X-KEY:METHOD=AES-128,URI="([^"]+\.js)"', m3u8_content)
                 if key_uri_match:
+                    # Dynamically determine the domain for the key file
+                    key_file_url = key_uri_match.group(1)
+                    key_file_domain = urlparse(key_file_url).netloc
+                    logger.info(f"Key file domain detected: {key_file_domain}")
+
                     js_key_url = key_uri_match.group(1)
                     logger.info(f"Found JS key URL in M3U8: {js_key_url}")
                     
