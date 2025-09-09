@@ -148,32 +148,51 @@ class DLHDExtractor(BaseExtractor):
                             continue
                 return None
             
-            def extract_bundle_format(js):
-                """Extract parameters from new BUNDLE format"""
+            def extract_xjz_format(js):
+                """Extract parameters from the new XJZ base64-encoded JSON format."""
                 try:
-                    # Look for BUNDLE variable
+                    # Look for the XJZ variable assignment
+                    xjz_pattern = r'const\s+XJZ\s*=\s*["\']([^"\']+)["\']'
+                    match = re.search(xjz_pattern, js)
+                    if not match:
+                        return None
+                    xjz_b64 = match.group(1)
+                    import json
+                    # Decode the first base64 layer (JSON)
+                    xjz_json = base64.b64decode(xjz_b64).decode('utf-8')
+                    xjz_obj = json.loads(xjz_json)
+                    # Each value is also base64-encoded, decode each
+                    decoded = {}
+                    for k, v in xjz_obj.items():
+                        try:
+                            decoded[k] = base64.b64decode(v).decode('utf-8')
+                        except Exception as e:
+                            logger.warning(f"Failed to decode XJZ field {k}: {e}")
+                            decoded[k] = v
+                    return decoded
+                except Exception as e:
+                    logger.warning(f"Failed to extract XJZ format: {e}")
+                    return None
+
+            def extract_bundle_format(js):
+                """Extract parameters from new BUNDLE format (legacy fallback)."""
+                try:
                     bundle_patterns = [
                         r'const\s+BUNDLE\s*=\s*["\']([^"\']+)["\']',
                         r'var\s+BUNDLE\s*=\s*["\']([^"\']+)["\']',
                         r'let\s+BUNDLE\s*=\s*["\']([^"\']+)["\']'
                     ]
-                    
                     bundle_data = None
                     for pattern in bundle_patterns:
                         match = re.search(pattern, js)
                         if match:
                             bundle_data = match.group(1)
                             break
-                    
                     if not bundle_data:
                         return None
-                    
-                    # Decode the bundle (base64 -> JSON -> decode each field)
                     import json
                     bundle_json = base64.b64decode(bundle_data).decode('utf-8')
                     bundle_obj = json.loads(bundle_json)
-                    
-                    # Decode each base64 field
                     decoded_bundle = {}
                     for key, value in bundle_obj.items():
                         try:
@@ -181,9 +200,7 @@ class DLHDExtractor(BaseExtractor):
                         except Exception as e:
                             logger.warning(f"Failed to decode bundle field {key}: {e}")
                             decoded_bundle[key] = value
-                    
                     return decoded_bundle
-                    
                 except Exception as e:
                     logger.warning(f"Failed to extract bundle format: {e}")
                     return None
@@ -204,28 +221,39 @@ class DLHDExtractor(BaseExtractor):
                     channel_key = match.group(1)
                     break
             
-            # Try new bundle format first
-            bundle_data = extract_bundle_format(iframe_content)
-            if bundle_data:
-                logger.info("Using new BUNDLE format for parameter extraction")
-                auth_host = bundle_data.get('b_host')
-                auth_php = bundle_data.get('b_script')
-                auth_ts = bundle_data.get('b_ts')
-                auth_rnd = bundle_data.get('b_rnd')
-                auth_sig = bundle_data.get('b_sig')
-                logger.debug(f"Bundle data extracted: {bundle_data}")
+            # Try new XJZ format first
+            xjz_data = extract_xjz_format(iframe_content)
+            if xjz_data:
+                logger.info("Using new XJZ format for parameter extraction")
+                auth_host = xjz_data.get('b_host')
+                auth_php = xjz_data.get('b_script')
+                auth_ts = xjz_data.get('b_ts')
+                auth_rnd = xjz_data.get('b_rnd')
+                auth_sig = xjz_data.get('b_sig')
+                logger.debug(f"XJZ data extracted: {xjz_data}")
             else:
-                logger.info("Falling back to old format for parameter extraction")
-                # Fall back to old format
-                auth_ts = extract_var_old_format(iframe_content, 'c')
-                auth_rnd = extract_var_old_format(iframe_content, 'd')
-                auth_sig = extract_var_old_format(iframe_content, 'e')
-                auth_host = extract_var_old_format(iframe_content, 'a')
-                auth_php = extract_var_old_format(iframe_content, 'b')
-            
+                # Try bundle format (legacy fallback)
+                bundle_data = extract_bundle_format(iframe_content)
+                if bundle_data:
+                    logger.info("Using BUNDLE format for parameter extraction")
+                    auth_host = bundle_data.get('b_host')
+                    auth_php = bundle_data.get('b_script')
+                    auth_ts = bundle_data.get('b_ts')
+                    auth_rnd = bundle_data.get('b_rnd')
+                    auth_sig = bundle_data.get('b_sig')
+                    logger.debug(f"Bundle data extracted: {bundle_data}")
+                else:
+                    logger.info("Falling back to old format for parameter extraction")
+                    # Fall back to old format
+                    auth_ts = extract_var_old_format(iframe_content, 'c')
+                    auth_rnd = extract_var_old_format(iframe_content, 'd')
+                    auth_sig = extract_var_old_format(iframe_content, 'e')
+                    auth_host = extract_var_old_format(iframe_content, 'a')
+                    auth_php = extract_var_old_format(iframe_content, 'b')
+
             # Log what we found for debugging
             logger.debug(f"Extracted parameters: channel_key={channel_key}, auth_ts={auth_ts}, auth_rnd={auth_rnd}, auth_sig={auth_sig}, auth_host={auth_host}, auth_php={auth_php}")
-            
+
             # Check which parameters are missing
             missing_params = []
             if not channel_key:
@@ -240,7 +268,7 @@ class DLHDExtractor(BaseExtractor):
                 missing_params.append('auth_host (var a / b_host)')
             if not auth_php:
                 missing_params.append('auth_php (var b / b_script)')
-            
+
             if missing_params:
                 logger.error(f"Missing parameters: {', '.join(missing_params)}")
                 # Log a portion of the iframe content for debugging (first 2000 chars)
@@ -248,7 +276,21 @@ class DLHDExtractor(BaseExtractor):
                 raise ExtractorError(f"Error extracting parameters: missing {', '.join(missing_params)}")
             auth_sig = quote_plus(auth_sig)
             # 6. Richiesta auth
-            auth_url = f'{auth_host}{auth_php}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
+            # Se il sito fornisce ancora /a.php ma ora serve /auth.php, sostituisci
+            # Normalize and robustly replace any variant of a.php with /auth.php
+            if auth_php:
+                normalized_auth_php = auth_php.strip().lstrip('/')
+                if normalized_auth_php == 'a.php':
+                    logger.info("Sostituisco qualunque variante di a.php con /auth.php per compatibilità.")
+                    auth_php = '/auth.php'
+            # Unisci host e script senza doppio slash
+            if auth_host.endswith('/') and auth_php.startswith('/'):
+                auth_url = f'{auth_host[:-1]}{auth_php}'
+            elif not auth_host.endswith('/') and not auth_php.startswith('/'):
+                auth_url = f'{auth_host}/{auth_php}'
+            else:
+                auth_url = f'{auth_host}{auth_php}'
+            auth_url = f'{auth_url}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
             auth_resp = await self._make_request(auth_url, headers=daddylive_headers)
             # 7. Lookup server - Extract host parameter
             host = None
