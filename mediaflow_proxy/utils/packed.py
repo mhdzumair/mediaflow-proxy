@@ -14,6 +14,7 @@
 
 import re
 from bs4 import BeautifulSoup, SoupStrainer
+from urllib.parse import urljoin, urlparse
 import logging
 
 
@@ -142,7 +143,7 @@ class UnpackingError(Exception):
 
 
 
-async def eval_solver(self, url: str, headers, pattern: str) -> str:
+async def eval_solver(self, url: str, headers: dict[str, str] | None, patterns: list[str]) -> str:
     try:
         response = await self._make_request(url, headers=headers)
         soup = BeautifulSoup(response.text, "lxml",parse_only=SoupStrainer("script"))
@@ -150,10 +151,15 @@ async def eval_solver(self, url: str, headers, pattern: str) -> str:
         for i in script_all:
             if detect(i.text):
                 unpacked_code = unpack(i.text)
-                match = re.search(pattern, unpacked_code)
-                if match:
-                    m3u8_url = match.group(1)
-                    return m3u8_url
+                for pattern in patterns:
+                    match = re.search(pattern, unpacked_code)
+                    if match:
+                        extracted_url = match.group(1)
+                        if not urlparse(extracted_url).scheme:
+                            extracted_url = urljoin(url, extracted_url)
+
+                        return extracted_url
+        raise UnpackingError("No p.a.c.k.e.d JS found or no pattern matched.")
     except Exception as e:
-        logger.error("Eval solver error\n",e)
-        raise Exception("Error in eval_solver")
+        logger.exception("Eval solver error for %s", url)
+        raise UnpackingError("Error in eval_solver") from e
