@@ -1,4 +1,4 @@
-﻿# MediaFlow Proxy
+# MediaFlow Proxy
 
 <div style="text-align: center;">
   <img src="https://cdn.githubraw.com/mhdzumair/mediaflow-proxy/main/mediaflow_proxy/static/logo.png" alt="MediaFlow Proxy Logo" width="200" style="border-radius: 15px;">
@@ -720,7 +720,7 @@ Ideal for users who want a reliable, plug-and-play solution without the technica
 4. Go to the "Settings" tab and create a new secret with the name `API_PASSWORD` and set the value to your desired password.
 5. Go to the "Files" tab and create a new file with the name `Dockerfile` and paste the following content. After that, replace `YourUsername/YourRepoName` in the Dockerfile with your username and the name of your fork. Finally, click on "Commit" to save the changes. Remember, your space might get banned if instead of using your fork, you use the main repo.
     ```dockerfile
-    FROM python:3.10-slim-bookworm
+    FROM python:3.11-slim-bullseye
 
     WORKDIR /app
 
@@ -733,7 +733,7 @@ Ideal for users who want a reliable, plug-and-play solution without the technica
     EXPOSE 7860
     CMD ["uvicorn", "run:main_app", "--host", "0.0.0.0", "--port", "7860", "--workers", "4"]
     ```
-6. Wait until the space gets built and deployed.
+6. Wait until the space gets built and deployed. Don't panic if you see "Your app is running" instead of the usual mediaflowproxy page. You can still use it as usual. 
 7. If the space is deployed successfully, you can click on the three dots in the top right corner and click on "Embed this space" and copy the "Direct URL".
 8. To update your proxy to the newest release, go to your GitHub fork and click on Sync. After that, hop on your Hugging Face Space -> Settings and click on Factory Rebuild.
 9. Use the above URL and API password on support addons like MediaFusion, MammaMia, Jackettio, etc.
