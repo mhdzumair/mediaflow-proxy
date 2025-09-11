@@ -308,7 +308,10 @@ class DLHDExtractor(BaseExtractor):
                 if matches:
                     host = matches[0]
                     logger.debug(f"Found host with pattern '{pattern}': {host}")
-                    break
+
+                    # if this is a bad match, continue with patterns
+                    if(host != ""):
+                        break
             
             if not host:
                 logger.error("Failed to extract host from iframe content")
