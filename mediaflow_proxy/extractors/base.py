@@ -60,7 +60,6 @@ class BaseExtractor(ABC):
         # Domains that should use the custom CA client (adjust as needed)
         self._custom_ca_domains = (
             "newkso.ru",
-            "testdrivenetwork.click",
         )
 
     async def _make_request(
