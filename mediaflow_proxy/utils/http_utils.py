@@ -602,7 +602,6 @@ class EnhancedStreamingResponse(Response):
                 # Add Transfer-Encoding: chunked
                 headers.append((b"transfer-encoding", b"chunked"))
                 logger.debug("Switched from content-length to chunked transfer-encoding for streaming")
-                    break
 
             await send(
                 {
