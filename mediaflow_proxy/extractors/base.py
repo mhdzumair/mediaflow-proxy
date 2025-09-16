@@ -3,7 +3,7 @@ from typing import Dict, Optional, Any
 
 import httpx
 import ssl
-import certifi  # opzionale: per partire dal bundle Mozilla
+import certifi  # optional: use Mozilla CA bundle if preferred
 from urllib.parse import urlparse
 
 from mediaflow_proxy.configs import settings
@@ -18,7 +18,7 @@ class BaseExtractor(ABC):
     """Base class for all URL extractors."""
 
     def __init__(self, request_headers: dict):
-        # App base headers
+        # Base headers for the application
         self.base_headers = {
             "user-agent": settings.user_agent,
         }
@@ -26,39 +26,41 @@ class BaseExtractor(ABC):
         self.base_headers.update(request_headers)
 
         # SSL contexts:
-        # - default_ctx: use system or certifi CA bundle (secure verification)
-        # - custom_ctx: add extra CA/intermediates required by specific domains
+        # - default_ctx: uses system or certifi trust store (secure verification)
+        # - custom_ctx: load extra root/intermediate CAs for specific domains
         #
-        # Option A: system trust store (recommended if container has updated ca-certificates)
+        # Option A: system trust store (recommended if the container has updated ca-certificates)
         default_ctx = ssl.create_default_context()
-        # Option B: start from certifi bundle (uncomment if preferred)
+        # Option B: start from certifi bundle (uncomment if you prefer Mozilla bundle)
         # default_ctx = ssl.create_default_context(cafile=certifi.where())
 
-        # Custom context for domains with non-standard chains or enterprise interception
+        # Custom context for domains behind TLS inspection or with non-standard chains
         custom_ctx = ssl.create_default_context()
-        # If you have a PEM with additional root/intermediate CAs, mount and load it here:
+        # If you have a PEM with additional CAs, mount it and enable the line below:
         # custom_ctx.load_verify_locations(cafile="/app/certs/ca-bundle.pem")
 
+        # Granular timeouts to better tolerate slow endpoints and control TTFB
+        default_timeout = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=30.0)
+
         # Persistent HTTPX clients:
-        # - No per-request verify: certificate verification is configured at client level
-        # - Automatic redirects enabled to follow 301/302 (e.g., daddylive.sx -> thedaddy.top)
-        # - Reasonable timeout; add more parameters if needed (http2, proxies, etc.)
+        # - Certificate verification configured at client level (verify=SSLContext)
+        # - Automatic redirects enabled for 3xx
         self._default_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(20.0),
+            timeout=default_timeout,
             follow_redirects=True,
-            verify=default_ctx,  # secure verification using system/certifi store
+            verify=default_ctx,
         )
 
-        # Client with custom CA bundle for specific domains (instead of verify=False)
         self._custom_ca_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(20.0),
+            timeout=default_timeout,
             follow_redirects=True,
-            verify=custom_ctx,  # secure verification with additional CA(s)
+            verify=custom_ctx,
         )
 
-        # Domains requiring the custom CA context (adjust as needed)
+        # Domains that should use the custom CA client (adjust as needed)
         self._custom_ca_domains = (
             "newkso.ru",
+            "testdrivenetwork.click",
         )
 
     async def _make_request(
@@ -68,24 +70,26 @@ class BaseExtractor(ABC):
         try:
             netloc = urlparse(url).netloc
 
-            # Select client based on domain; use custom CA client for specific domains
+            # Choose client per-domain; use custom CA for listed domains
             use_custom = any(d in netloc for d in self._custom_ca_domains)
-            client = self._custom_ca_client if use_custom else self._default_client  # [uses SSLContext verify]
+            client = self._custom_ca_client if use_custom else self._default_client
 
-            # Build effective headers
+            # Compose effective headers
             request_headers = self.base_headers.copy()
             request_headers.update(headers or {})
 
-            # Remove 'verify' from kwargs to avoid TypeError on async calls; verify is configured on the client
+            # Allow per-request timeout override; verification stays at client level
+            req_timeout = kwargs.pop("timeout", None)
             kwargs.pop("verify", None)
 
             response = await client.request(
                 method,
                 url,
                 headers=request_headers,
+                timeout=req_timeout,
                 **kwargs,
             )
-            # raise_for_status raises for 4xx/5xx; 3xx are followed due to follow_redirects=True
+            # Raise for 4xx/5xx; 3xx are already followed thanks to follow_redirects=True
             response.raise_for_status()
             return response
         except httpx.HTTPError as e:
@@ -94,7 +98,7 @@ class BaseExtractor(ABC):
             raise ExtractorError(f"Request failed for URL {url}: {str(e)}")
 
     async def aclose(self):
-        """Close clients on app shutdown."""
+        """Close HTTP clients on application shutdown."""
         await self._default_client.aclose()
         await self._custom_ca_client.aclose()
 
@@ -102,3 +106,42 @@ class BaseExtractor(ABC):
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         """Extract final URL and required headers."""
         pass
+
+    async def _request_with_retry(
+        self,
+        url: str,
+        method: str = "GET",
+        headers: Optional[Dict] = None,
+        attempts: int = 3,
+        base_delay: float = 0.5,
+        timeout: Optional[httpx.Timeout] = None,
+        **kwargs,
+    ) -> httpx.Response:
+        """
+        Perform a request with simple exponential backoff on ReadTimeout/ConnectTimeout.
+        Use the 'timeout' parameter to set a higher read timeout for slow endpoints.
+        """
+        import asyncio
+        from httpx import ReadTimeout, ConnectTimeout
+
+        delay = base_delay
+        last_exc: Optional[Exception] = None
+
+        for _ in range(attempts):
+            try:
+                return await self._make_request(
+                    url,
+                    method=method,
+                    headers=headers,
+                    timeout=timeout,
+                    **kwargs,
+                )
+            except ExtractorError as e:
+                msg = str(e)
+                if "ReadTimeout" in msg or "ConnectTimeout" in msg:
+                    last_exc = e
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                    continue
+                raise
+        raise last_exc or ExtractorError(f"Retries exhausted for {url}")
