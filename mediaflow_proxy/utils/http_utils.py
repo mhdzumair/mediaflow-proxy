@@ -59,7 +59,7 @@ DEFAULT_SSL_CONTEXT = build_default_ssl_context()
 CUSTOM_SSL_CONTEXT = build_custom_ssl_context()
 
 # Domains that require the custom CA context (adjust as needed)
-CUSTOM_CA_DOMAINS = ("newkso.ru", "testdrivenetwork.click")
+CUSTOM_CA_DOMAINS = ("newkso.ru")
 
 
 def create_httpx_client(
