@@ -9,6 +9,7 @@ from mediaflow_proxy.extractors.factory import ExtractorFactory
 from mediaflow_proxy.schemas import ExtractorURLParams
 from mediaflow_proxy.utils.cache_utils import get_cached_extractor_result, set_cache_extractor_result
 from mediaflow_proxy.utils.http_utils import (
+    DownloadError,
     encode_mediaflow_proxy_url,
     get_original_scheme,
     ProxyRequestHeaders,
@@ -58,6 +59,9 @@ async def extract_url(
 
         return response
 
+    except DownloadError as e:
+        logger.error(f"Extraction failed: {str(e)}")
+        raise HTTPException(status_code=e.status_code, detail=str(e))
     except ExtractorError as e:
         logger.error(f"Extraction failed: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
