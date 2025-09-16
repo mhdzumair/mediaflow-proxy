@@ -58,8 +58,33 @@ def build_custom_ssl_context() -> ssl.SSLContext:
 DEFAULT_SSL_CONTEXT = build_default_ssl_context()
 CUSTOM_SSL_CONTEXT = build_custom_ssl_context()
 
-# Domains that require the custom CA context (adjust as needed)
-CUSTOM_CA_DOMAINS = ("newkso.ru")
+# Domains requiring the custom CA context (tuple even if single item)
+CUSTOM_CA_DOMAINS: tuple[str, ...] = ("newkso.ru", "testdrivenetwork.click")
+
+
+def _extract_host_from_url(for_url: str | None) -> str | None:
+    if not for_url:
+        return None
+    try:
+        netloc = parse.urlparse(for_url).netloc
+        # strip optional port
+        return netloc.rsplit(":", 1)
+    except Exception:
+        return None
+
+
+def _needs_custom_ca(for_url: str | None, explicit_host: str | None = None) -> bool:
+    """
+    Strict domain match: true if host is exactly a domain in CUSTOM_CA_DOMAINS
+    or is a subdomain (host endswith '.' + domain).
+    """
+    host = explicit_host or _extract_host_from_url(for_url)
+    if not host:
+        return False
+    for domain in CUSTOM_CA_DOMAINS:
+        if host == domain or host.endswith("." + domain):
+            return True
+    return False
 
 
 def create_httpx_client(
@@ -70,37 +95,29 @@ def create_httpx_client(
 ) -> httpx.AsyncClient:
     """
     Create an HTTPX AsyncClient with proper TLS verification and optional domain-based context selection.
-
-    Args:
-        follow_redirects (bool): Whether to follow 3xx redirects automatically.
-        ssl_context (ssl.SSLContext | None): Explicit SSLContext to use. If None, select based on 'for_url'.
-        for_url (str | None): If provided, select context based on the URL's domain against CUSTOM_CA_DOMAINS.
-        **kwargs: Additional AsyncClient keyword arguments.
-
-    Returns:
-        httpx.AsyncClient: Configured client with verify=SSLContext.
+    If mounts contain 'all://', ensure HTTPS traffic uses a transport with verify=selected_ctx by
+    mounting an explicit 'https://' transport that carries the chosen SSLContext.
     """
     mounts = settings.transport_config.get_mounts()
     kwargs.setdefault("timeout", settings.transport_config.timeout)
 
-    selected_ctx = ssl_context
-    if selected_ctx is None:
-        if for_url:
-            try:
-                netloc = parse.urlparse(for_url).netloc
-                if any(d in netloc for d in CUSTOM_CA_DOMAINS):
-                    selected_ctx = CUSTOM_SSL_CONTEXT
-                else:
-                    selected_ctx = DEFAULT_SSL_CONTEXT
-            except Exception:
-                selected_ctx = DEFAULT_SSL_CONTEXT
-        else:
-            selected_ctx = DEFAULT_SSL_CONTEXT
+    # Choose SSLContext (default/custom or explicit)
+    if ssl_context is None:
+        selected_ctx = CUSTOM_SSL_CONTEXT if _needs_custom_ca(for_url) else DEFAULT_SSL_CONTEXT
+    else:
+        selected_ctx = ssl_context
+
+    # If an all:// mount exists, client-level verify may be ignored.
+    # Provide an explicit HTTPS transport that enforces verify=selected_ctx.
+    if mounts and "all://" in mounts and selected_ctx is not None:
+        # If you keep transport options in mounts['all://'], replicate relevant params as needed.
+        https_transport = httpx.AsyncHTTPTransport(verify=selected_ctx)
+        mounts["https://"] = https_transport
 
     client = httpx.AsyncClient(
         mounts=mounts,
         follow_redirects=follow_redirects,
-        verify=selected_ctx,  # TLS verification configured at client level
+        verify=selected_ctx,  # used when no https:// mount overrides it
         **kwargs
     )
     return client
@@ -114,20 +131,6 @@ def create_httpx_client(
 async def fetch_with_retry(client, method, url, headers, follow_redirects=True, **kwargs):
     """
     Fetch a URL with retry logic.
-
-    Args:
-        client (httpx.AsyncClient): HTTP client to use for the request.
-        method (str): HTTP method (e.g., GET, POST).
-        url (str): Target URL.
-        headers (dict): Request headers.
-        follow_redirects (bool): Whether to follow redirects.
-        **kwargs: Additional request arguments.
-
-    Returns:
-        httpx.Response: HTTP response.
-
-    Raises:
-        DownloadError: If the request fails after retries.
     """
     try:
         response = await client.request(method, url, headers=headers, follow_redirects=follow_redirects, **kwargs)
@@ -178,7 +181,7 @@ class Streamer:
         """
         try:
             request = self.client.build_request("GET", url, headers=headers)
-            # Note: TLS verification must be configured at client creation via verify=SSLContext
+            # TLS verification must be configured at client creation via verify=SSLContext
             self.response = await self.client.send(request, stream=True, follow_redirects=True)
             self.response.raise_for_status()
         except httpx.TimeoutException:
@@ -282,13 +285,6 @@ class Streamer:
     async def get_text(self, url: str, headers: dict):
         """
         Send a GET request and return the response text.
-
-        Args:
-            url (str): Target URL.
-            headers (dict): Request headers.
-
-        Returns:
-            str: Response text.
         """
         try:
             self.response = await fetch_with_retry(self.client, "GET", url, headers)
@@ -310,16 +306,6 @@ class Streamer:
 async def download_file_with_retry(url: str, headers: dict):
     """
     Download a file with retry logic.
-
-    Args:
-        url (str): File URL.
-        headers (dict): Request headers.
-
-    Returns:
-        bytes: Downloaded file content.
-
-    Raises:
-        DownloadError: If the download fails after retries.
     """
     # Ensure client uses the proper SSLContext based on URL domain
     async with create_httpx_client(for_url=url) as client:
@@ -336,18 +322,6 @@ async def download_file_with_retry(url: str, headers: dict):
 async def request_with_retry(method: str, url: str, headers: dict, **kwargs) -> httpx.Response:
     """
     Send an HTTP request with retry logic.
-
-    Args:
-        method (str): HTTP method.
-        url (str): Target URL.
-        headers (dict): Request headers.
-        **kwargs: Additional request arguments.
-
-    Returns:
-        httpx.Response: HTTP response.
-
-    Raises:
-        DownloadError: If the request fails after retries.
     """
     # Ensure client uses the proper SSLContext based on URL domain
     async with create_httpx_client(for_url=url) as client:
@@ -373,21 +347,6 @@ def encode_mediaflow_proxy_url(
 ) -> str:
     """
     Encode & optionally encrypt a MediaFlow proxy URL with query parameters and headers.
-
-    Args:
-        mediaflow_proxy_url (str): Base MediaFlow proxy URL.
-        endpoint (str, optional): Endpoint to append to base URL.
-        destination_url (str, optional): Destination URL to include as query parameter.
-        query_params (dict, optional): Additional query parameters.
-        request_headers (dict, optional): Request headers to include as query parameters.
-        response_headers (dict, optional): Response headers to include as query parameters.
-        encryption_handler (EncryptionHandler, optional): Encryption handler.
-        expiration (int, optional): Expiration for the encrypted token.
-        ip (str, optional): Public IP to include in encryption context.
-        filename (str, optional): Filename preserved for media players (e.g., Infuse).
-
-    Returns:
-        str: Encoded proxy URL.
     """
     # Prepare query parameters
     query_params = query_params or {}
@@ -419,11 +378,10 @@ def encode_mediaflow_proxy_url(
         encrypted_token = encryption_handler.encrypt_data(query_params, expiration, ip)
 
         parsed_url = parse.urlparse(base_url)
-        new_path = f"/_token_{encrypted_token}{parsed_url.path}"
+        new_path = f"/_token_{encrypted_token}{parsed_url.path}"  # ensure it starts with '/'
 
         url_parts = list(parsed_url)
-        url_parts[3] = new_path  # replace path
-
+        url_parts[3] = new_path  # write into path slot (index 2), not params
         url = parse.urlunparse(url_parts)
 
         if filename:
@@ -451,15 +409,6 @@ def encode_stremio_proxy_url(
     Encode a Stremio proxy URL with destination URL and headers.
 
     Format: http://127.0.0.1:11470/proxy/d=<encoded_origin>&h=<headers>&r=<response_headers>/<path><query>
-
-    Args:
-        stremio_proxy_url (str): Base Stremio proxy URL.
-        destination_url (str): Destination URL to proxy.
-        request_headers (dict, optional): Request headers to include.
-        response_headers (dict, optional): Response headers to include.
-
-    Returns:
-        str: Encoded Stremio proxy URL.
     """
     parsed_dest = parse.urlparse(destination_url)
     dest_origin = f"{parsed_dest.scheme}://{parsed_dest.netloc}"
@@ -500,12 +449,6 @@ def encode_stremio_proxy_url(
 def get_original_scheme(request: Request) -> str:
     """
     Determine the original scheme (http or https) of the incoming request.
-
-    Args:
-        request (Request): Incoming HTTP request.
-
-    Returns:
-        str: 'http' or 'https'
     """
     forwarded_proto = request.headers.get("X-Forwarded-Proto")
     if forwarded_proto:
@@ -533,12 +476,6 @@ class ProxyRequestHeaders:
 def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
     """
     Extract proxy headers from request headers and query parameters.
-
-    Args:
-        request (Request): Incoming HTTP request.
-
-    Returns:
-        ProxyRequestHeaders: Request and response headers extracted for proxying.
     """
     request_headers = {k: v for k, v in request.headers.items() if k in SUPPORTED_REQUEST_HEADERS}
     request_headers.update({k[2:].lower(): v for k, v in request.query_params.items() if k.startswith("h_")})
@@ -586,23 +523,20 @@ class EnhancedStreamingResponse(Response):
         Stream the response body in chunks and handle protocol edge cases gracefully.
         """
         try:
-            # Start from current headers
+            # Current headers (list of (name, value) as bytes)
             headers = list(self.raw_headers)
-            
-            # Prefer chunked transfer over a static Content-Length for streaming
-            cl_index = None
-            for i, (name, value) in enumerate(headers):
-                if name.lower() == b"content-length":
-                    cl_index = i
-                    break
-            
-            if cl_index is not None:
-                # Remove all Content-Length headers (case-insensitive)
+
+            # Prefer chunked transfer over a static Content-Length to avoid protocol errors
+            # if the upstream connection closes prematurely.
+            cl_present = any(n.lower() == b"content-length" for (n, v) in headers)
+            if cl_present:
+                # Remove all Content-Length headers using the header-name element
                 headers = [(n, v) for (n, v) in headers if n.lower() != b"content-length"]
                 # Add Transfer-Encoding: chunked
                 headers.append((b"transfer-encoding", b"chunked"))
                 logger.debug("Switched from content-length to chunked transfer-encoding for streaming")
 
+            # Start the response
             await send(
                 {
                     "type": "http.response.start",
