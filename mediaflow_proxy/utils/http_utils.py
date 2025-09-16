@@ -588,14 +588,20 @@ class EnhancedStreamingResponse(Response):
         try:
             # Start from current headers
             headers = list(self.raw_headers)
-
-            # For streaming, prefer chunked transfer over a static content-length
-            # to avoid protocol errors if upstream closes prematurely.
-            for i, (name, _) in enumerate(headers):
+            
+            # Prefer chunked transfer over a static Content-Length for streaming
+            cl_index = None
+            for i, (name, value) in enumerate(headers):
                 if name.lower() == b"content-length":
-                    headers[i] = (b"transfer-encoding", b"chunked")
-                    headers = [h for h in headers if h.lower() != b"content-length"]
-                    logger.debug("Switched from content-length to chunked transfer-encoding for streaming")
+                    cl_index = i
+                    break
+            
+            if cl_index is not None:
+                # Remove all Content-Length headers (case-insensitive)
+                headers = [(n, v) for (n, v) in headers if n.lower() != b"content-length"]
+                # Add Transfer-Encoding: chunked
+                headers.append((b"transfer-encoding", b"chunked"))
+                logger.debug("Switched from content-length to chunked transfer-encoding for streaming")
                     break
 
             await send(
