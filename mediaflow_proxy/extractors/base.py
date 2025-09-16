@@ -4,7 +4,7 @@ from typing import Dict, Optional, Any
 import httpx
 
 from mediaflow_proxy.configs import settings
-from mediaflow_proxy.utils.http_utils import create_httpx_client, DownloadError
+from mediaflow_proxy.utils.http_utils import DownloadError, request_with_retry
 
 
 class ExtractorError(Exception):
@@ -27,20 +27,20 @@ class BaseExtractor(ABC):
         self, url: str, method: str = "GET", headers: Optional[Dict] = None, **kwargs
     ) -> httpx.Response:
         """Make HTTP request with error handling."""
+        request_headers = self.base_headers.copy()
+        request_headers.update(headers or {})
         try:
-            async with create_httpx_client() as client:
-                request_headers = self.base_headers.copy()
-                request_headers.update(headers or {})
-                response = await client.request(
-                    method,
-                    url,
-                    headers=request_headers,
-                    **kwargs,
-                )
-                response.raise_for_status()
-                return response
+            response = await request_with_retry(method, url, request_headers, **kwargs)
+            return response
+        except DownloadError as e:
+            # Normalize retry-layer errors into extractor domain
+            raise ExtractorError(f"Request failed for URL {url}: {e.message}")
+        except httpx.TimeoutException as e:
+            # Fallback in case timeout bubbles up directly
+            raise ExtractorError(f"Timeout while requesting {url}: {str(e)}")
         except httpx.HTTPStatusError as e:
-            raise DownloadError(e.response.status_code, f"HTTP error {e.response.status_code} while requesting {url}")
+            # Normalize HTTP errors to extractor domain
+            raise ExtractorError(f"HTTP error {e.response.status_code} while requesting {url}")
         except Exception as e:
             raise ExtractorError(f"Request failed for URL {url}: {str(e)}")
 

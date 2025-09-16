@@ -1,5 +1,6 @@
 import logging
 from typing import Any, Dict, Optional
+import httpx
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
 logger = logging.getLogger(__name__)
@@ -86,7 +87,8 @@ class VavooExtractor(BaseExtractor):
                 "https://www.vavoo.tv/api/app/ping",
                 method="POST",
                 json=data,
-                headers=headers
+                headers=headers,
+                timeout=httpx.Timeout(20.0),
             )
             result = resp.json()
             addon_sig = result.get("addonSig")
@@ -148,7 +150,8 @@ class VavooExtractor(BaseExtractor):
                 "https://vavoo.to/mediahubmx-resolve.json",
                 method="POST",
                 json=data,
-                headers=headers
+                headers=headers,
+                timeout=httpx.Timeout(60.0),
             )
             result = resp.json()
             logger.info(f"Vavoo API response: {result}")
