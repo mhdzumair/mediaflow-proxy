@@ -91,10 +91,18 @@ class BaseExtractor(ABC):
             # Raise for 4xx/5xx; 3xx are already followed thanks to follow_redirects=True
             response.raise_for_status()
             return response
+
+        except (httpx.ReadTimeout, httpx.ConnectTimeout) as e:
+            # Let caller decide on retry based on the chained cause
+            raise ExtractorError(f"Timeout while requesting {url}") from e
+        except httpx.HTTPStatusError as e:
+            raise ExtractorError(
+                f"HTTP {e.response.status_code} for {e.request.method} {e.request.url}"
+            ) from e
         except httpx.HTTPError as e:
-            raise ExtractorError(f"HTTP request failed for URL {url}: {str(e)}")
+            raise ExtractorError(f"HTTP error for {url}") from e
         except Exception as e:
-            raise ExtractorError(f"Request failed for URL {url}: {str(e)}")
+            raise ExtractorError(f"Unexpected error for {url}") from e
 
     async def aclose(self):
         """Close HTTP clients on application shutdown."""
@@ -136,8 +144,8 @@ class BaseExtractor(ABC):
                     **kwargs,
                 )
             except ExtractorError as e:
-                msg = str(e)
-                if "ReadTimeout" in msg or "ConnectTimeout" in msg:
+                cause = getattr(e, "__cause__", None)
+                if isinstance(cause, (ReadTimeout, ConnectTimeout)):
                     last_exc = e
                     await asyncio.sleep(delay)
                     delay *= 2
