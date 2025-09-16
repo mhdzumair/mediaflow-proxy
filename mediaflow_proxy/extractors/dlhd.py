@@ -53,15 +53,15 @@ class DLHDExtractor(BaseExtractor):
         
         return headers
 
-    # dentro la classe DLHDExtractor
+    # inside the DLHDExtractor class
     async def _make_request(self, url: str, method: str = "GET", headers: dict = None, **kwargs):
-        # aggiungi SOLO gli header specifici (Referer/Origin) per newkso.ru
+        # add ONLY the specific headers (Referer/Origin) for newkso.ru
         final_headers = self._get_headers_for_url(url, headers or {})
-        # delega tutto (client, verify, redirect) al BaseExtractor
+        # delegate everything (client, verify, redirect) to the BaseExtractor
         return await super()._make_request(url, method, final_headers, **kwargs)
     
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
-        """Extract DLHD stream URL and required headers (logica tvproxy adattata async, con fallback su endpoint alternativi)."""
+        """Extract DLHD stream URL and required headers (adapted tvproxy logic async, with fallback on alternative endpoints)."""
         from urllib.parse import urlparse, quote_plus
 
         async def get_daddylive_base_url():
@@ -105,9 +105,9 @@ class DLHDExtractor(BaseExtractor):
                 'Referer': baseurl,
                 'Origin': daddy_origin
             }
-            # 1. Richiesta alla pagina stream/cast/player/watch
+            # 1. Request to the stream/cast/player/watch page
             resp1 = await self._make_request(stream_url, headers=daddylive_headers)
-            # 2. Estrai link Player 2
+            # 2. Extract Player 2 link
             iframes = re.findall(r'<a[^>]*href="([^"]+)"[^>]*>\s*<button[^>]*>\s*Player\s*2\s*</button>', resp1.text)
             if not iframes:
                 raise ExtractorError("No Player 2 link found")
@@ -116,9 +116,9 @@ class DLHDExtractor(BaseExtractor):
             url2 = url2.replace('//cast', '/cast')
             daddylive_headers['Referer'] = url2
             daddylive_headers['Origin'] = url2
-            # 3. Richiesta alla pagina Player 2
+            # 3. Request to the Player 2 page
             resp2 = await self._make_request(url2, headers=daddylive_headers)
-            # 4. Estrai iframe
+            # 4. Extract iframe
             iframes2 = re.findall(r'iframe src="([^"]*)', resp2.text)
             if not iframes2:
                 raise ExtractorError("No iframe found in Player 2 page")
@@ -127,7 +127,7 @@ class DLHDExtractor(BaseExtractor):
             self._iframe_context = iframe_url
             resp3 = await self._make_request(iframe_url, headers=daddylive_headers)
             iframe_content = resp3.text
-            # 5. Estrai parametri auth (robusto) - Handle both old and new formats
+            # 5. Extract auth parameters (robust) - Handle both old and new formats
             def extract_var_old_format(js, name):
                 # Try multiple patterns for variable extraction (old format)
                 patterns = [
@@ -273,15 +273,15 @@ class DLHDExtractor(BaseExtractor):
                 logger.debug(f"Iframe content sample: {iframe_content[:2000]}")
                 raise ExtractorError(f"Error extracting parameters: missing {', '.join(missing_params)}")
             auth_sig = quote_plus(auth_sig)
-            # 6. Richiesta auth
-            # Se il sito fornisce ancora /a.php ma ora serve /auth.php, sostituisci
+            # 6. Auth request
+            # If the site still provides /a.php but now requires /auth.php, replace it
             # Normalize and robustly replace any variant of a.php with /auth.php
             if auth_php:
                 normalized_auth_php = auth_php.strip().lstrip('/')
                 if normalized_auth_php == 'a.php':
-                    logger.info("Sostituisco qualunque variante di a.php con /auth.php per compatibilità.")
+                    logger.info("Replacing any variant of a.php with /auth.php for compatibility.")
                     auth_php = '/auth.php'
-            # Unisci host e script senza doppio slash
+            # Join host and script without double slash
             if auth_host.endswith('/') and auth_php.startswith('/'):
                 auth_url = f'{auth_host[:-1]}{auth_php}'
             elif not auth_host.endswith('/') and not auth_php.startswith('/'):
