@@ -53,15 +53,13 @@ class DLHDExtractor(BaseExtractor):
         
         return headers
 
+    # dentro la classe DLHDExtractor
     async def _make_request(self, url: str, method: str = "GET", headers: dict = None, **kwargs):
-        """Override _make_request to apply newkso.ru specific headers when needed."""
-        request_headers = headers or {}
-        
-        # Apply newkso.ru specific headers if the URL contains newkso.ru
-        final_headers = self._get_headers_for_url(url, request_headers)
-        
+        # aggiungi SOLO gli header specifici (Referer/Origin) per newkso.ru
+        final_headers = self._get_headers_for_url(url, headers or {})
+        # delega tutto (client, verify, redirect) al BaseExtractor
         return await super()._make_request(url, method, final_headers, **kwargs)
-
+    
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         """Extract DLHD stream URL and required headers (logica tvproxy adattata async, con fallback su endpoint alternativi)."""
         from urllib.parse import urlparse, quote_plus
