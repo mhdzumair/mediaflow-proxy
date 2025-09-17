@@ -40,6 +40,9 @@ def sanitize_url(url: str) -> str:
     logger = logging.getLogger(__name__)
     original_url = url
     
+    # Strip leading/trailing whitespace which can cause protocol errors
+    url = url.strip()
+    
     # First, try to process potential base64 encoded URLs
     url = process_potential_base64_url(url)
     
