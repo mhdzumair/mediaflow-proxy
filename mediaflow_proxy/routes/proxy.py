@@ -192,6 +192,31 @@ async def hls_manifest_proxy(
     return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
 
 
+@proxy_router.get("/hls/key")
+async def hls_key_proxy(
+    request: Request,
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+    key_url: str = Query(..., description="URL of the HLS key"),
+):
+    """
+    Proxy HLS encryption keys. This is a simple stream proxy.
+
+    Args:
+        request (Request): The incoming HTTP request.
+        key_url (str): URL of the HLS key to proxy.
+        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
+
+    Returns:
+        Response: The HTTP response with the key content.
+    """
+    # Sanitize key URL to fix common encoding issues
+    key_url = sanitize_url(key_url)
+    
+    # Keys are small, so we can use a simple stream request.
+    # No pre-buffering is needed for keys.
+    return await handle_stream_request("GET", key_url, proxy_headers)
+
+
 @proxy_router.get("/hls/segment")
 async def hls_segment_proxy(
     request: Request,
