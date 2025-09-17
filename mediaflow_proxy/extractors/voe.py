@@ -38,6 +38,8 @@ class VoeExtractor(BaseExtractor):
         data = self.voe_decode(code_and_script_match.group(1), luts_match.group(1))
 
         final_url = data.get('source')
+        if not final_url:
+            raise ExtractorError("VOE: failed to extract video URL")
 
         self.base_headers["referer"] = url
         return {
