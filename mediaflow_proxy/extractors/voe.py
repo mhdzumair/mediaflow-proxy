@@ -11,13 +11,16 @@ class VoeExtractor(BaseExtractor):
         super().__init__(*args, **kwargs)
         self.mediaflow_endpoint = "hls_manifest_proxy"
 
-    async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
+    async def extract(self, url: str, redirected: bool = False, **kwargs) -> Dict[str, Any]:
         response = await self._make_request(url)
 
         # See https://github.com/Gujal00/ResolveURL/blob/master/script.module.resolveurl/lib/resolveurl/plugins/voesx.py
         redirect_pattern = r'''window\.location\.href\s*=\s*'([^']+)'''
         redirect_match = re.search(redirect_pattern, response.text, re.DOTALL)
         if redirect_match:
+            if redirected:
+                raise ExtractorError("VOE: too many redirects")
+
             return await self.extract(redirect_match.group(1))
 
         code_and_script_pattern = r'json">\["([^"]+)"]</script>\s*<script\s*src="([^"]+)'
