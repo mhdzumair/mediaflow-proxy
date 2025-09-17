@@ -32,15 +32,14 @@ class BaseExtractor(ABC):
         try:
             response = await request_with_retry(method, url, request_headers, **kwargs)
             return response
-        except DownloadError as e:
-            # Normalize retry-layer errors into extractor domain
-            raise ExtractorError(f"Request failed for URL {url}: {e.message}")
+        except DownloadError:
+            # Let DownloadError bubble up from the retry layer
+            raise
         except httpx.TimeoutException as e:
             # Fallback in case timeout bubbles up directly
             raise ExtractorError(f"Timeout while requesting {url}: {str(e)}")
         except httpx.HTTPStatusError as e:
-            # Normalize HTTP errors to extractor domain
-            raise ExtractorError(f"HTTP error {e.response.status_code} while requesting {url}")
+            raise DownloadError(e.response.status_code, f"HTTP error {e.response.status_code} while requesting {url}")
         except Exception as e:
             raise ExtractorError(f"Request failed for URL {url}: {str(e)}")
 
