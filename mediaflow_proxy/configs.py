@@ -46,14 +46,6 @@ class TransportConfig(BaseSettings):
             verify=False, proxy=self.proxy_url if self.all_proxy else None
         )
 
-        # Hardcoded configuration for newkso.ru - SSL verification disabled
-        mounts["all://newkso.ru"] = transport_cls(
-            verify=False, proxy=self.proxy_url if self.all_proxy else None
-        )
-        mounts["all://*.newkso.ru"] = transport_cls(
-            verify=False, proxy=self.proxy_url if self.all_proxy else None
-        )
-
         # Set default proxy for all routes if enabled
         if self.all_proxy:
             mounts["all://"] = transport_cls(proxy=self.proxy_url)
