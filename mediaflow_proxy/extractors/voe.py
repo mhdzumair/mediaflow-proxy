@@ -3,7 +3,7 @@ import re
 from typing import Dict, Any
 from urllib.parse import urljoin
 
-from mediaflow_proxy.extractors.base import BaseExtractor
+from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
 
 class VoeExtractor(BaseExtractor):
@@ -22,11 +22,15 @@ class VoeExtractor(BaseExtractor):
 
         code_and_script_pattern = r'json">\["([^"]+)"]</script>\s*<script\s*src="([^"]+)'
         code_and_script_match = re.search(code_and_script_pattern, response.text, re.DOTALL)
+        if not code_and_script_match:
+            raise ExtractorError("VOE: unable to locate obfuscated payload or external script URL")
 
         script_response = await self._make_request(urljoin(url, code_and_script_match.group(2)))
 
         luts_pattern = r"(\[(?:'\W{2}'[,\]]){1,9})"
         luts_match = re.search(luts_pattern, script_response.text, re.DOTALL)
+        if not luts_match:
+            raise ExtractorError("VOE: unable to locate LUTs in external script")
 
         data = self.voe_decode(code_and_script_match.group(1), luts_match.group(1))
 
