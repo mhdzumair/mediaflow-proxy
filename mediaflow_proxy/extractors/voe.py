@@ -49,7 +49,7 @@ class VoeExtractor(BaseExtractor):
         }
 
     @staticmethod
-    def voe_decode(ct, luts):
+    def voe_decode(ct: str, luts: str) -> Dict[str, Any]:
         import json
         lut = [''.join([('\\' + x) if x in '.*+?^${}()|[]\\' else x for x in i]) for i in luts[2:-2].split("','")]
         txt = ''
