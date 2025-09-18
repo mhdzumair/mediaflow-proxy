@@ -45,6 +45,10 @@ class TransportConfig(BaseSettings):
             verify=False, proxy=self.proxy_url if self.all_proxy else None
         )
 
+        mounts["all://dlhd.dad"] = transport_cls(
+            verify=False, proxy=self.proxy_url if self.all_proxy else None
+        )
+
         # Set default proxy for all routes if enabled
         if self.all_proxy:
             mounts["all://"] = transport_cls(proxy=self.proxy_url)
