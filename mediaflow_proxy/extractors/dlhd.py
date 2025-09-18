@@ -53,33 +53,58 @@ class DLHDExtractor(BaseExtractor):
         
         return headers
 
-    async def _make_request(self, url: str, method: str = "GET", headers: dict = None, **kwargs):
-        """Override _make_request to apply newkso.ru specific headers when needed."""
-        request_headers = headers or {}
-        
-        # Apply newkso.ru specific headers if the URL contains newkso.ru
-        final_headers = self._get_headers_for_url(url, request_headers)
-        
-        return await super()._make_request(url, method, final_headers, **kwargs)
+    async def _make_request(self, url: str, method: str = "GET", headers: Optional[Dict] = None, **kwargs) -> Any:
+        """Override _make_request to always disable SSL verification for this extractor by creating a new client."""
+        from mediaflow_proxy.utils.http_utils import create_httpx_client, fetch_with_retry
+        async with create_httpx_client(verify=False) as client:
+            return await fetch_with_retry(client, method, url, headers, **kwargs)
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
-        """Extract DLHD stream URL and required headers (logica tvproxy adattata async, con fallback su endpoint alternativi)."""
+        """Extract DLHD stream URL and required headers"""
         from urllib.parse import urlparse, quote_plus
+        async def resolve_base_url(preferred_host: str | None = None) -> str:
+            """Resolve a working base domain following redirects, with shared caching.
 
-        async def get_daddylive_base_url():
+            Attempt order:
+              1. If we already have a cached value -> return it
+              2. If preferred_host (from the initial URL) is one of the known domains, try it first
+              3. Then try each domain in DOMAINS (daddylive.sx, dlhd.dad)
+              4. Final fallback: first candidate (ensuring trailing slash)
+            """
             if self._cached_base_url:
                 return self._cached_base_url
-            try:
-                resp = await self._make_request("https://daddylive.sx/")
-                # resp.url is the final URL after redirects
-                base_url = str(resp.url)
-                if not base_url.endswith('/'):
-                    base_url += '/'
-                self._cached_base_url = base_url
-                return base_url
-            except Exception:
-                # Fallback to default if request fails
-                return "https://daddylive.sx/"
+
+            DOMAINS = [
+                'https://daddylive.sx/',
+                'https://dlhd.dad/'
+            ]
+
+            if preferred_host:
+                # Normalize and ensure trailing slash
+                ph = preferred_host if preferred_host.endswith('/') else preferred_host + '/'
+                if ph in DOMAINS:
+                    candidates = [ph] + [d for d in DOMAINS if d != ph]
+                else:
+                    candidates = [ph] + DOMAINS
+            else:
+                candidates = DOMAINS[:]
+
+            for base in candidates:
+                try:
+                    resp = await self._make_request(base)
+                    final_url = str(resp.url)
+                    if not final_url.endswith('/'):
+                        final_url += '/'
+                    self._cached_base_url = final_url
+                    logger.info(f"Resolved base domain: {final_url}")
+                    return final_url
+                except Exception as e:
+                    logger.warning(f"Base domain attempt failed for {base}: {e}")
+
+            fallback = candidates[0]
+            logger.warning(f"All domain resolution attempts failed, using fallback: {fallback}")
+            self._cached_base_url = fallback
+            return fallback
 
         def extract_channel_id(url):
             match_premium = re.search(r'/premium(\d+)/mono\.m3u8$', url)
@@ -89,6 +114,10 @@ class DLHDExtractor(BaseExtractor):
             match_player = re.search(r'/(?:watch|stream|cast|player)/stream-(\d+)\.php', url)
             if match_player:
                 return match_player.group(1)
+            # Handle watch.php?id=...
+            match_watch_id = re.search(r'watch\.php\?id=(\d+)', url)
+            if match_watch_id:
+                return match_watch_id.group(1)
             # Handle URL-encoded patterns like %2Fstream%2Fstream-123.php or just stream-123.php
             match_encoded = re.search(r'(?:%2F|/)stream-(\d+)\.php', url, re.IGNORECASE)
             if match_encoded:
@@ -99,111 +128,82 @@ class DLHDExtractor(BaseExtractor):
                 return match_direct.group(1)
             return None
 
-        async def try_endpoint(baseurl, endpoint, channel_id):
-            stream_url = f"{baseurl}{endpoint}stream-{channel_id}.php"
+        async def get_stream_data(baseurl: str, initial_url: str, channel_id: str):
             daddy_origin = urlparse(baseurl).scheme + "://" + urlparse(baseurl).netloc
             daddylive_headers = {
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
                 'Referer': baseurl,
                 'Origin': daddy_origin
             }
-            # 1. Richiesta alla pagina stream/cast/player/watch
-            resp1 = await self._make_request(stream_url, headers=daddylive_headers)
-            # 2. Estrai link Player 2
-            iframes = re.findall(r'<a[^>]*href="([^"]+)"[^>]*>\s*<button[^>]*>\s*Player\s*2\s*</button>', resp1.text)
-            if not iframes:
-                raise ExtractorError("No Player 2 link found")
-            url2 = iframes[0]
-            url2 = baseurl + url2
-            url2 = url2.replace('//cast', '/cast')
-            daddylive_headers['Referer'] = url2
-            daddylive_headers['Origin'] = url2
-            # 3. Richiesta alla pagina Player 2
-            resp2 = await self._make_request(url2, headers=daddylive_headers)
-            # 4. Estrai iframe
-            iframes2 = re.findall(r'iframe src="([^"]*)', resp2.text)
-            if not iframes2:
-                raise ExtractorError("No iframe found in Player 2 page")
-            iframe_url = iframes2[0]
+            # 1. Request the initial channel page
+            resp1 = await self._make_request(initial_url, headers=daddylive_headers, timeout=15)
+            
+            # 2. Extract all player links (Player 1, 2, 3 ...)
+            player_links = re.findall(r'<button[^>]*data-url="([^"]+)"[^>]*>Player\s*\d+</button>', resp1.text)            
+            if not player_links:
+                raise ExtractorError("No player links found on the page.")
+
+            last_player_error = None
+            for player_url in player_links:
+                try:
+                    # If the URL is relative, make it absolute
+                    if not player_url.startswith('http'):
+                        player_url = baseurl + player_url.lstrip('/')
+
+                    daddylive_headers['Referer'] = player_url
+                    daddylive_headers['Origin'] = player_url
+                    # 3. Request the specific player page
+                    resp2 = await self._make_request(player_url, headers=daddylive_headers)
+                    # 4. Extract iframe URL
+                    iframes2 = re.findall(r'iframe src="([^"]*)', resp2.text)
+                    if iframes2:
+                        iframe_url = iframes2[0]
+                        break  # Iframe found, exit loop
+                except Exception as e:
+                    last_player_error = e
+                    logger.warning(f"Failed to process player link {player_url}: {e}")
+                    continue
+            else: # If the loop finishes with no 'break'
+                if last_player_error:
+                    raise ExtractorError(f"All player links failed. Last error: {last_player_error}")
+                raise ExtractorError("No valid iframe found in any player page")
+
             # Store iframe context for newkso.ru requests
             self._iframe_context = iframe_url
             resp3 = await self._make_request(iframe_url, headers=daddylive_headers)
             iframe_content = resp3.text
-            # 5. Estrai parametri auth (robusto) - Handle both old and new formats
-            def extract_var_old_format(js, name):
-                # Try multiple patterns for variable extraction (old format)
-                patterns = [
-                    rf'var (?:__)?{name}\s*=\s*atob\("([^"]+)"\)',
-                    rf'var (?:__)?{name}\s*=\s*atob\(\'([^\']+)\'\)',
-                    rf'(?:var\s+)?(?:__)?{name}\s*=\s*atob\s*\(\s*["\']([^"\']+)["\']\s*\)',
-                    rf'(?:let|const)\s+(?:__)?{name}\s*=\s*atob\s*\(\s*["\']([^"\']+)["\']\s*\)'
-                ]
-                for pattern in patterns:
-                    m = re.search(pattern, js)
-                    if m:
-                        try:
-                            return base64.b64decode(m.group(1)).decode('utf-8')
-                        except Exception as decode_error:
-                            logger.warning(f"Failed to decode base64 for variable {name}: {decode_error}")
-                            continue
-                return None
-            
-            def extract_xjz_format(js):
-                """Extract parameters from the new XJZ base64-encoded JSON format."""
+            # 5. Extract auth parameters (robust) - handles both old and new formats
+            def extract_auth_params(js):
+                """Extracts auth parameters from the modern XJZ JSON-based format."""
                 try:
-                    # Look for the XJZ variable assignment
-                    xjz_pattern = r'const\s+XJZ\s*=\s*["\']([^"\']+)["\']'
-                    match = re.search(xjz_pattern, js)
+                    pattern = r'(?:const|var|let)\s+XJZ\s*=\s*["\']([^"\']+)["\']'
+                    match = re.search(pattern, js)
                     if not match:
-                        return None
-                    xjz_b64 = match.group(1)
+                        return {}
+                    
+                    logger.info("Found 'XJZ' format. Attempting to decode.")
+                    b64_data = match.group(1)
                     import json
-                    # Decode the first base64 layer (JSON)
-                    xjz_json = base64.b64decode(xjz_b64).decode('utf-8')
-                    xjz_obj = json.loads(xjz_json)
-                    # Each value is also base64-encoded, decode each
-                    decoded = {}
-                    for k, v in xjz_obj.items():
+                    json_data = base64.b64decode(b64_data).decode('utf-8')
+                    obj_data = json.loads(json_data)
+                    
+                    decoded_params = {}
+                    for k, v in obj_data.items():
                         try:
-                            decoded[k] = base64.b64decode(v).decode('utf-8')
-                        except Exception as e:
-                            logger.warning(f"Failed to decode XJZ field {k}: {e}")
-                            decoded[k] = v
-                    return decoded
+                            decoded_params[k] = base64.b64decode(v).decode('utf-8')
+                        except Exception:
+                            decoded_params[k] = v # Keep as is if decoding fails
+                    
+                    return {
+                        "auth_host": decoded_params.get('b_host'), "auth_php": decoded_params.get('b_script'),
+                        "auth_ts": decoded_params.get('b_ts'), "auth_rnd": decoded_params.get('b_rnd'),
+                        "auth_sig": decoded_params.get('b_sig')
+                    }
                 except Exception as e:
-                    logger.warning(f"Failed to extract XJZ format: {e}")
-                    return None
-
-            def extract_bundle_format(js):
-                """Extract parameters from new BUNDLE format (legacy fallback)."""
-                try:
-                    bundle_patterns = [
-                        r'const\s+BUNDLE\s*=\s*["\']([^"\']+)["\']',
-                        r'var\s+BUNDLE\s*=\s*["\']([^"\']+)["\']',
-                        r'let\s+BUNDLE\s*=\s*["\']([^"\']+)["\']'
-                    ]
-                    bundle_data = None
-                    for pattern in bundle_patterns:
-                        match = re.search(pattern, js)
-                        if match:
-                            bundle_data = match.group(1)
-                            break
-                    if not bundle_data:
-                        return None
-                    import json
-                    bundle_json = base64.b64decode(bundle_data).decode('utf-8')
-                    bundle_obj = json.loads(bundle_json)
-                    decoded_bundle = {}
-                    for key, value in bundle_obj.items():
-                        try:
-                            decoded_bundle[key] = base64.b64decode(value).decode('utf-8')
-                        except Exception as e:
-                            logger.warning(f"Failed to decode bundle field {key}: {e}")
-                            decoded_bundle[key] = value
-                    return decoded_bundle
-                except Exception as e:
-                    logger.warning(f"Failed to extract bundle format: {e}")
-                    return None
+                    logger.warning(f"Could not process 'XJZ' format: {e}")
+                
+                # If no JSON format is found, return an empty dict
+                return {}
             
             # Try multiple patterns for channel key extraction
             channel_key = None
@@ -221,40 +221,18 @@ class DLHDExtractor(BaseExtractor):
                     channel_key = match.group(1)
                     break
             
-            # Try new XJZ format first
-            xjz_data = extract_xjz_format(iframe_content)
-            if xjz_data:
-                logger.info("Using new XJZ format for parameter extraction")
-                auth_host = xjz_data.get('b_host')
-                auth_php = xjz_data.get('b_script')
-                auth_ts = xjz_data.get('b_ts')
-                auth_rnd = xjz_data.get('b_rnd')
-                auth_sig = xjz_data.get('b_sig')
-                logger.debug(f"XJZ data extracted: {xjz_data}")
-            else:
-                # Try bundle format (legacy fallback)
-                bundle_data = extract_bundle_format(iframe_content)
-                if bundle_data:
-                    logger.info("Using BUNDLE format for parameter extraction")
-                    auth_host = bundle_data.get('b_host')
-                    auth_php = bundle_data.get('b_script')
-                    auth_ts = bundle_data.get('b_ts')
-                    auth_rnd = bundle_data.get('b_rnd')
-                    auth_sig = bundle_data.get('b_sig')
-                    logger.debug(f"Bundle data extracted: {bundle_data}")
-                else:
-                    logger.info("Falling back to old format for parameter extraction")
-                    # Fall back to old format
-                    auth_ts = extract_var_old_format(iframe_content, 'c')
-                    auth_rnd = extract_var_old_format(iframe_content, 'd')
-                    auth_sig = extract_var_old_format(iframe_content, 'e')
-                    auth_host = extract_var_old_format(iframe_content, 'a')
-                    auth_php = extract_var_old_format(iframe_content, 'b')
+            # Extract all auth parameters using the unified function
+            params = extract_auth_params(iframe_content)
+            auth_host = params.get("auth_host")
+            auth_php = params.get("auth_php")
+            auth_ts = params.get("auth_ts")
+            auth_rnd = params.get("auth_rnd")
+            auth_sig = params.get("auth_sig")
 
             # Log what we found for debugging
             logger.debug(f"Extracted parameters: channel_key={channel_key}, auth_ts={auth_ts}, auth_rnd={auth_rnd}, auth_sig={auth_sig}, auth_host={auth_host}, auth_php={auth_php}")
 
-            # Check which parameters are missing
+            # Build list of missing required parameters (if any)
             missing_params = []
             if not channel_key:
                 missing_params.append('channel_key/CHANNEL_KEY')
@@ -275,15 +253,15 @@ class DLHDExtractor(BaseExtractor):
                 logger.debug(f"Iframe content sample: {iframe_content[:2000]}")
                 raise ExtractorError(f"Error extracting parameters: missing {', '.join(missing_params)}")
             auth_sig = quote_plus(auth_sig)
-            # 6. Richiesta auth
-            # Se il sito fornisce ancora /a.php ma ora serve /auth.php, sostituisci
+            # 6. Auth request
+            # If the site still provides /a.php but /auth.php is required, replace it
             # Normalize and robustly replace any variant of a.php with /auth.php
             if auth_php:
                 normalized_auth_php = auth_php.strip().lstrip('/')
                 if normalized_auth_php == 'a.php':
-                    logger.info("Sostituisco qualunque variante di a.php con /auth.php per compatibilità.")
+                    logger.info("Replacing any 'a.php' variant with '/auth.php' for compatibility.")
                     auth_php = '/auth.php'
-            # Unisci host e script senza doppio slash
+            # Join host and script avoiding double slashes
             if auth_host.endswith('/') and auth_php.startswith('/'):
                 auth_url = f'{auth_host[:-1]}{auth_php}'
             elif not auth_host.endswith('/') and not auth_php.startswith('/'):
@@ -291,7 +269,14 @@ class DLHDExtractor(BaseExtractor):
             else:
                 auth_url = f'{auth_host}{auth_php}'
             auth_url = f'{auth_url}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
-            auth_resp = await self._make_request(auth_url, headers=daddylive_headers)
+            
+            # Use correct headers for the auth request against newkso.ru
+            iframe_origin = f"https://{urlparse(iframe_url).netloc}"
+            auth_headers = daddylive_headers.copy()
+            auth_headers['Referer'] = iframe_url
+            auth_headers['Origin'] = iframe_origin
+
+            auth_resp = await self._make_request(auth_url, headers=auth_headers)
             # 7. Lookup server - Extract host parameter
             host = None
             host_patterns = [
@@ -368,8 +353,7 @@ class DLHDExtractor(BaseExtractor):
             
             referer_raw = f'https://{urlparse(iframe_url).netloc}'
             
-            # Extract URL construction logic dynamically from JavaScript
-            # Simple approach: look for newkso.ru URLs and construct based on server_key
+            # Build final stream URL; keep a simple approach: look for newkso.ru pattern and build from server_key
             
             # Check if we have the special case server_key
             if server_key == 'top1/cdn':
@@ -406,21 +390,23 @@ class DLHDExtractor(BaseExtractor):
             }
 
         try:
-            clean_url = url
-            channel_id = extract_channel_id(clean_url)
-            if not channel_id:
-                raise ExtractorError(f"Unable to extract channel ID from {clean_url}")
+            # MULTI-DOMAIN SUPPORT:
+            # If the requested URL already belongs to dlhd.dad or daddylive.sx we pass it as preferred for resolution.
+            parsed_original = urlparse(url)
+            host_lower = parsed_original.netloc.lower()
+            preferred = None
+            if 'daddylive.sx' in host_lower:
+                preferred = 'https://daddylive.sx/'
+            elif 'dlhd.dad' in host_lower:
+                preferred = 'https://dlhd.dad/'
+            baseurl = await resolve_base_url(preferred)
 
-            baseurl = await get_daddylive_base_url()
-            endpoints = ["stream/", "cast/", "player/", "watch/"]
-            last_exc = None
-            for endpoint in endpoints:
-                try:
-                    return await try_endpoint(baseurl, endpoint, channel_id)
-                except Exception as exc:
-                    last_exc = exc
-                    continue
-            raise ExtractorError(f"Extraction failed: {str(last_exc)}")
+            channel_id = extract_channel_id(url)
+            if not channel_id:
+                raise ExtractorError(f"Unable to extract channel ID from {url}")
+
+            return await get_stream_data(baseurl, url, channel_id)
+
         except Exception as e:
             raise ExtractorError(f"Extraction failed: {str(e)}")
 
