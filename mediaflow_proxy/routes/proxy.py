@@ -134,9 +134,16 @@ def _check_and_redirect_dlhd_stream(request: Request, destination: str) -> Redir
         RedirectResponse | None: RedirectResponse if redirect is needed, None otherwise.
     """
     import re
+    from urllib.parse import urlparse
     
-    # Check for stream-{numero} pattern (e.g., stream-1, stream-123, etc.)
-    if re.search(r'stream-\d+', destination):
+    # Check for common DLHD/DaddyLive patterns in the URL
+    # This includes stream-XXX pattern and domain names like dlhd.dad or daddylive.sx
+    is_dlhd_link = (
+        re.search(r'stream-\d+', destination) or
+        "dlhd.dad" in urlparse(destination).netloc or
+        "daddylive.sx" in urlparse(destination).netloc
+    )
+    if is_dlhd_link:
         from urllib.parse import urlencode
         
         # Build redirect URL to extractor
