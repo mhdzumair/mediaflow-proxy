@@ -61,21 +61,53 @@ class DLHDExtractor(BaseExtractor):
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         """Extract DLHD stream URL and required headers"""
         from urllib.parse import urlparse, quote_plus
+        async def resolve_base_url(preferred_host: str | None = None) -> str:
+            """Risolvi il dominio base valido seguendo redirect, con cache condivisa.
 
-        async def get_daddylive_base_url():
+            Ordine di tentativo:
+              1. Se abbiamo già cache => ritorna
+              2. Se preferred_host (dall'URL iniziale) è uno dei domini noti, prova quello
+              3. Prova sequenzialmente la lista DOMAINS (daddylive.sx, dlhd.dad)
+              4. Ultimo fallback: primo della lista con slash finale
+            """
             if self._cached_base_url:
                 return self._cached_base_url
-            try:
-                resp = await self._make_request("https://daddylive.sx/")
-                # resp.url is the final URL after redirects
-                base_url = str(resp.url)
-                if not base_url.endswith('/'):
-                    base_url += '/'
-                self._cached_base_url = base_url
-                return base_url
-            except Exception:
-                # Fallback to default if request fails
-                return "https://daddylive.sx/"
+
+            DOMAINS = [
+                'https://daddylive.sx/',
+                'https://dlhd.dad/'
+            ]
+
+            candidates = []
+            if preferred_host:
+                # Normalizza e assicura trailing slash
+                ph = preferred_host if preferred_host.endswith('/') else preferred_host + '/'
+                # Inserisci davanti se non già presente
+                if ph not in DOMAINS:
+                    candidates.append(ph)
+                else:
+                    # Metti la preferred all'inizio mantenendo ordine degli altri
+                    candidates = [ph] + [d for d in DOMAINS if d != ph]
+            else:
+                candidates = DOMAINS[:]
+
+            for base in candidates:
+                try:
+                    resp = await self._make_request(base)
+                    final_url = str(resp.url)
+                    if not final_url.endswith('/'):
+                        final_url += '/'
+                    self._cached_base_url = final_url
+                    logger.info(f"Resolved base domain: {final_url}")
+                    return final_url
+                except Exception as e:
+                    logger.warning(f"Base domain attempt failed for {base}: {e}")
+
+            # Fallback finale
+            fallback = candidates[0] if candidates else DOMAINS[0]
+            logger.warning(f"All domain resolution attempts failed, using fallback: {fallback}")
+            self._cached_base_url = fallback
+            return fallback
 
         def extract_channel_id(url):
             match_premium = re.search(r'/premium(\d+)/mono\.m3u8$', url)
@@ -362,11 +394,21 @@ class DLHDExtractor(BaseExtractor):
             }
 
         try:
+            # SUPPORTO MULTI-DOMINIO:
+            # Se l'URL richiesto è già su dlhd.dad usiamo direttamente quello come base senza fetch redirect iniziale.
+            parsed_original = urlparse(url)
+            host_lower = parsed_original.netloc.lower()
+            preferred = None
+            if 'daddylive.sx' in host_lower:
+                preferred = 'https://daddylive.sx/'
+            elif 'dlhd.dad' in host_lower:
+                preferred = 'https://dlhd.dad/'
+            baseurl = await resolve_base_url(preferred)
+
             channel_id = extract_channel_id(url)
             if not channel_id:
                 raise ExtractorError(f"Unable to extract channel ID from {url}")
 
-            baseurl = await get_daddylive_base_url()
             return await get_stream_data(baseurl, url, channel_id)
 
         except Exception as e:
