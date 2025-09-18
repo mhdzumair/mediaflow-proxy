@@ -62,13 +62,13 @@ class DLHDExtractor(BaseExtractor):
         """Extract DLHD stream URL and required headers"""
         from urllib.parse import urlparse, quote_plus
         async def resolve_base_url(preferred_host: str | None = None) -> str:
-            """Risolvi il dominio base valido seguendo redirect, con cache condivisa.
+            """Resolve a working base domain following redirects, with shared caching.
 
-            Ordine di tentativo:
-              1. Se abbiamo già cache => ritorna
-              2. Se preferred_host (dall'URL iniziale) è uno dei domini noti, prova quello
-              3. Prova sequenzialmente la lista DOMAINS (daddylive.sx, dlhd.dad)
-              4. Ultimo fallback: primo della lista con slash finale
+            Attempt order:
+              1. If we already have a cached value -> return it
+              2. If preferred_host (from the initial URL) is one of the known domains, try it first
+              3. Then try each domain in DOMAINS (daddylive.sx, dlhd.dad)
+              4. Final fallback: first candidate (ensuring trailing slash)
             """
             if self._cached_base_url:
                 return self._cached_base_url
@@ -78,16 +78,13 @@ class DLHDExtractor(BaseExtractor):
                 'https://dlhd.dad/'
             ]
 
-            candidates = []
             if preferred_host:
-                # Normalizza e assicura trailing slash
+                # Normalize and ensure trailing slash
                 ph = preferred_host if preferred_host.endswith('/') else preferred_host + '/'
-                # Inserisci davanti se non già presente
-                if ph not in DOMAINS:
-                    candidates.append(ph)
-                else:
-                    # Metti la preferred all'inizio mantenendo ordine degli altri
+                if ph in DOMAINS:
                     candidates = [ph] + [d for d in DOMAINS if d != ph]
+                else:
+                    candidates = [ph] + DOMAINS
             else:
                 candidates = DOMAINS[:]
 
@@ -103,8 +100,7 @@ class DLHDExtractor(BaseExtractor):
                 except Exception as e:
                     logger.warning(f"Base domain attempt failed for {base}: {e}")
 
-            # Fallback finale
-            fallback = candidates[0] if candidates else DOMAINS[0]
+            fallback = candidates[0]
             logger.warning(f"All domain resolution attempts failed, using fallback: {fallback}")
             self._cached_base_url = fallback
             return fallback
@@ -138,10 +134,10 @@ class DLHDExtractor(BaseExtractor):
                 'Referer': baseurl,
                 'Origin': daddy_origin
             }
-            # 1. Richiesta alla pagina iniziale del canale
+            # 1. Request the initial channel page
             resp1 = await self._make_request(initial_url, headers=daddylive_headers, timeout=15)
             
-            # 2. Estrai tutti i link dei player (Player 1, 2, 3...)
+            # 2. Extract all player links (Player 1, 2, 3 ...)
             player_links = re.findall(r'<button[^>]*data-url="([^"]+)"[^>]*>Player\s*\d+</button>', resp1.text)            
             if not player_links:
                 raise ExtractorError("No player links found on the page.")
@@ -149,24 +145,24 @@ class DLHDExtractor(BaseExtractor):
             last_player_error = None
             for player_url in player_links:
                 try:
-                    # Se l'URL non è assoluto, lo costruiamo
+                    # If the URL is relative, make it absolute
                     if not player_url.startswith('http'):
                         player_url = baseurl + player_url.lstrip('/')
 
                     daddylive_headers['Referer'] = player_url
                     daddylive_headers['Origin'] = player_url
-                    # 3. Richiesta alla pagina del player
+                    # 3. Request the specific player page
                     resp2 = await self._make_request(player_url, headers=daddylive_headers)
-                    # 4. Estrai iframe
+                    # 4. Extract iframe URL
                     iframes2 = re.findall(r'iframe src="([^"]*)', resp2.text)
                     if iframes2:
                         iframe_url = iframes2[0]
-                        break  # Iframe trovato, esci dal ciclo dei player
+                        break  # Iframe found, exit loop
                 except Exception as e:
                     last_player_error = e
                     logger.warning(f"Failed to process player link {player_url}: {e}")
                     continue
-            else: # Se il ciclo finisce senza 'break'
+            else: # If the loop finishes with no 'break'
                 if last_player_error:
                     raise ExtractorError(f"All player links failed. Last error: {last_player_error}")
                 raise ExtractorError("No valid iframe found in any player page")
@@ -175,7 +171,7 @@ class DLHDExtractor(BaseExtractor):
             self._iframe_context = iframe_url
             resp3 = await self._make_request(iframe_url, headers=daddylive_headers)
             iframe_content = resp3.text
-            # 5. Estrai parametri auth (robusto) - Handle both old and new formats
+            # 5. Extract auth parameters (robust) - handles both old and new formats
             def extract_auth_params(js):
                 """Extracts auth parameters from the modern XJZ JSON-based format."""
                 try:
@@ -235,7 +231,7 @@ class DLHDExtractor(BaseExtractor):
             # Log what we found for debugging
             logger.debug(f"Extracted parameters: channel_key={channel_key}, auth_ts={auth_ts}, auth_rnd={auth_rnd}, auth_sig={auth_sig}, auth_host={auth_host}, auth_php={auth_php}")
 
-            # Check which parameters are missing
+            # Build list of missing required parameters (if any)
             missing_params = []
             if not channel_key:
                 missing_params.append('channel_key/CHANNEL_KEY')
@@ -256,15 +252,15 @@ class DLHDExtractor(BaseExtractor):
                 logger.debug(f"Iframe content sample: {iframe_content[:2000]}")
                 raise ExtractorError(f"Error extracting parameters: missing {', '.join(missing_params)}")
             auth_sig = quote_plus(auth_sig)
-            # 6. Richiesta auth
-            # Se il sito fornisce ancora /a.php ma ora serve /auth.php, sostituisci
+            # 6. Auth request
+            # If the site still provides /a.php but /auth.php is required, replace it
             # Normalize and robustly replace any variant of a.php with /auth.php
             if auth_php:
                 normalized_auth_php = auth_php.strip().lstrip('/')
                 if normalized_auth_php == 'a.php':
-                    logger.info("Sostituisco qualunque variante di a.php con /auth.php per compatibilità.")
+                    logger.info("Replacing any 'a.php' variant with '/auth.php' for compatibility.")
                     auth_php = '/auth.php'
-            # Unisci host e script senza doppio slash
+            # Join host and script avoiding double slashes
             if auth_host.endswith('/') and auth_php.startswith('/'):
                 auth_url = f'{auth_host[:-1]}{auth_php}'
             elif not auth_host.endswith('/') and not auth_php.startswith('/'):
@@ -273,7 +269,7 @@ class DLHDExtractor(BaseExtractor):
                 auth_url = f'{auth_host}{auth_php}'
             auth_url = f'{auth_url}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
             
-            # Utilizza gli header corretti per la richiesta di autenticazione a newkso.ru
+            # Use correct headers for the auth request against newkso.ru
             iframe_origin = f"https://{urlparse(iframe_url).netloc}"
             auth_headers = daddylive_headers.copy()
             auth_headers['Referer'] = iframe_url
@@ -356,8 +352,7 @@ class DLHDExtractor(BaseExtractor):
             
             referer_raw = f'https://{urlparse(iframe_url).netloc}'
             
-            # Extract URL construction logic dynamically from JavaScript
-            # Simple approach: look for newkso.ru URLs and construct based on server_key
+            # Build final stream URL; keep a simple approach: look for newkso.ru pattern and build from server_key
             
             # Check if we have the special case server_key
             if server_key == 'top1/cdn':
@@ -394,8 +389,8 @@ class DLHDExtractor(BaseExtractor):
             }
 
         try:
-            # SUPPORTO MULTI-DOMINIO:
-            # Se l'URL richiesto è già su dlhd.dad usiamo direttamente quello come base senza fetch redirect iniziale.
+            # MULTI-DOMAIN SUPPORT:
+            # If the requested URL already belongs to dlhd.dad or daddylive.sx we pass it as preferred for resolution.
             parsed_original = urlparse(url)
             host_lower = parsed_original.netloc.lower()
             preferred = None
