@@ -57,16 +57,6 @@ class TransportConfig(BaseSettings):
             verify=False, proxy=self.proxy_url if self.all_proxy else None
         )
 
-        # Configuration for Cloudflare R2 storage domains
-        mounts["all://*.r2.cloudflarestorage.com"] = transport_cls(
-            verify=False, proxy=self.proxy_url if self.all_proxy else None
-        )
-        
-        # Generic pattern for all kluster3 subdomains
-        mounts["all://kluster3.*"] = transport_cls(
-            verify=False, proxy=self.proxy_url if self.all_proxy else None
-        )
-
         # Set default proxy for all routes if enabled
         if self.all_proxy:
             mounts["all://"] = transport_cls(proxy=self.proxy_url)
@@ -100,6 +90,7 @@ class Settings(BaseSettings):
     dash_prebuffer_cache_size: int = 50  # Maximum number of segments to cache in memory.
     dash_prebuffer_max_memory_percent: int = 80  # Maximum percentage of system memory to use for DASH pre-buffer cache.
     dash_prebuffer_emergency_threshold: int = 90  # Emergency threshold percentage to trigger aggressive cache cleanup.
+    disable_ssl_verification_for_hls: bool = False  # Whether to disable SSL verification for HLS proxy endpoints to avoid certificate errors.
 
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"  # The user agent to use for HTTP requests.
