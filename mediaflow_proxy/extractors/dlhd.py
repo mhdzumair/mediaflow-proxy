@@ -131,13 +131,18 @@ class DLHDExtractor(BaseExtractor):
         
         # Extract fresh data from the website
         logger.info(f"Extracting fresh DLHD data for {url}")
-        result = await self._extract_from_website(url, **kwargs)
+        full_result = await self._extract_from_website(url, **kwargs)
         
         # Cache the new result
-        await set_cache_extractor_result(cache_key, result)
+        await set_cache_extractor_result(cache_key, full_result)
         logger.info(f"Cached new DLHD result for {url}")
         
-        return result
+        # Return a clean result without 'auth_data' to avoid TypeErrors downstream
+        # when the result is unpacked into functions that don't expect it.
+        # The full result with 'auth_data' is still in the cache.
+        clean_result = full_result.copy()
+        clean_result.pop("auth_data", None)
+        return clean_result
 
     async def _extract_from_website(self, url: str, **kwargs) -> Dict[str, Any]:
         """Extract DLHD stream URL from website (original extraction logic)."""
