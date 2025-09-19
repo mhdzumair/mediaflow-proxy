@@ -26,14 +26,17 @@ from .utils.mpd_utils import pad_base64
 logger = logging.getLogger(__name__)
 
 
-async def setup_client_and_streamer() -> tuple[httpx.AsyncClient, Streamer]:
+async def setup_client_and_streamer(verify_ssl: bool = True) -> tuple[httpx.AsyncClient, Streamer]:
     """
     Set up an HTTP client and a streamer.
+
+    Args:
+        verify_ssl (bool): Whether to verify SSL certificates.
 
     Returns:
         tuple: An httpx.AsyncClient instance and a Streamer instance.
     """
-    client = create_httpx_client()
+    client = create_httpx_client(verify_ssl=verify_ssl)
     return client, Streamer(client)
 
 
@@ -76,7 +79,10 @@ async def handle_hls_stream_proxy(
     Returns:
         Union[Response, EnhancedStreamingResponse]: Either a processed m3u8 playlist or a streaming response.
     """
-    _, streamer = await setup_client_and_streamer()
+    from .configs import settings
+    # Use SSL verification setting for HLS endpoints
+    verify_ssl = not settings.disable_ssl_verification_for_hls
+    _, streamer = await setup_client_and_streamer(verify_ssl=verify_ssl)
     # Handle range requests
     content_range = proxy_headers.request.get("range", "bytes=0-")
     if "nan" in content_range.casefold():
@@ -152,7 +158,8 @@ async def handle_stream_request(
     Returns:
         Union[Response, EnhancedStreamingResponse]: Either a HEAD response with headers or a streaming response.
     """
-    client, streamer = await setup_client_and_streamer()
+    # Keep SSL verification enabled for /proxy/stream endpoints
+    client, streamer = await setup_client_and_streamer(verify_ssl=True)
 
     try:
         # Auto-detect and resolve Vavoo links
@@ -311,10 +318,14 @@ async def get_manifest(
         Response: The HTTP response with the HLS manifest.
     """
     try:
+        from .configs import settings
+        # Use SSL verification setting for MPD downloads
+        verify_ssl = not settings.disable_ssl_verification_for_hls
         mpd_dict = await get_cached_mpd(
             manifest_params.destination,
             headers=proxy_headers.request,
             parse_drm=not manifest_params.key_id and not manifest_params.key,
+            verify_ssl=verify_ssl,
         )
     except DownloadError as e:
         raise HTTPException(status_code=e.status_code, detail=f"Failed to download MPD: {e.message}")
@@ -352,11 +363,15 @@ async def get_playlist(
         Response: The HTTP response with the HLS playlist.
     """
     try:
+        from .configs import settings
+        # Use SSL verification setting for MPD downloads
+        verify_ssl = not settings.disable_ssl_verification_for_hls
         mpd_dict = await get_cached_mpd(
             playlist_params.destination,
             headers=proxy_headers.request,
             parse_drm=not playlist_params.key_id and not playlist_params.key,
             parse_segment_profile_id=playlist_params.profile_id,
+            verify_ssl=verify_ssl,
         )
     except DownloadError as e:
         raise HTTPException(status_code=e.status_code, detail=f"Failed to download MPD: {e.message}")
@@ -378,8 +393,11 @@ async def get_segment(
         Response: The HTTP response with the processed segment.
     """
     try:
-        init_content = await get_cached_init_segment(segment_params.init_url, proxy_headers.request)
-        segment_content = await download_file_with_retry(segment_params.segment_url, proxy_headers.request)
+        from .configs import settings
+        # Use SSL verification setting for segment downloads
+        verify_ssl = not settings.disable_ssl_verification_for_hls
+        init_content = await get_cached_init_segment(segment_params.init_url, proxy_headers.request, verify_ssl=verify_ssl)
+        segment_content = await download_file_with_retry(segment_params.segment_url, proxy_headers.request, verify_ssl=verify_ssl)
     except Exception as e:
         return handle_exceptions(e)
 
@@ -400,5 +418,5 @@ async def get_public_ip():
     Returns:
         Response: The HTTP response with the public IP address.
     """
-    ip_address_data = await request_with_retry("GET", "https://api.ipify.org?format=json", {})
+    ip_address_data = await request_with_retry("GET", "https://api.ipify.org?format=json", {}, verify_ssl=True)
     return ip_address_data.json()
