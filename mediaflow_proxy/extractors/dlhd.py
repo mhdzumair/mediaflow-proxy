@@ -20,6 +20,8 @@ class DLHDExtractor(BaseExtractor):
         self._cached_base_url = None
         # Store iframe context for newkso.ru requests
         self._iframe_context = None
+        # Cache for auth data per channel_id to avoid re-fetching
+        self._auth_cache: Dict[str, Dict[str, Any]] = {}
 
     def _get_headers_for_url(self, url: str, base_headers: dict) -> dict:
         """Get appropriate headers for the given URL, applying newkso.ru specific headers if needed."""
@@ -136,7 +138,7 @@ class DLHDExtractor(BaseExtractor):
                 'Origin': daddy_origin
             }
             # 1. Request the initial channel page
-            resp1 = await self._make_request(initial_url, headers=daddylive_headers, timeout=15)
+            resp1 = await self._make_request(initial_url, headers=daddylive_headers, timeout=15) # This will raise on failure
             
             # 2. Extract all player links (Player 1, 2, 3 ...)
             player_links = re.findall(r'<button[^>]*data-url="([^"]+)"[^>]*>Player\s*\d+</button>', resp1.text)            
@@ -276,13 +278,25 @@ class DLHDExtractor(BaseExtractor):
             auth_headers['Referer'] = iframe_url
             auth_headers['Origin'] = iframe_origin
 
-            auth_resp = await self._make_request(auth_url, headers=auth_headers)
+            try:
+                auth_resp = await self._make_request(auth_url, headers=auth_headers)
+                auth_resp.raise_for_status() # Will raise for non-2xx status
+            except Exception as auth_error:
+                logger.warning(f"Auth request failed: {auth_error}. Invalidating cache for channel {channel_id} if it exists.")
+                # If auth fails, maybe the cached data is stale. Invalidate and retry once.
+                if channel_id in self._auth_cache:
+                    del self._auth_cache[channel_id]
+                    logger.info(f"Cache for channel {channel_id} invalidated. Retrying extraction.")
+                    return await get_stream_data(baseurl, initial_url, channel_id)
+                raise ExtractorError(f"Authentication failed after retry or without cache: {auth_error}")
+
             # 7. Lookup server - Extract host parameter
             host = None
             host_patterns = [
                 r'(?s)m3u8 =.*?:.*?:.*?".*?".*?"([^"]*)',  # Original pattern
                 r'm3u8\s*=.*?"([^"]*)"',  # Simplified m3u8 pattern
                 r'host["\']?\s*[:=]\s*["\']([^"\']*)',  # host: or host= pattern
+                r'host["\']?\s*[:=]\s*["\']([^"\']*)',  # host: or host= pattern,
                 r'["\']([^"\']*\.newkso\.ru[^"\']*)',  # Direct newkso.ru pattern
                 r'["\']([^"\']*\/premium\d+[^"\']*)',  # premium path pattern
                 r'url.*?["\']([^"\']*newkso[^"\']*)',  # URL with newkso
@@ -368,21 +382,33 @@ class DLHDExtractor(BaseExtractor):
             
             # Check if the final stream URL is on newkso.ru domain
             if "newkso.ru" in clean_m3u8_url:
-                # For newkso.ru streams, use iframe URL as referer
+                # For newkso.ru streams, use iframe URL as referer and proxy only the key
+                # The hls_key_proxy endpoint will handle rewriting the manifest to proxy only the key URL
+                self.mediaflow_endpoint = "hls_key_proxy"
                 stream_headers = {
                     'User-Agent': daddylive_headers['User-Agent'],
                     'Referer': iframe_url,
                     'Origin': referer_raw
                 }
-                logger.info(f"Applied iframe-specific headers for newkso.ru stream URL: {clean_m3u8_url}")
+                logger.info(f"Using 'hls_key_proxy' for newkso.ru stream. Only the key will be proxied.")
                 logger.debug(f"Stream headers for newkso.ru: {stream_headers}")
             else:
                 # For other domains, use the original logic
+                self.mediaflow_endpoint = "hls_manifest_proxy" # Fallback to full proxy
                 stream_headers = {
                     'User-Agent': daddylive_headers['User-Agent'],
                     'Referer': referer_raw,
                     'Origin': referer_raw
                 }
+            
+            # Cache the successful auth data and iframe_url
+            self._auth_cache[channel_id] = {
+                "auth_data": params,
+                "iframe_url": iframe_url,
+                "timestamp": __import__('time').time()
+            }
+            logger.info(f"Successfully cached auth data for channel_id: {channel_id}")
+
             return {
                 "destination_url": clean_m3u8_url,
                 "request_headers": stream_headers,
