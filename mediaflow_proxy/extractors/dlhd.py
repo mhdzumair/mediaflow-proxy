@@ -463,10 +463,23 @@ class DLHDExtractor(BaseExtractor):
                     'Referer': referer_raw,
                     'Origin': referer_raw
                 }
+
+            # Prepare auth data for caching
+            auth_data_to_cache = {
+                "channel_key": channel_key,
+                "auth_host": auth_host,
+                "auth_php": auth_php,
+                "auth_ts": auth_ts,
+                "auth_rnd": auth_rnd,
+                "auth_sig": auth_sig,  # Raw signature, not URL-encoded
+                "iframe_url": iframe_url
+            }
+
             return {
                 "destination_url": clean_m3u8_url,
                 "request_headers": stream_headers,
                 "mediaflow_endpoint": self.mediaflow_endpoint,
+                "auth_data": auth_data_to_cache,  # Add auth data to the cached result
             }
 
         try:
