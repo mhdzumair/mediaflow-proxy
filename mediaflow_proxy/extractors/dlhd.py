@@ -15,7 +15,7 @@ class DLHDExtractor(BaseExtractor):
     """DLHD (DaddyLive) URL extractor for M3U8 streams."""
 
     def __init__(self, request_headers: dict):
-        super().__init__(request_headers)
+        super().__init__(request_headers, key_proxy_only=True)
         # Default to HLS proxy endpoint
         self.mediaflow_endpoint = "hls_manifest_proxy"
         # Cache for the resolved base URL to avoid repeated network calls
