@@ -196,6 +196,33 @@ async def hls_manifest_proxy(
     return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
 
 
+@proxy_router.head("/hls/key_proxy/manifest.m3u8", name="hls_key_proxy")
+@proxy_router.get("/hls/key_proxy/manifest.m3u8", name="hls_key_proxy")
+async def hls_key_proxy(
+    request: Request,
+    hls_params: Annotated[HLSManifestParams, Query()],
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+):
+    """
+    Proxify HLS stream requests, but only proxy the key URL, leaving segment URLs direct.
+
+    Args:
+        request (Request): The incoming HTTP request.
+        hls_params (HLSManifestParams): The parameters for the HLS stream request.
+        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
+
+    Returns:
+        Response: The HTTP response with the processed m3u8 playlist.
+    """
+    # Sanitize destination URL to fix common encoding issues
+    hls_params.destination = sanitize_url(hls_params.destination)
+    
+    # Set the key_only_proxy flag to True
+    hls_params.key_only_proxy = True
+    
+    return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
+
+
 @proxy_router.get("/hls/segment")
 async def hls_segment_proxy(
     request: Request,
