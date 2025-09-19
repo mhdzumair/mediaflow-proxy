@@ -57,6 +57,16 @@ class TransportConfig(BaseSettings):
             verify=False, proxy=self.proxy_url if self.all_proxy else None
         )
 
+        # Configuration for Cloudflare R2 storage domains
+        mounts["all://*.r2.cloudflarestorage.com"] = transport_cls(
+            verify=False, proxy=self.proxy_url if self.all_proxy else None
+        )
+        
+        # Generic pattern for all kluster3 subdomains
+        mounts["all://kluster3.*"] = transport_cls(
+            verify=False, proxy=self.proxy_url if self.all_proxy else None
+        )
+
         # Set default proxy for all routes if enabled
         if self.all_proxy:
             mounts["all://"] = transport_cls(proxy=self.proxy_url)
