@@ -5,6 +5,8 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse, quote, urlunparse
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
+from mediaflow_proxy.utils.cache_utils import get_cached_extractor_result, set_cache_extractor_result
+from mediaflow_proxy.utils.http_utils import create_httpx_client
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,8 @@ class DLHDExtractor(BaseExtractor):
         self._cached_base_url = None
         # Store iframe context for newkso.ru requests
         self._iframe_context = None
+        # Cache TTL for DLHD streams (30 minutes)
+        self._cache_ttl = 30 * 60
 
     def _get_headers_for_url(self, url: str, base_headers: dict) -> dict:
         """Get appropriate headers for the given URL, applying newkso.ru specific headers if needed."""
@@ -59,8 +63,84 @@ class DLHDExtractor(BaseExtractor):
         async with create_httpx_client(verify=False) as client:
             return await fetch_with_retry(client, method, url, headers, **kwargs)
 
+    async def _validate_stream_url(self, stream_url: str, headers: dict) -> bool:
+        """Validate if a cached stream URL is still working."""
+        try:
+            async with create_httpx_client(verify=False) as client:
+                # Make a HEAD request to check if the stream is accessible
+                response = await client.head(stream_url, headers=headers, timeout=10)
+                # Consider 2xx and 3xx status codes as valid
+                return 200 <= response.status_code < 400
+        except Exception as e:
+            logger.warning(f"Stream validation failed for {stream_url}: {e}")
+            return False
+
+    async def _get_cache_key(self, url: str) -> str:
+        """Generate a cache key for the DLHD URL."""
+        # Extract channel ID to create a consistent cache key
+        channel_id = self._extract_channel_id_from_url(url)
+        if channel_id:
+            return f"dlhd_stream_{channel_id}"
+        # Fallback to URL-based key
+        return f"dlhd_stream_{hash(url)}"
+
+    def _extract_channel_id_from_url(self, url: str) -> Optional[str]:
+        """Extract channel ID from DLHD URL for caching purposes."""
+        # Reuse the existing extract_channel_id logic
+        match_premium = re.search(r'/premium(\d+)/mono\.m3u8$', url)
+        if match_premium:
+            return match_premium.group(1)
+        match_player = re.search(r'/(?:watch|stream|cast|player)/stream-(\d+)\.php', url)
+        if match_player:
+            return match_player.group(1)
+        match_watch_id = re.search(r'watch\.php\?id=(\d+)', url)
+        if match_watch_id:
+            return match_watch_id.group(1)
+        match_encoded = re.search(r'(?:%2F|/)stream-(\d+)\.php', url, re.IGNORECASE)
+        if match_encoded:
+            return match_encoded.group(1)
+        match_direct = re.search(r'stream-(\d+)\.php', url)
+        if match_direct:
+            return match_direct.group(1)
+        return None
+
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
-        """Extract DLHD stream URL and required headers"""
+        """Extract DLHD stream URL and required headers with caching and fallback."""
+        from urllib.parse import urlparse, quote_plus
+        
+        # Generate cache key for this URL
+        cache_key = await self._get_cache_key(url)
+        
+        # Try to get cached result first
+        cached_result = await get_cached_extractor_result(cache_key)
+        if cached_result:
+            logger.info(f"Found cached DLHD result for {url}")
+            
+            # Validate the cached stream URL
+            stream_url = cached_result.get("destination_url")
+            stream_headers = cached_result.get("request_headers", {})
+            
+            if stream_url and await self._validate_stream_url(stream_url, stream_headers):
+                logger.info(f"Cached DLHD stream is still valid: {stream_url}")
+                return cached_result
+            else:
+                logger.warning(f"Cached DLHD stream is no longer valid, re-extracting: {stream_url}")
+                # Remove invalid cache entry
+                from mediaflow_proxy.utils.cache_utils import EXTRACTOR_CACHE
+                await EXTRACTOR_CACHE.delete(cache_key)
+        
+        # Extract fresh data from the website
+        logger.info(f"Extracting fresh DLHD data for {url}")
+        result = await self._extract_from_website(url, **kwargs)
+        
+        # Cache the new result
+        await set_cache_extractor_result(cache_key, result)
+        logger.info(f"Cached new DLHD result for {url}")
+        
+        return result
+
+    async def _extract_from_website(self, url: str, **kwargs) -> Dict[str, Any]:
+        """Extract DLHD stream URL from website (original extraction logic)."""
         from urllib.parse import urlparse, quote_plus
         async def resolve_base_url(preferred_host: str | None = None) -> str:
             """Resolve a working base domain following redirects, with shared caching.
