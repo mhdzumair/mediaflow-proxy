@@ -31,10 +31,15 @@ class DownloadError(Exception):
         super().__init__(message)
 
 
-def create_httpx_client(follow_redirects: bool = True, **kwargs) -> httpx.AsyncClient:
+def create_httpx_client(follow_redirects: bool = True, verify_ssl: bool = True, **kwargs) -> httpx.AsyncClient:
     """Creates an HTTPX client with configured proxy routing"""
     mounts = settings.transport_config.get_mounts()
     kwargs.setdefault("timeout", settings.transport_config.timeout)
+    
+    # Override SSL verification if specified
+    if not verify_ssl:
+        kwargs["verify"] = False
+    
     client = httpx.AsyncClient(mounts=mounts, follow_redirects=follow_redirects, **kwargs)
     return client
 
@@ -239,13 +244,14 @@ class Streamer:
         await self.client.aclose()
 
 
-async def download_file_with_retry(url: str, headers: dict):
+async def download_file_with_retry(url: str, headers: dict, verify_ssl: bool = True):
     """
     Downloads a file with retry logic.
 
     Args:
         url (str): The URL of the file to download.
         headers (dict): The headers to include in the request.
+        verify_ssl (bool): Whether to verify SSL certificates.
 
     Returns:
         bytes: The downloaded file content.
@@ -253,7 +259,7 @@ async def download_file_with_retry(url: str, headers: dict):
     Raises:
         DownloadError: If the download fails after retries.
     """
-    async with create_httpx_client() as client:
+    async with create_httpx_client(verify_ssl=verify_ssl) as client:
         try:
             response = await fetch_with_retry(client, "GET", url, headers)
             return response.content
@@ -264,7 +270,7 @@ async def download_file_with_retry(url: str, headers: dict):
             raise DownloadError(502, f"Failed to download file: {e.last_attempt.result()}")
 
 
-async def request_with_retry(method: str, url: str, headers: dict, **kwargs) -> httpx.Response:
+async def request_with_retry(method: str, url: str, headers: dict, verify_ssl: bool = True, **kwargs) -> httpx.Response:
     """
     Sends an HTTP request with retry logic.
 
@@ -272,6 +278,7 @@ async def request_with_retry(method: str, url: str, headers: dict, **kwargs) -> 
         method (str): The HTTP method to use (e.g., GET, POST).
         url (str): The URL to send the request to.
         headers (dict): The headers to include in the request.
+        verify_ssl (bool): Whether to verify SSL certificates.
         **kwargs: Additional arguments to pass to the request.
 
     Returns:
@@ -280,7 +287,7 @@ async def request_with_retry(method: str, url: str, headers: dict, **kwargs) -> 
     Raises:
         DownloadError: If the request fails after retries.
     """
-    async with create_httpx_client() as client:
+    async with create_httpx_client(verify_ssl=verify_ssl) as client:
         try:
             response = await fetch_with_retry(client, method, url, headers, **kwargs)
             return response
