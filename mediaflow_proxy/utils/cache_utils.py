@@ -276,7 +276,7 @@ EXTRACTOR_CACHE = HybridCache(
 
 
 # Specific cache implementations
-async def get_cached_init_segment(init_url: str, headers: dict) -> Optional[bytes]:
+async def get_cached_init_segment(init_url: str, headers: dict, verify_ssl: bool = True) -> Optional[bytes]:
     """Get initialization segment from cache or download it."""
     # Try cache first
     cached_data = await INIT_SEGMENT_CACHE.get(init_url)
@@ -285,7 +285,7 @@ async def get_cached_init_segment(init_url: str, headers: dict) -> Optional[byte
 
     # Download if not cached
     try:
-        init_content = await download_file_with_retry(init_url, headers)
+        init_content = await download_file_with_retry(init_url, headers, verify_ssl=verify_ssl)
         if init_content:
             await INIT_SEGMENT_CACHE.set(init_url, init_content)
         return init_content
@@ -299,6 +299,7 @@ async def get_cached_mpd(
     headers: dict,
     parse_drm: bool,
     parse_segment_profile_id: Optional[str] = None,
+    verify_ssl: bool = True,
 ) -> dict:
     """Get MPD from cache or download and parse it."""
     # Try cache first
@@ -312,7 +313,7 @@ async def get_cached_mpd(
 
     # Download and parse if not cached
     try:
-        mpd_content = await download_file_with_retry(mpd_url, headers)
+        mpd_content = await download_file_with_retry(mpd_url, headers, verify_ssl=verify_ssl)
         mpd_dict = parse_mpd(mpd_content)
         parsed_dict = parse_mpd_dict(mpd_dict, mpd_url, parse_drm, parse_segment_profile_id)
 
