@@ -102,7 +102,8 @@ async def handle_hls_stream_proxy(
         # If force_playlist_proxy is enabled, skip detection and directly process as m3u8
         if hls_params.force_playlist_proxy:
             return await fetch_and_process_m3u8(
-                streamer, hls_params.destination, proxy_headers, request, hls_params.key_url, hls_params.force_playlist_proxy
+                streamer, hls_params.destination, proxy_headers, request, 
+                hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy
             )
 
         parsed_url = urlparse(hls_params.destination)
@@ -111,7 +112,8 @@ async def handle_hls_stream_proxy(
             0
         ] in ["m3u", "m3u8", "m3u_plus"]:
             return await fetch_and_process_m3u8(
-                streamer, hls_params.destination, proxy_headers, request, hls_params.key_url, hls_params.force_playlist_proxy
+                streamer, hls_params.destination, proxy_headers, request, 
+                hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy
             )
 
         # Create initial streaming response to check content type
@@ -120,7 +122,8 @@ async def handle_hls_stream_proxy(
 
         if "mpegurl" in response_headers.get("content-type", "").lower():
             return await fetch_and_process_m3u8(
-                streamer, hls_params.destination, proxy_headers, request, hls_params.key_url, hls_params.force_playlist_proxy
+                streamer, hls_params.destination, proxy_headers, request, 
+                hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy
             )
 
         return EnhancedStreamingResponse(
@@ -224,7 +227,13 @@ async def proxy_stream(method: str, destination: str, proxy_headers: ProxyReques
 
 
 async def fetch_and_process_m3u8(
-    streamer: Streamer, url: str, proxy_headers: ProxyRequestHeaders, request: Request, key_url: str = None, force_playlist_proxy: bool = None
+    streamer: Streamer, 
+    url: str, 
+    proxy_headers: ProxyRequestHeaders, 
+    request: Request, 
+    key_url: str = None, 
+    force_playlist_proxy: bool = None,
+    key_only_proxy: bool = False
 ):
     """
     Fetches and processes the m3u8 playlist on-the-fly, converting it to an HLS playlist.
@@ -236,6 +245,7 @@ async def fetch_and_process_m3u8(
         request (Request): The incoming HTTP request.
         key_url (str, optional): The HLS Key URL to replace the original key URL. Defaults to None.
         force_playlist_proxy (bool, optional): Force all playlist URLs to be proxied through MediaFlow. Defaults to None.
+        key_only_proxy (bool, optional): Only proxy the key URL, leaving segment URLs direct. Defaults to False.
 
     Returns:
         Response: The HTTP response with the processed m3u8 playlist.
@@ -246,7 +256,7 @@ async def fetch_and_process_m3u8(
             await streamer.create_streaming_response(url, proxy_headers.request)
 
         # Initialize processor and response headers
-        processor = M3U8Processor(request, key_url, force_playlist_proxy)
+        processor = M3U8Processor(request, key_url, force_playlist_proxy, key_only_proxy)
         response_headers = {
             "content-disposition": "inline",
             "accept-ranges": "none",

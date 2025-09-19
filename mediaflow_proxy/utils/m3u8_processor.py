@@ -11,7 +11,7 @@ from mediaflow_proxy.utils.hls_prebuffer import hls_prebuffer
 
 
 class M3U8Processor:
-    def __init__(self, request, key_url: str = None, force_playlist_proxy: bool = None):
+    def __init__(self, request, key_url: str = None, force_playlist_proxy: bool = None, key_only_proxy: bool = False):
         """
         Initializes the M3U8Processor with the request and URL prefix.
 
@@ -19,9 +19,11 @@ class M3U8Processor:
             request (Request): The incoming HTTP request.
             key_url (HttpUrl, optional): The URL of the key server. Defaults to None.
             force_playlist_proxy (bool, optional): Force all playlist URLs to be proxied through MediaFlow. Defaults to None.
+            key_only_proxy (bool, optional): Only proxy the key URL, leaving segment URLs direct. Defaults to False.
         """
         self.request = request
         self.key_url = parse.urlparse(key_url) if key_url else None
+        self.key_only_proxy = key_only_proxy
         self.force_playlist_proxy = force_playlist_proxy
         self.mediaflow_proxy_url = str(
             request.url_for("hls_manifest_proxy").replace(scheme=get_original_scheme(request))
@@ -196,6 +198,10 @@ class M3U8Processor:
             str: The proxied URL.
         """
         full_url = parse.urljoin(base_url, url)
+
+        # If key_only_proxy is enabled, return the direct URL for segments
+        if self.key_only_proxy and not url.endswith((".m3u", ".m3u8")):
+            return full_url
 
         # Determine routing strategy based on configuration
         routing_strategy = settings.m3u8_content_routing

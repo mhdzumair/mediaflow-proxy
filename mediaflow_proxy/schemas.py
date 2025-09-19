@@ -71,6 +71,10 @@ class HLSManifestParams(GenericParams):
         None,
         description="Force all playlist URLs to be proxied through MediaFlow regardless of m3u8_content_routing setting. Useful for IPTV m3u/m3u_plus formats that don't have clear URL indicators.",
     )
+    key_only_proxy: Optional[bool] = Field(
+        False,
+        description="Only proxy the key URL, leaving segment URLs direct.",
+    )
 
 
 class MPDManifestParams(GenericParams):

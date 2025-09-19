@@ -134,9 +134,16 @@ def _check_and_redirect_dlhd_stream(request: Request, destination: str) -> Redir
         RedirectResponse | None: RedirectResponse if redirect is needed, None otherwise.
     """
     import re
+    from urllib.parse import urlparse
     
-    # Check for stream-{numero} pattern (e.g., stream-1, stream-123, etc.)
-    if re.search(r'stream-\d+', destination):
+    # Check for common DLHD/DaddyLive patterns in the URL
+    # This includes stream-XXX pattern and domain names like dlhd.dad or daddylive.sx
+    is_dlhd_link = (
+        re.search(r'stream-\d+', destination) or
+        "dlhd.dad" in urlparse(destination).netloc or
+        "daddylive.sx" in urlparse(destination).netloc
+    )
+    if is_dlhd_link:
         from urllib.parse import urlencode
         
         # Build redirect URL to extractor
@@ -185,6 +192,33 @@ async def hls_manifest_proxy(
     redirect_response = _check_and_redirect_dlhd_stream(request, hls_params.destination)
     if redirect_response:
         return redirect_response
+    
+    return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
+
+
+@proxy_router.head("/hls/key_proxy/manifest.m3u8", name="hls_key_proxy")
+@proxy_router.get("/hls/key_proxy/manifest.m3u8", name="hls_key_proxy")
+async def hls_key_proxy(
+    request: Request,
+    hls_params: Annotated[HLSManifestParams, Query()],
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+):
+    """
+    Proxify HLS stream requests, but only proxy the key URL, leaving segment URLs direct.
+
+    Args:
+        request (Request): The incoming HTTP request.
+        hls_params (HLSManifestParams): The parameters for the HLS stream request.
+        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
+
+    Returns:
+        Response: The HTTP response with the processed m3u8 playlist.
+    """
+    # Sanitize destination URL to fix common encoding issues
+    hls_params.destination = sanitize_url(hls_params.destination)
+    
+    # Set the key_only_proxy flag to True
+    hls_params.key_only_proxy = True
     
     return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
 
