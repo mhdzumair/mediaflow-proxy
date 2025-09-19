@@ -253,7 +253,7 @@ async def fetch_and_process_m3u8(
             await streamer.create_streaming_response(url, proxy_headers.request)
 
         # Initialize processor and response headers
-        processor = M3U8Processor(request, key_url, force_playlist_proxy)
+        processor = M3U8Processor(request, key_url, force_playlist_proxy, key_proxy_only=getattr(streamer, 'extractor_instance', None) and streamer.extractor_instance.key_proxy_only)
         response_headers = {
             "content-disposition": "inline",
             "accept-ranges": "none",
