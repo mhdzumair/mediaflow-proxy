@@ -16,11 +16,13 @@ class ExtractorError(Exception):
 class BaseExtractor(ABC):
     """Base class for all URL extractors."""
 
-    def __init__(self, request_headers: dict):
+    def __init__(self, request_headers: dict, **kwargs):
         self.base_headers = {
             "user-agent": settings.user_agent,
         }
         self.mediaflow_endpoint = "proxy_stream_endpoint"
+        # Set key_proxy_only from kwargs, default to False
+        self.key_proxy_only = kwargs.get("key_proxy_only", False)
         self.base_headers.update(request_headers)
 
     async def _make_request(
