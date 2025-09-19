@@ -11,7 +11,7 @@ from mediaflow_proxy.utils.hls_prebuffer import hls_prebuffer
 
 
 class M3U8Processor:
-    def __init__(self, request, key_url: str = None, force_playlist_proxy: bool = None):
+    def __init__(self, request, key_url: str = None, force_playlist_proxy: bool = None, key_proxy_only: bool = False):
         """
         Initializes the M3U8Processor with the request and URL prefix.
 
@@ -19,8 +19,10 @@ class M3U8Processor:
             request (Request): The incoming HTTP request.
             key_url (HttpUrl, optional): The URL of the key server. Defaults to None.
             force_playlist_proxy (bool, optional): Force all playlist URLs to be proxied through MediaFlow. Defaults to None.
+            key_proxy_only (bool, optional): Only proxy the key URL, not segment URLs. Defaults to False.
         """
         self.request = request
+        self.key_proxy_only = key_proxy_only
         self.key_url = parse.urlparse(key_url) if key_url else None
         self.force_playlist_proxy = force_playlist_proxy
         self.mediaflow_proxy_url = str(
@@ -159,7 +161,10 @@ class M3U8Processor:
         if "URI=" in line:
             return await self.process_key_line(line, base_url)
         elif not line.startswith("#") and line.strip():
-            return await self.proxy_content_url(line, base_url)
+            if self.key_proxy_only:
+                return parse.urljoin(base_url, line)
+            else:
+                return await self.proxy_content_url(line, base_url)
         else:
             return line
 
