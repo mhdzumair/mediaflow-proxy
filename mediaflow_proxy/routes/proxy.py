@@ -240,7 +240,30 @@ async def hls_segment_proxy(
             )
     
     # Fallback to direct streaming if not in cache
-    return await handle_stream_request("GET", segment_url, proxy_headers)
+    # Use SSL verification setting for HLS segment requests
+    from mediaflow_proxy.configs import settings
+    from mediaflow_proxy.handlers import setup_client_and_streamer
+    from mediaflow_proxy.utils.http_utils import EnhancedStreamingResponse
+    from starlette.background import BackgroundTask
+    
+    verify_ssl = not settings.disable_ssl_verification_for_hls
+    client, streamer = await setup_client_and_streamer(verify_ssl=verify_ssl)
+    
+    try:
+        await streamer.create_streaming_response(segment_url, proxy_headers.request)
+        response_headers = {k: v for k, v in streamer.response.headers.multi_items()}
+        response_headers.update(proxy_headers.response)
+        
+        return EnhancedStreamingResponse(
+            streamer.stream_content(),
+            headers=response_headers,
+            status_code=streamer.response.status_code,
+            background=BackgroundTask(streamer.close),
+        )
+    except Exception as e:
+        await streamer.close()
+        from mediaflow_proxy.handlers import handle_exceptions
+        return handle_exceptions(e)
 
 
 @proxy_router.get("/dash/segment")
@@ -287,7 +310,30 @@ async def dash_segment_proxy(
             )
     
     # Fallback to direct streaming if not in cache
-    return await handle_stream_request("GET", segment_url, proxy_headers)
+    # Use SSL verification setting for DASH segment requests
+    from mediaflow_proxy.configs import settings
+    from mediaflow_proxy.handlers import setup_client_and_streamer
+    from mediaflow_proxy.utils.http_utils import EnhancedStreamingResponse
+    from starlette.background import BackgroundTask
+    
+    verify_ssl = not settings.disable_ssl_verification_for_hls
+    client, streamer = await setup_client_and_streamer(verify_ssl=verify_ssl)
+    
+    try:
+        await streamer.create_streaming_response(segment_url, proxy_headers.request)
+        response_headers = {k: v for k, v in streamer.response.headers.multi_items()}
+        response_headers.update(proxy_headers.response)
+        
+        return EnhancedStreamingResponse(
+            streamer.stream_content(),
+            headers=response_headers,
+            status_code=streamer.response.status_code,
+            background=BackgroundTask(streamer.close),
+        )
+    except Exception as e:
+        await streamer.close()
+        from mediaflow_proxy.handlers import handle_exceptions
+        return handle_exceptions(e)
 
 
 @proxy_router.head("/stream")
