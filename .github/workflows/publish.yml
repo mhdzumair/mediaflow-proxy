@@ -1,0 +1,16 @@
+name: Docker Image CI for GHCR
+
+on:
+  push
+
+jobs:
+  build_and_publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build and push the image
+        run: |
+          docker login --username aleZZ2001 --password ${{ secrets.GH_TOKEN }} ghcr.io
+          docker build . --tag ghcr.io/alezz2001/mediaflow-proxy:latest
+          docker push ghcr.io/alezz2001/mediaflow-proxy:latest
