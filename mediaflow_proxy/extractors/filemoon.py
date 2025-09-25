@@ -2,6 +2,7 @@ import re
 from typing import Dict, Any
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
+from mediaflow_proxy.utils.http_utils import DownloadError
 from mediaflow_proxy.utils.packed import eval_solver
 
 
@@ -12,6 +13,8 @@ class FileMoonExtractor(BaseExtractor):
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         response = await self._make_request(url)
+        if "Page not found" in response.text:
+            raise DownloadError(404, "Not Found")
 
         pattern = r"iframe.*?src=[\"'](.*?)[\"']"
         match = re.search(pattern, response.text, re.DOTALL)
