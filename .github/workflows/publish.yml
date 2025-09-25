@@ -1,16 +1,26 @@
-name: Docker Image CI for GHCR
+name: Docker Image CI
 
 on:
-  push
+  push:
+    branches: [ main ]
 
 jobs:
-  build_and_publish:
+  publish:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v3
-      - name: Build and push the image
-        run: |
-          docker login --username aleZZ2001 --password ${{ secrets.GH_TOKEN }} ghcr.io
-          docker build . --tag ghcr.io/alezz2001/mediaflow-proxy:latest
-          docker push ghcr.io/alezz2001/mediaflow-proxy:latest
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GH_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          tags: ghcr.io/${{ github.repository }}:latest
+          push: true
