@@ -242,7 +242,7 @@ async def hls_segment_proxy(
     """
     from mediaflow_proxy.utils.hls_prebuffer import hls_prebuffer
     from mediaflow_proxy.configs import settings
-    
+
     # Sanitize segment URL to fix common encoding issues
     segment_url = sanitize_url(segment_url)
     
@@ -251,11 +251,13 @@ async def hls_segment_proxy(
     for key, value in request.query_params.items():
         if key.startswith("h_"):
             headers[key[2:]] = value
-    
+
     # Try to get segment from pre-buffer cache first
     if settings.enable_hls_prebuffer:
         cached_segment = await hls_prebuffer.get_segment(segment_url, headers)
         if cached_segment:
+            # Avvia prebuffer dei successivi in background
+            asyncio.create_task(hls_prebuffer.prebuffer_from_segment(segment_url, headers))
             return Response(
                 content=cached_segment,
                 media_type="video/mp2t",
@@ -265,8 +267,11 @@ async def hls_segment_proxy(
                     "Access-Control-Allow-Origin": "*"
                 }
             )
-    
-    # Fallback to direct streaming if not in cache
+
+    # Fallback to direct streaming se non in cache:
+    # prima di restituire, prova comunque a far partire il prebuffer dei successivi
+    if settings.enable_hls_prebuffer:
+        asyncio.create_task(hls_prebuffer.prebuffer_from_segment(segment_url, headers))
     return await handle_stream_request("GET", segment_url, proxy_headers)
 
 
