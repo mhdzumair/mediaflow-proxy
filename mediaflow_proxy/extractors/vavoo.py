@@ -4,24 +4,31 @@ from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
 logger = logging.getLogger(__name__)
 
+
 class VavooExtractor(BaseExtractor):
-    """Vavoo URL extractor for resolving vavoo.to links (solo httpx, async)."""
+    """Vavoo URL extractor for resolving vavoo.to links.
+
+    Features:
+    - Uses BaseExtractor's retry/timeouts
+    - Improved headers to mimic Android okhttp client
+    - Robust JSON handling and logging
+    """
 
     def __init__(self, request_headers: dict):
         super().__init__(request_headers)
         self.mediaflow_endpoint = "proxy_stream_endpoint"
 
     async def get_auth_signature(self) -> Optional[str]:
-        """Get authentication signature for Vavoo API (async, httpx, pulito)."""
+        """Get authentication signature for Vavoo API (async)."""
         headers = {
             "user-agent": "okhttp/4.11.0",
-            "accept": "application/json", 
+            "accept": "application/json",
             "content-type": "application/json; charset=utf-8",
-            "accept-encoding": "gzip"
+            "accept-encoding": "gzip",
         }
         import time
         current_time = int(time.time() * 1000)
-        
+
         data = {
             "token": "tosFwQCJMS8qrW_AjLoHPQ41646J5dRNha6ZWHnijoYQQQoADQoXYSo7ki7O5-CsgN4CH0uRk6EEoJ0728ar9scCRQW3ZkbfrPfeCXW2VgopSW2FWDqPOoVYIuVPAOnXCZ5g",
             "reason": "app-blur",
@@ -37,23 +44,17 @@ class VavooExtractor(BaseExtractor):
                 },
                 "os": {
                     "name": "android",
-                    "version": "13",
-                    "abis": ["arm64-v8a", "armeabi-v7a", "armeabi"],
-                    "host": "android"
+                    "version": "13"
                 },
                 "app": {
                     "platform": "android",
-                    "version": "3.1.21",
-                    "buildId": "289515000",
-                    "engine": "hbc85",
-                    "signatures": ["6e8a975e3cbf07d5de823a760d4c2547f86c1403105020adee5de67ac510999e"],
-                    "installer": "app.revanced.manager.flutter"
+                    "version": "3.1.21"
                 },
                 "version": {
                     "package": "tv.vavoo.app",
                     "binary": "3.1.21",
                     "js": "3.1.21"
-                }
+                },
             },
             "appFocusTime": 0,
             "playerActive": False,
@@ -70,7 +71,7 @@ class VavooExtractor(BaseExtractor):
             "adblockEnabled": True,
             "proxy": {
                 "supported": ["ss", "openvpn"],
-                "engine": "ss", 
+                "engine": "ss",
                 "ssVersion": 1,
                 "enabled": True,
                 "autoServer": True,
@@ -80,44 +81,48 @@ class VavooExtractor(BaseExtractor):
                 "supported": False
             }
         }
-        
+
         try:
             resp = await self._make_request(
                 "https://www.vavoo.tv/api/app/ping",
                 method="POST",
                 json=data,
-                headers=headers
+                headers=headers,
+                timeout=10,
+                retries=2,
             )
-            result = resp.json()
-            addon_sig = result.get("addonSig")
+            try:
+                result = resp.json()
+            except Exception:
+                logger.warning("Vavoo ping returned non-json response (status=%s).", resp.status_code)
+                return None
+
+            addon_sig = result.get("addonSig") if isinstance(result, dict) else None
             if addon_sig:
                 logger.info("Successfully obtained Vavoo authentication signature")
                 return addon_sig
             else:
-                logger.warning("No addonSig in Vavoo API response")
+                logger.warning("No addonSig in Vavoo API response: %s", result)
                 return None
-        except Exception as e:
-            logger.exception(f"Failed to get Vavoo authentication signature: {str(e)}")
+        except ExtractorError as e:
+            logger.warning("Failed to get Vavoo auth signature: %s", e)
             return None
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
-        """Extract Vavoo stream URL (async, httpx)."""
+        """Extract Vavoo stream URL (async)."""
         if "vavoo.to" not in url:
             raise ExtractorError("Not a valid Vavoo URL")
 
-        # Get authentication signature
         signature = await self.get_auth_signature()
         if not signature:
             raise ExtractorError("Failed to get Vavoo authentication signature")
 
-        # Resolve the URL
         resolved_url = await self._resolve_vavoo_link(url, signature)
         if not resolved_url:
             raise ExtractorError("Failed to resolve Vavoo URL")
 
-        # Set up headers for the resolved stream
         stream_headers = {
-            "user-agent": self.base_headers["user-agent"],
+            "user-agent": self.base_headers.get("user-agent", "okhttp/4.11.0"),
             "referer": "https://vavoo.to/",
         }
 
@@ -128,17 +133,17 @@ class VavooExtractor(BaseExtractor):
         }
 
     async def _resolve_vavoo_link(self, link: str, signature: str) -> Optional[str]:
-        """Resolve a Vavoo link using the MediaHubMX API (async, httpx)."""
+        """Resolve a Vavoo link using the MediaHubMX API (async)."""
         headers = {
-            "user-agent": "MediaHubMX/2",
+            "user-agent": "okhttp/4.11.0",
             "accept": "application/json",
-            "content-type": "application/json; charset=utf-8", 
+            "content-type": "application/json; charset=utf-8",
             "accept-encoding": "gzip",
             "mediahubmx-signature": signature
         }
         data = {
             "language": "de",
-            "region": "AT", 
+            "region": "AT",
             "url": link,
             "clientVersion": "3.1.21"
         }
@@ -148,22 +153,34 @@ class VavooExtractor(BaseExtractor):
                 "https://vavoo.to/mediahubmx-resolve.json",
                 method="POST",
                 json=data,
-                headers=headers
+                headers=headers,
+                timeout=12,
+                retries=3,
+                backoff_factor=0.6,
             )
-            result = resp.json()
-            logger.info(f"Vavoo API response: {result}")
-            
-            if isinstance(result, list) and result and result[0].get("url"):
+            try:
+                result = resp.json()
+            except Exception:
+                logger.warning("Vavoo resolve returned non-json response (status=%s). Body preview: %s", resp.status_code, getattr(resp, "text", "")[:500])
+                return None
+
+            logger.debug("Vavoo API response: %s", result)
+
+            # Accept either list or dict with 'url'
+            if isinstance(result, list) and result and isinstance(result[0], dict) and result[0].get("url"):
                 resolved_url = result[0]["url"]
-                logger.info(f"Successfully resolved Vavoo URL to: {resolved_url}")
+                logger.info("Successfully resolved Vavoo URL to: %s", resolved_url)
                 return resolved_url
             elif isinstance(result, dict) and result.get("url"):
                 resolved_url = result["url"]
-                logger.info(f"Successfully resolved Vavoo URL to: {resolved_url}")
+                logger.info("Successfully resolved Vavoo URL to: %s", resolved_url)
                 return resolved_url
             else:
-                logger.warning(f"No URL found in Vavoo API response: {result}")
+                logger.warning("No URL found in Vavoo API response: %s", result)
                 return None
+        except ExtractorError as e:
+            logger.exception(f"Vavoo resolution failed for URL {link}: {e}")
+            raise
         except Exception as e:
-            logger.exception(f"Vavoo resolution failed for URL {link}: {str(e)}")
+            logger.exception(f"Unexpected error while resolving Vavoo URL {link}: {e}")
             raise ExtractorError(f"Vavoo resolution failed: {str(e)}") from e
