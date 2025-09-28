@@ -60,8 +60,8 @@ class DLHDExtractor(BaseExtractor):
         # create_httpx_client is expected to accept verify and timeout params similar to prior usage
         async with create_httpx_client(verify=False, timeout=httpx.Timeout(timeout)) as client:
             try:
-                # Prefer helper function if exists
-                return await fetch_with_retry(client, method, url, headers or {}, timeout=timeout, retries=retries)
+                # Prefer helper function if exists (do not pass unsupported kwargs like 'retries')
+                return await fetch_with_retry(client, method, url, headers or {}, timeout=timeout)
             except Exception:
                 # Fallback to direct request so exceptions bubble with status etc.
                 logger.debug("fetch_with_retry failed or unavailable; falling back to direct request for %s", url)
@@ -370,12 +370,14 @@ class DLHDExtractor(BaseExtractor):
                 }
                 logger.info("Using 'hls_key_proxy' for newkso.ru stream. Only the key will be proxied.")
             else:
-                self.mediaflow_endpoint = "hls_manifest_proxy"
+                # Use key-only proxy for all DLHD streams as requested
+                self.mediaflow_endpoint = "hls_key_proxy"
                 stream_headers = {
                     'User-Agent': daddylive_headers['User-Agent'],
                     'Referer': referer_raw,
                     'Origin': referer_raw
                 }
+                logger.info("Using 'hls_key_proxy' for DLHD stream. Only the key will be proxied.")
 
             # cache auth data
             self._auth_cache[channel_id] = {
