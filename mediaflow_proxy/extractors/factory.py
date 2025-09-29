@@ -16,6 +16,8 @@ from mediaflow_proxy.extractors.uqload import UqloadExtractor
 from mediaflow_proxy.extractors.vavoo import VavooExtractor
 from mediaflow_proxy.extractors.vixcloud import VixCloudExtractor
 from mediaflow_proxy.extractors.fastream import FastreamExtractor
+from mediaflow_proxy.extractors.voe import VoeExtractor
+
 
 class ExtractorFactory:
     """Factory for creating URL extractors."""
@@ -35,7 +37,8 @@ class ExtractorFactory:
         "LuluStream": LuluStreamExtractor,
         "DLHD": DLHDExtractor,
         "Vavoo": VavooExtractor,
-        "Fastream": FastreamExtractor
+        "Fastream": FastreamExtractor,
+        "Voe": VoeExtractor
     }
 
     @classmethod
