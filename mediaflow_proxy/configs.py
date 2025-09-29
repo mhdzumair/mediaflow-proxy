@@ -23,7 +23,7 @@ class TransportConfig(BaseSettings):
     transport_routes: Dict[str, RouteConfig] = Field(
         default_factory=dict, description="Pattern-based route configuration"
     )
-    timeout: int = Field(30, description="Timeout for HTTP requests in seconds")
+    timeout: int = Field(60, description="Timeout for HTTP requests in seconds")
 
     def get_mounts(
         self, async_http: bool = True
@@ -42,6 +42,14 @@ class TransportConfig(BaseSettings):
 
         # Hardcoded configuration for jxoplay.xyz domain - SSL verification disabled
         mounts["all://jxoplay.xyz"] = transport_cls(
+            verify=False, proxy=self.proxy_url if self.all_proxy else None
+        )
+
+        mounts["all://dlhd.dad"] = transport_cls(
+            verify=False, proxy=self.proxy_url if self.all_proxy else None
+        )
+        
+        mounts["all://*.newkso.ru"] = transport_cls(
             verify=False, proxy=self.proxy_url if self.all_proxy else None
         )
 
