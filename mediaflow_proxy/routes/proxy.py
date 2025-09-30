@@ -233,8 +233,7 @@ async def hls_manifest_proxy(
         from urllib.parse import urlencode
         new_query_params = dict(request.query_params)
         new_query_params['d'] = highest_res_url
-        if 'max_res' in new_query_params:
-            del new_query_params['max_res']
+        new_query_params.pop('max_res', None)
         final_url = request.url.replace(query=urlencode(new_query_params))
 
         return RedirectResponse(url=str(final_url))
