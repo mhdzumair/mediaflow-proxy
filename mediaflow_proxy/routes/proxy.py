@@ -22,7 +22,11 @@ from mediaflow_proxy.schemas import (
     HLSManifestParams,
     MPDManifestParams,
 )
-from mediaflow_proxy.utils.http_utils import get_proxy_headers, ProxyRequestHeaders
+from mediaflow_proxy.utils.http_utils import (
+    get_proxy_headers,
+    ProxyRequestHeaders,
+    create_httpx_client,
+)
 from mediaflow_proxy.utils.base64_utils import process_potential_base64_url
 
 proxy_router = APIRouter()
@@ -195,7 +199,6 @@ async def hls_manifest_proxy(
         return redirect_response
 
     if hls_params.max_res:
-        from mediaflow_proxy.utils.http_utils import create_httpx_client
         from mediaflow_proxy.utils.hls_utils import parse_hls_playlist # Fixed import
 
         async with create_httpx_client(
@@ -206,11 +209,18 @@ async def hls_manifest_proxy(
                 response = await client.get(hls_params.destination)
                 response.raise_for_status()
                 playlist_content = response.text
-            except (httpx.HTTPError, httpx.TimeoutException) as e:
+            except httpx.HTTPStatusError as e:
                 raise HTTPException(
-                    status_code=500, detail=f"Failed to fetch HLS manifest: {e}"
+                    status_code=502,  # Bad Gateway
+                    detail=f"Failed to fetch HLS manifest from origin: {e.response.status_code} {e.response.reason_phrase}",
                 ) from e
-
+            except httpx.TimeoutException as e:
+                raise HTTPException(
+                    status_code=504,  # Gateway Timeout
+                    detail=f"Timeout while fetching HLS manifest: {e}",
+                ) from e
+            except httpx.RequestError as e:
+                raise HTTPException(status_code=502, detail=f"Network error fetching HLS manifest: {e}") from e
         streams = parse_hls_playlist(playlist_content, base_url=hls_params.destination)
         if not streams:
             raise HTTPException(
@@ -223,6 +233,11 @@ async def hls_manifest_proxy(
             * s.get("resolution", (0, 0))[1],
         )
 
+        # Log a warning if the selected stream has a resolution of (0, 0)
+        if highest_res_stream.get("resolution", (0, 0)) == (0, 0):
+            logging.warning("Selected stream has resolution (0, 0); resolution parsing may have failed or not be available in the manifest.")
+
+
         highest_res_url = highest_res_stream.get("url")
         if not highest_res_url:
             raise HTTPException(
@@ -231,11 +246,17 @@ async def hls_manifest_proxy(
 
         # Rebuild the manifest with only the highest resolution stream
         new_manifest_lines = ["#EXTM3U"]
-        # Add all media tags (audio, subtitles)
-        new_manifest_lines.extend([line for line in playlist_content.split('\n') if line.startswith('#EXT-X-MEDIA')])
+        # Add all media tags (audio, subtitles), using splitlines() for robustness
+        new_manifest_lines.extend([line for line in playlist_content.splitlines() if line.startswith('#EXT-X-MEDIA')])
 
         # Add the highest resolution stream
-        new_manifest_lines.append(highest_res_stream['raw_stream_inf'])
+        raw_stream_inf = highest_res_stream.get('raw_stream_inf')
+        if not raw_stream_inf:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to find raw stream info for the highest resolution stream.",
+            )
+        new_manifest_lines.append(raw_stream_inf)
         new_manifest_lines.append(highest_res_stream['url'])
 
         new_manifest = "\n".join(new_manifest_lines)
