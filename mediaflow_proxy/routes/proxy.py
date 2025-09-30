@@ -246,6 +246,11 @@ async def hls_manifest_proxy(
 
         # Rebuild the manifest with only the highest resolution stream
         new_manifest_lines = ["#EXTM3U"]
+        # Preserve other master playlist tags (VERSION, INDEPENDENT-SEGMENTS, START)
+        for line in playlist_content.splitlines():
+            if line.startswith(('#EXT-X-VERSION', '#EXT-X-INDEPENDENT-SEGMENTS', '#EXT-X-START')):
+                new_manifest_lines.append(line)
+        
         # Add all media tags (audio, subtitles), using splitlines() for robustness
         new_manifest_lines.extend([line for line in playlist_content.splitlines() if line.startswith('#EXT-X-MEDIA')])
 
