@@ -171,31 +171,70 @@ class DLHDExtractor(BaseExtractor):
 
             # Try to extract parameters via JSON-like encoded XJZ or older patterns
             def extract_auth_params(js: str) -> Dict[str, Optional[str]]:
+                # NEW: Try XKZK/PWAROS format first
+                try:
+                    # Look for const XKZK = "..."
+                    xkzk_pattern = r'(?:const|var|let)\s+XKZK\s*=\s*["\']([^"\']+)["\']'
+                    xkzk_match = re.search(xkzk_pattern, js)
+                    
+                    if xkzk_match:
+                        b64_data = xkzk_match.group(1)
+                        logger.info(f"Found XKZK data: {b64_data[:50]}...")
+                        
+                        import json
+                        json_data = base64.b64decode(b64_data).decode('utf-8')
+                        obj_data = json.loads(json_data)
+                        logger.info(f"Decoded XKZK object: {obj_data}")
+                        
+                        decoded_params = {}
+                        for k, v in obj_data.items():
+                            try:
+                                decoded_params[k] = base64.b64decode(v).decode('utf-8')
+                            except Exception:
+                                decoded_params[k] = v
+                        
+                        logger.info(f"Final decoded params: {decoded_params}")
+                        
+                        return {
+                            "auth_host": decoded_params.get('b_host'),
+                            "auth_php": decoded_params.get('b_script'),
+                            "auth_ts": decoded_params.get('b_ts'),
+                            "auth_rnd": decoded_params.get('b_rnd'),
+                            "auth_sig": decoded_params.get('b_sig')
+                        }
+                except Exception as e:
+                    logger.debug(f"Could not process XKZK format: {e}")
+
+                # FALLBACK: Try old XJZ format
                 try:
                     pattern = r'(?:const|var|let)\s+XJZ\s*=\s*["\']([^"\']+)["\']'
                     match = re.search(pattern, js)
                     if not match:
                         return {}
+
                     b64_data = match.group(1)
                     import json
                     json_data = base64.b64decode(b64_data).decode('utf-8')
                     obj_data = json.loads(json_data)
+
                     decoded_params = {}
                     for k, v in obj_data.items():
                         try:
                             decoded_params[k] = base64.b64decode(v).decode('utf-8')
                         except Exception:
                             decoded_params[k] = v
+
                     return {
                         "auth_host": decoded_params.get('b_host'),
-                        "auth_php": decoded_params.get('b_script'),
+                        "auth_php": decoded_params.get('b_script'), 
                         "auth_ts": decoded_params.get('b_ts'),
                         "auth_rnd": decoded_params.get('b_rnd'),
                         "auth_sig": decoded_params.get('b_sig')
                     }
                 except Exception as e:
-                    logger.debug(f"Could not process 'XJZ' format: {e}")
+                    logger.debug(f"Could not process XJZ format: {e}")
                     return {}
+
 
             # Extract channel key with multiple patterns
             channel_key = None
