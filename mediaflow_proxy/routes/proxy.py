@@ -2,6 +2,7 @@ from typing import Annotated
 from urllib.parse import quote, unquote
 import re
 import logging
+import httpx
 
 from fastapi import Request, Depends, APIRouter, Query, HTTPException
 from fastapi.responses import Response, RedirectResponse
@@ -205,10 +206,10 @@ async def hls_manifest_proxy(
                 response = await client.get(hls_params.destination)
                 response.raise_for_status()
                 playlist_content = response.text
-            except Exception as e:
+            except (httpx.HTTPError, httpx.TimeoutException) as e:
                 raise HTTPException(
                     status_code=500, detail=f"Failed to fetch HLS manifest: {e}"
-                )
+                ) from e
 
         streams = parse_hls_playlist(playlist_content, base_url=hls_params.destination)
         if not streams:
@@ -228,16 +229,15 @@ async def hls_manifest_proxy(
                 status_code=404, detail="Highest resolution stream has no URL."
             )
 
-        # Rebuild the URL, replacing 'd' and removing 'max_res'
+        # Rebuild the URL using Starlette's URL helpers to preserve all components
+        from urllib.parse import urlencode
         new_query_params = dict(request.query_params)
         new_query_params['d'] = highest_res_url
         if 'max_res' in new_query_params:
             del new_query_params['max_res']
+        final_url = request.url.replace(query=urlencode(new_query_params))
 
-        from urllib.parse import urlencode
-        final_url = f"{request.url.scheme}://{request.url.netloc}{request.url.path}?{urlencode(new_query_params)}"
-
-        return RedirectResponse(url=final_url)
+        return RedirectResponse(url=str(final_url))
     
     return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
 
