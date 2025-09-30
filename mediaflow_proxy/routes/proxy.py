@@ -192,6 +192,52 @@ async def hls_manifest_proxy(
     redirect_response = _check_and_redirect_dlhd_stream(request, hls_params.destination)
     if redirect_response:
         return redirect_response
+
+    if hls_params.max_res:
+        from mediaflow_proxy.utils.http_utils import create_httpx_client
+        from mediaflow_proxy.utils.hls_utils import parse_hls_playlist # Fixed import
+
+        async with create_httpx_client(
+            headers=proxy_headers.request,
+            follow_redirects=True,
+        ) as client:
+            try:
+                response = await client.get(hls_params.destination)
+                response.raise_for_status()
+                playlist_content = response.text
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500, detail=f"Failed to fetch HLS manifest: {e}"
+                )
+
+        streams = parse_hls_playlist(playlist_content, base_url=hls_params.destination)
+        if not streams:
+            raise HTTPException(
+                status_code=404, detail="No streams found in the manifest."
+            )
+
+        highest_res_stream = max(
+            streams,
+            key=lambda s: s.get("resolution", (0, 0))[0]
+            * s.get("resolution", (0, 0))[1],
+        )
+
+        highest_res_url = highest_res_stream.get("url")
+        if not highest_res_url:
+            raise HTTPException(
+                status_code=404, detail="Highest resolution stream has no URL."
+            )
+
+        # Rebuild the URL, replacing 'd' and removing 'max_res'
+        new_query_params = dict(request.query_params)
+        new_query_params['d'] = highest_res_url
+        if 'max_res' in new_query_params:
+            del new_query_params['max_res']
+
+        from urllib.parse import urlencode
+        final_url = f"{request.url.scheme}://{request.url.netloc}{request.url.path}?{urlencode(new_query_params)}"
+
+        return RedirectResponse(url=final_url)
     
     return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
 
