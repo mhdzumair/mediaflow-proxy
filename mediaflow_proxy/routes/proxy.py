@@ -26,11 +26,8 @@ from mediaflow_proxy.utils.http_utils import (
     get_proxy_headers,
     ProxyRequestHeaders,
     create_httpx_client,
-    encode_mediaflow_proxy_url,
-    get_original_scheme,
 )
 from mediaflow_proxy.utils.base64_utils import process_potential_base64_url
-from mediaflow_proxy.utils.crypto_utils import encryption_handler
 
 proxy_router = APIRouter()
 
