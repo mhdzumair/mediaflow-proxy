@@ -229,14 +229,18 @@ async def hls_manifest_proxy(
                 status_code=404, detail="Highest resolution stream has no URL."
             )
 
-        # Rebuild the URL using Starlette's URL helpers to preserve all components
-        from urllib.parse import urlencode
-        new_query_params = dict(request.query_params)
-        new_query_params['d'] = highest_res_url
-        new_query_params.pop('max_res', None)
-        final_url = request.url.replace(query=urlencode(new_query_params))
+        # Rebuild the manifest with only the highest resolution stream
+        new_manifest_lines = ["#EXTM3U"]
+        # Add all media tags (audio, subtitles)
+        new_manifest_lines.extend([line for line in playlist_content.split('\n') if line.startswith('#EXT-X-MEDIA')])
 
-        return RedirectResponse(url=str(final_url))
+        # Add the highest resolution stream
+        new_manifest_lines.append(highest_res_stream['raw_stream_inf'])
+        new_manifest_lines.append(highest_res_stream['url'])
+
+        new_manifest = "\n".join(new_manifest_lines)
+
+        return Response(content=new_manifest, media_type="application/vnd.apple.mpegurl")
     
     return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
 
