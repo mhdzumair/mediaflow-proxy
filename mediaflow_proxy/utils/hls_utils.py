@@ -25,7 +25,7 @@ def parse_hls_playlist(playlist_content: str, base_url: Optional[str] = None) ->
     
     for i, line in enumerate(lines):
         if line.startswith('#EXT-X-STREAM-INF'):
-            stream_info = {}
+            stream_info = {'raw_stream_inf': line}
             match = stream_inf_pattern.match(line)
             if not match:
                 logger.warning(f"Could not parse #EXT-X-STREAM-INF line: {line}")
