@@ -26,8 +26,11 @@ from mediaflow_proxy.utils.http_utils import (
     get_proxy_headers,
     ProxyRequestHeaders,
     create_httpx_client,
+    encode_mediaflow_proxy_url,
+    get_original_scheme,
 )
 from mediaflow_proxy.utils.base64_utils import process_potential_base64_url
+from mediaflow_proxy.utils.crypto_utils import encryption_handler
 
 proxy_router = APIRouter()
 
@@ -199,7 +202,8 @@ async def hls_manifest_proxy(
         return redirect_response
 
     if hls_params.max_res:
-        from mediaflow_proxy.utils.hls_utils import parse_hls_playlist # Fixed import
+        from mediaflow_proxy.utils.hls_utils import parse_hls_playlist
+        from mediaflow_proxy.utils.m3u8_processor import M3U8Processor
 
         async with create_httpx_client(
             headers=proxy_headers.request,
@@ -211,16 +215,17 @@ async def hls_manifest_proxy(
                 playlist_content = response.text
             except httpx.HTTPStatusError as e:
                 raise HTTPException(
-                    status_code=502,  # Bad Gateway
+                    status_code=502,
                     detail=f"Failed to fetch HLS manifest from origin: {e.response.status_code} {e.response.reason_phrase}",
                 ) from e
             except httpx.TimeoutException as e:
                 raise HTTPException(
-                    status_code=504,  # Gateway Timeout
+                    status_code=504,
                     detail=f"Timeout while fetching HLS manifest: {e}",
                 ) from e
             except httpx.RequestError as e:
                 raise HTTPException(status_code=502, detail=f"Network error fetching HLS manifest: {e}") from e
+        
         streams = parse_hls_playlist(playlist_content, base_url=hls_params.destination)
         if not streams:
             raise HTTPException(
@@ -233,18 +238,10 @@ async def hls_manifest_proxy(
             * s.get("resolution", (0, 0))[1],
         )
 
-        # Log a warning if the selected stream has a resolution of (0, 0)
         if highest_res_stream.get("resolution", (0, 0)) == (0, 0):
             logging.warning("Selected stream has resolution (0, 0); resolution parsing may have failed or not be available in the manifest.")
 
-
-        highest_res_url = highest_res_stream.get("url")
-        if not highest_res_url:
-            raise HTTPException(
-                status_code=404, detail="Highest resolution stream has no URL."
-            )
-
-        # Rebuild the manifest, preserving all master-level tags and only including the highest resolution stream.
+        # Rebuild the manifest with only the highest resolution stream
         new_manifest_lines = []
         lines = playlist_content.splitlines()
         i = 0
@@ -257,17 +254,27 @@ async def hls_manifest_proxy(
             new_manifest_lines.append(line)
             i += 1
 
-        # Now, append the highest resolution stream to the filtered manifest
         raw_stream_inf = highest_res_stream.get('raw_stream_inf')
         if not raw_stream_inf:
             raise HTTPException(
                 status_code=500,
                 detail="Failed to find raw stream info for the highest resolution stream.",
             )
-        new_manifest_lines.extend([raw_stream_inf, highest_res_stream['url']])
+        
+        highest_res_url = highest_res_stream.get("url")
+        if not highest_res_url:
+            raise HTTPException(
+                status_code=404, detail="Highest resolution stream has no URL."
+            )
+        
+        new_manifest_lines.extend([raw_stream_inf, highest_res_url])
         new_manifest = "\n".join(new_manifest_lines)
 
-        return Response(content=new_manifest, media_type="application/vnd.apple.mpegurl")
+        # Process the new manifest to proxy all URLs within it
+        processor = M3U8Processor(request, hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy)
+        processed_manifest = await processor.process_m3u8(new_manifest, base_url=hls_params.destination)
+        
+        return Response(content=processed_manifest, media_type="application/vnd.apple.mpegurl")
     
     return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
 
