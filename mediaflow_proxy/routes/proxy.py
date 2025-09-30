@@ -244,26 +244,27 @@ async def hls_manifest_proxy(
                 status_code=404, detail="Highest resolution stream has no URL."
             )
 
-        # Rebuild the manifest with only the highest resolution stream
-        new_manifest_lines = ["#EXTM3U"]
-        # Preserve other master playlist tags (VERSION, INDEPENDENT-SEGMENTS, START)
-        for line in playlist_content.splitlines():
-            if line.startswith(('#EXT-X-VERSION', '#EXT-X-INDEPENDENT-SEGMENTS', '#EXT-X-START')):
-                new_manifest_lines.append(line)
-        
-        # Add all media tags (audio, subtitles), using splitlines() for robustness
-        new_manifest_lines.extend([line for line in playlist_content.splitlines() if line.startswith('#EXT-X-MEDIA')])
+        # Rebuild the manifest, preserving all master-level tags and only including the highest resolution stream.
+        new_manifest_lines = []
+        lines = playlist_content.splitlines()
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if line.startswith('#EXT-X-STREAM-INF'):
+                # Skip this variant block (stream-inf + url)
+                i += 2
+                continue
+            new_manifest_lines.append(line)
+            i += 1
 
-        # Add the highest resolution stream
+        # Now, append the highest resolution stream to the filtered manifest
         raw_stream_inf = highest_res_stream.get('raw_stream_inf')
         if not raw_stream_inf:
             raise HTTPException(
                 status_code=500,
                 detail="Failed to find raw stream info for the highest resolution stream.",
             )
-        new_manifest_lines.append(raw_stream_inf)
-        new_manifest_lines.append(highest_res_stream['url'])
-
+        new_manifest_lines.extend([raw_stream_inf, highest_res_stream['url']])
         new_manifest = "\n".join(new_manifest_lines)
 
         return Response(content=new_manifest, media_type="application/vnd.apple.mpegurl")
