@@ -1,6 +1,9 @@
+import logging
 import re
 from typing import List, Dict, Any, Optional, Tuple
 from urllib.parse import urljoin
+
+logger = logging.getLogger(__name__)
 
 
 def parse_hls_playlist(playlist_content: str, base_url: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -23,7 +26,11 @@ def parse_hls_playlist(playlist_content: str, base_url: Optional[str] = None) ->
     for i, line in enumerate(lines):
         if line.startswith('#EXT-X-STREAM-INF'):
             stream_info = {}
-            attributes_str = stream_inf_pattern.match(line).group(1)
+            match = stream_inf_pattern.match(line)
+            if not match:
+                logger.warning(f"Could not parse #EXT-X-STREAM-INF line: {line}")
+                continue
+            attributes_str = match.group(1)
             
             # Parse attributes like BANDWIDTH, RESOLUTION, etc.
             attributes = re.findall(r'([A-Z-]+)=("([^"]+)"|([^,]+))', attributes_str)
