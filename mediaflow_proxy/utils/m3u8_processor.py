@@ -11,7 +11,7 @@ from mediaflow_proxy.utils.hls_prebuffer import hls_prebuffer
 
 
 class M3U8Processor:
-    def __init__(self, request, key_url: str = None, force_playlist_proxy: bool = None, key_only_proxy: bool = False):
+    def __init__(self, request, key_url: str = None, force_playlist_proxy: bool = None, key_only_proxy: bool = False, no_proxy: bool = False):
         """
         Initializes the M3U8Processor with the request and URL prefix.
 
@@ -20,10 +20,12 @@ class M3U8Processor:
             key_url (HttpUrl, optional): The URL of the key server. Defaults to None.
             force_playlist_proxy (bool, optional): Force all playlist URLs to be proxied through MediaFlow. Defaults to None.
             key_only_proxy (bool, optional): Only proxy the key URL, leaving segment URLs direct. Defaults to False.
+            no_proxy (bool, optional): If True, returns the manifest without proxying any URLs. Defaults to False.
         """
         self.request = request
         self.key_url = parse.urlparse(key_url) if key_url else None
         self.key_only_proxy = key_only_proxy
+        self.no_proxy = no_proxy
         self.force_playlist_proxy = force_playlist_proxy
         self.mediaflow_proxy_url = str(
             request.url_for("hls_manifest_proxy").replace(scheme=get_original_scheme(request))
@@ -176,6 +178,15 @@ class M3U8Processor:
         Returns:
             str: The processed key line.
         """
+        # If no_proxy is enabled, just resolve relative URLs without proxying
+        if self.no_proxy:
+            uri_match = re.search(r'URI="([^"]+)"', line)
+            if uri_match:
+                original_uri = uri_match.group(1)
+                full_url = parse.urljoin(base_url, original_uri)
+                line = line.replace(f'URI="{original_uri}"', f'URI="{full_url}"')
+            return line
+        
         uri_match = re.search(r'URI="([^"]+)"', line)
         if uri_match:
             original_uri = uri_match.group(1)
@@ -198,6 +209,10 @@ class M3U8Processor:
             str: The proxied URL.
         """
         full_url = parse.urljoin(base_url, url)
+
+        # If no_proxy is enabled, return the direct URL without any proxying
+        if self.no_proxy:
+            return full_url
 
         # If key_only_proxy is enabled, return the direct URL for segments
         if self.key_only_proxy and not url.endswith((".m3u", ".m3u8")):
