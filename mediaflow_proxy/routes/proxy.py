@@ -268,7 +268,7 @@ async def hls_manifest_proxy(
         new_manifest = "\n".join(new_manifest_lines)
 
         # Process the new manifest to proxy all URLs within it
-        processor = M3U8Processor(request, hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy)
+        processor = M3U8Processor(request, hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy, hls_params.no_proxy)
         processed_manifest = await processor.process_m3u8(new_manifest, base_url=hls_params.destination)
         
         return Response(content=processed_manifest, media_type="application/vnd.apple.mpegurl")
