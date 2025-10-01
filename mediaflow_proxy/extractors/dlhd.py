@@ -348,19 +348,19 @@ class DLHDExtractor(BaseExtractor):
 
             # server lookup
             server_lookup = None
-            if "fetchWithRetry('/server_lookup.php?channel_id='" in iframe_content:
-                server_lookup = '/server_lookup.php?channel_id='
+            if "fetchWithRetry('/server_lookup.js?channel_id='" in iframe_content:
+                server_lookup = '/server_lookup.js?channel_id='
             else:
                 # try to find explicit server_lookup patterns
                 js_lines = iframe_content.split('\n')
                 for js_line in js_lines:
-                    if 'server_lookup.php' in js_line and 'fetchWithRetry' in js_line:
+                    if 'server_lookup.' in js_line and 'fetchWithRetry' in js_line: # Look for .js or .php
                         start = js_line.find("'")
                         if start != -1:
                             end = js_line.find("'", start + 1)
                             if end != -1:
                                 potential_url = js_line[start+1:end]
-                                if 'server_lookup' in potential_url:
+                                if 'server_lookup' in potential_url and ('?' in potential_url or potential_url.endswith(('.js', '.php'))):
                                     server_lookup = potential_url
                                     break
 
