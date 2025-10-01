@@ -11,7 +11,7 @@ from mediaflow_proxy.utils.hls_prebuffer import hls_prebuffer
 
 
 class M3U8Processor:
-    def __init__(self, request, key_url: Optional[str] = None, force_playlist_proxy: Optional[bool] = None, key_only_proxy: bool = False, no_proxy: bool = False):
+    def __init__(self, request, key_url: str = None, force_playlist_proxy: bool = None, key_only_proxy: bool = False, no_proxy: bool = False):
         """
         Initializes the M3U8Processor with the request and URL prefix.
 
