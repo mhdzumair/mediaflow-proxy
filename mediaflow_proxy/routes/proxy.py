@@ -238,33 +238,36 @@ async def hls_manifest_proxy(
         if highest_res_stream.get("resolution", (0, 0)) == (0, 0):
             logging.warning("Selected stream has resolution (0, 0); resolution parsing may have failed or not be available in the manifest.")
 
-        # Rebuild the manifest with only the highest resolution stream
-        new_manifest_lines = []
+        # Rebuild the manifest preserving master-level directives
+        # but removing non-selected variant blocks
         lines = playlist_content.splitlines()
+        highest_variant_index = streams.index(highest_res_stream)
+        
+        variant_index = -1
+        new_manifest_lines = []
         i = 0
         while i < len(lines):
             line = lines[i]
-            if line.startswith('#EXT-X-STREAM-INF'):
-                # Skip this variant block (stream-inf + url)
-                i += 2
+            if line.startswith("#EXT-X-STREAM-INF"):
+                variant_index += 1
+                next_line = ""
+                if i + 1 < len(lines) and not lines[i + 1].startswith("#"):
+                    next_line = lines[i + 1]
+                
+                # Only keep the selected variant
+                if variant_index == highest_variant_index:
+                    new_manifest_lines.append(line)
+                    if next_line:
+                        new_manifest_lines.append(next_line)
+                
+                # Skip variant block (stream-inf + optional url)
+                i += 2 if next_line else 1
                 continue
+            
+            # Preserve all other lines (master directives, media tags, etc.)
             new_manifest_lines.append(line)
             i += 1
-
-        raw_stream_inf = highest_res_stream.get('raw_stream_inf')
-        if not raw_stream_inf:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to find raw stream info for the highest resolution stream.",
-            )
         
-        highest_res_url = highest_res_stream.get("url")
-        if not highest_res_url:
-            raise HTTPException(
-                status_code=404, detail="Highest resolution stream has no URL."
-            )
-        
-        new_manifest_lines.extend([raw_stream_inf, highest_res_url])
         new_manifest = "\n".join(new_manifest_lines)
 
         # Process the new manifest to proxy all URLs within it
