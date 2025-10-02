@@ -753,6 +753,19 @@ Ideal for users who want a reliable, plug-and-play solution without the technica
 
 Once the server is running, for more details on the available endpoints and their parameters, visit the Swagger UI at `http://localhost:8888/docs`.
 
+### New URL Parameters
+
+**`&max_res=true`**  
+Forces playback at the highest available quality (maximum resolution) supported by the stream.  
+- **Usage:** Add `&max_res=true` to the proxy URL  
+- **Effect:** Only the highest quality rendition will be selected and served.  
+- **Note:** This parameter is mainly effective with VixSrc (and similar) sources.
+
+**`&no_proxy=true`**  
+Disables the proxy for the current destination, performing a direct request.  
+- **Usage:** Add `&no_proxy=true` to the proxy URL  
+- **Effect:** Bypasses all proxy functions for the destination, useful for debugging or testing stream access directly.
+
 ### Examples
 
 #### Proxy HTTPS Stream

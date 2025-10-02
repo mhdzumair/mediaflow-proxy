@@ -179,8 +179,8 @@ class VavooExtractor(BaseExtractor):
                 logger.warning("No URL found in Vavoo API response: %s", result)
                 return None
         except ExtractorError as e:
-            logger.exception(f"Vavoo resolution failed for URL {link}: {e}")
-            raise
+            logger.error(f"Vavoo resolution failed for URL {link}: {e}")
+            raise ExtractorError(f"Vavoo resolution failed: {str(e)}") from e
         except Exception as e:
-            logger.exception(f"Unexpected error while resolving Vavoo URL {link}: {e}")
+            logger.error(f"Unexpected error while resolving Vavoo URL {link}: {e}")
             raise ExtractorError(f"Vavoo resolution failed: {str(e)}") from e

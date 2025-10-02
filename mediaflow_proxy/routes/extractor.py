@@ -70,6 +70,12 @@ async def extract_url(
         # Add API password to query params
         response["query_params"]["api_password"] = request.query_params.get("api_password")
 
+        if "max_res" in request.query_params:
+            response["query_params"]["max_res"] = request.query_params.get("max_res")
+
+        if "no_proxy" in request.query_params:
+            response["query_params"]["no_proxy"] = request.query_params.get("no_proxy")
+
         if extractor_params.redirect_stream:
             stream_url = encode_mediaflow_proxy_url(
                 **response,
