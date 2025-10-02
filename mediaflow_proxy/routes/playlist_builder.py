@@ -43,7 +43,7 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                         current_ext_headers[header_key] = header_value
                     elif key_vlc.startswith('http-'):
                         # Gestisce http-user-agent, http-referer etc.
-                        header_key = '-'.join(word.capitalize() for word in key_vlc[len('http-'):].split('-'))
+                        header_key = key_vlc[len('http-'):]
                         current_ext_headers[header_key] = value_vlc
             except Exception as e:
                 logger.error(f"⚠️ Error parsing #EXTVLCOPT '{logical_line}': {e}")
@@ -75,7 +75,7 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                 processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}"
             elif 'vixsrc.to' in logical_line:
                 encoded_url = urllib.parse.quote(logical_line, safe='')
-                processed_url_content = f"{base_url}/extractor/video?host=VixCloud&redirect_stream=true&d={encoded_url}"
+                processed_url_content = f"{base_url}/extractor/video?host=VixCloud&redirect_stream=true&d={encoded_url}&max_res=true&no_proxy=true"
             elif '.m3u8' in logical_line:
                 encoded_url = urllib.parse.quote(logical_line, safe='')
                 processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}"

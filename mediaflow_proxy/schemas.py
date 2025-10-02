@@ -75,6 +75,14 @@ class HLSManifestParams(GenericParams):
         False,
         description="Only proxy the key URL, leaving segment URLs direct.",
     )
+    no_proxy: bool = Field(
+        False,
+        description="If true, returns the manifest content without proxying any internal URLs (segments, keys, playlists).",
+    )
+    max_res: bool = Field(
+        False,
+        description="If true, redirects to the highest resolution stream in the manifest.",
+    )
 
 
 class MPDManifestParams(GenericParams):

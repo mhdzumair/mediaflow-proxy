@@ -2,6 +2,7 @@ from typing import Annotated
 from urllib.parse import quote, unquote
 import re
 import logging
+import httpx
 
 from fastapi import Request, Depends, APIRouter, Query, HTTPException
 from fastapi.responses import Response, RedirectResponse
@@ -21,7 +22,11 @@ from mediaflow_proxy.schemas import (
     HLSManifestParams,
     MPDManifestParams,
 )
-from mediaflow_proxy.utils.http_utils import get_proxy_headers, ProxyRequestHeaders
+from mediaflow_proxy.utils.http_utils import (
+    get_proxy_headers,
+    ProxyRequestHeaders,
+    create_httpx_client,
+)
 from mediaflow_proxy.utils.base64_utils import process_potential_base64_url
 
 proxy_router = APIRouter()
@@ -192,6 +197,84 @@ async def hls_manifest_proxy(
     redirect_response = _check_and_redirect_dlhd_stream(request, hls_params.destination)
     if redirect_response:
         return redirect_response
+
+    if hls_params.max_res:
+        from mediaflow_proxy.utils.hls_utils import parse_hls_playlist
+        from mediaflow_proxy.utils.m3u8_processor import M3U8Processor
+
+        async with create_httpx_client(
+            headers=proxy_headers.request,
+            follow_redirects=True,
+        ) as client:
+            try:
+                response = await client.get(hls_params.destination)
+                response.raise_for_status()
+                playlist_content = response.text
+            except httpx.HTTPStatusError as e:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to fetch HLS manifest from origin: {e.response.status_code} {e.response.reason_phrase}",
+                ) from e
+            except httpx.TimeoutException as e:
+                raise HTTPException(
+                    status_code=504,
+                    detail=f"Timeout while fetching HLS manifest: {e}",
+                ) from e
+            except httpx.RequestError as e:
+                raise HTTPException(status_code=502, detail=f"Network error fetching HLS manifest: {e}") from e
+        
+        streams = parse_hls_playlist(playlist_content, base_url=hls_params.destination)
+        if not streams:
+            raise HTTPException(
+                status_code=404, detail="No streams found in the manifest."
+            )
+
+        highest_res_stream = max(
+            streams,
+            key=lambda s: s.get("resolution", (0, 0))[0]
+            * s.get("resolution", (0, 0))[1],
+        )
+
+        if highest_res_stream.get("resolution", (0, 0)) == (0, 0):
+            logging.warning("Selected stream has resolution (0, 0); resolution parsing may have failed or not be available in the manifest.")
+
+        # Rebuild the manifest preserving master-level directives
+        # but removing non-selected variant blocks
+        lines = playlist_content.splitlines()
+        highest_variant_index = streams.index(highest_res_stream)
+        
+        variant_index = -1
+        new_manifest_lines = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if line.startswith("#EXT-X-STREAM-INF"):
+                variant_index += 1
+                next_line = ""
+                if i + 1 < len(lines) and not lines[i + 1].startswith("#"):
+                    next_line = lines[i + 1]
+                
+                # Only keep the selected variant
+                if variant_index == highest_variant_index:
+                    new_manifest_lines.append(line)
+                    if next_line:
+                        new_manifest_lines.append(next_line)
+                
+                # Skip variant block (stream-inf + optional url)
+                i += 2 if next_line else 1
+                continue
+            
+            # Preserve all other lines (master directives, media tags, etc.)
+            new_manifest_lines.append(line)
+            i += 1
+        
+        new_manifest = "\n".join(new_manifest_lines)
+
+        # Process the new manifest to proxy all URLs within it
+        processor = M3U8Processor(request, hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy, hls_params.no_proxy)
+        processed_manifest = await processor.process_m3u8(new_manifest, base_url=hls_params.destination)
+        
+        return Response(content=processed_manifest, media_type="application/vnd.apple.mpegurl")
     
     return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
 

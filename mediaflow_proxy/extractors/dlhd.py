@@ -171,31 +171,70 @@ class DLHDExtractor(BaseExtractor):
 
             # Try to extract parameters via JSON-like encoded XJZ or older patterns
             def extract_auth_params(js: str) -> Dict[str, Optional[str]]:
+                # NEW: Try XKZK/PWAROS format first
+                try:
+                    # Look for const XKZK = "..."
+                    xkzk_pattern = r'(?:const|var|let)\s+XKZK\s*=\s*["\']([^"\']+)["\']'
+                    xkzk_match = re.search(xkzk_pattern, js)
+                    
+                    if xkzk_match:
+                        b64_data = xkzk_match.group(1)
+                        logger.info(f"Found XKZK data: {b64_data[:50]}...")
+                        
+                        import json
+                        json_data = base64.b64decode(b64_data).decode('utf-8')
+                        obj_data = json.loads(json_data)
+                        logger.info(f"Decoded XKZK object: {obj_data}")
+                        
+                        decoded_params = {}
+                        for k, v in obj_data.items():
+                            try:
+                                decoded_params[k] = base64.b64decode(v).decode('utf-8')
+                            except Exception:
+                                decoded_params[k] = v
+                        
+                        logger.info(f"Final decoded params: {decoded_params}")
+                        
+                        return {
+                            "auth_host": decoded_params.get('b_host'),
+                            "auth_php": decoded_params.get('b_script'),
+                            "auth_ts": decoded_params.get('b_ts'),
+                            "auth_rnd": decoded_params.get('b_rnd'),
+                            "auth_sig": decoded_params.get('b_sig')
+                        }
+                except Exception as e:
+                    logger.debug(f"Could not process XKZK format: {e}")
+
+                # FALLBACK: Try old XJZ format
                 try:
                     pattern = r'(?:const|var|let)\s+XJZ\s*=\s*["\']([^"\']+)["\']'
                     match = re.search(pattern, js)
                     if not match:
                         return {}
+
                     b64_data = match.group(1)
                     import json
                     json_data = base64.b64decode(b64_data).decode('utf-8')
                     obj_data = json.loads(json_data)
+
                     decoded_params = {}
                     for k, v in obj_data.items():
                         try:
                             decoded_params[k] = base64.b64decode(v).decode('utf-8')
                         except Exception:
                             decoded_params[k] = v
+
                     return {
                         "auth_host": decoded_params.get('b_host'),
-                        "auth_php": decoded_params.get('b_script'),
+                        "auth_php": decoded_params.get('b_script'), 
                         "auth_ts": decoded_params.get('b_ts'),
                         "auth_rnd": decoded_params.get('b_rnd'),
                         "auth_sig": decoded_params.get('b_sig')
                     }
                 except Exception as e:
-                    logger.debug(f"Could not process 'XJZ' format: {e}")
+                    logger.debug(f"Could not process XJZ format: {e}")
                     return {}
+
 
             # Extract channel key with multiple patterns
             channel_key = None
@@ -309,19 +348,19 @@ class DLHDExtractor(BaseExtractor):
 
             # server lookup
             server_lookup = None
-            if "fetchWithRetry('/server_lookup.php?channel_id='" in iframe_content:
-                server_lookup = '/server_lookup.php?channel_id='
+            if "fetchWithRetry('/server_lookup.js?channel_id='" in iframe_content:
+                server_lookup = '/server_lookup.js?channel_id='
             else:
                 # try to find explicit server_lookup patterns
                 js_lines = iframe_content.split('\n')
                 for js_line in js_lines:
-                    if 'server_lookup.php' in js_line and 'fetchWithRetry' in js_line:
+                    if 'server_lookup.' in js_line and 'fetchWithRetry' in js_line: # Look for .js or .php
                         start = js_line.find("'")
                         if start != -1:
                             end = js_line.find("'", start + 1)
                             if end != -1:
                                 potential_url = js_line[start+1:end]
-                                if 'server_lookup' in potential_url:
+                                if 'server_lookup' in potential_url and ('?' in potential_url or potential_url.endswith(('.js', '.php'))):
                                     server_lookup = potential_url
                                     break
 
