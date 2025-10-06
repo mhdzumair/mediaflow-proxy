@@ -12,7 +12,8 @@ class FileLionsExtractor(BaseExtractor):
         headers  = {}
         patterns = [ # See https://github.com/Gujal00/ResolveURL/blob/master/script.module.resolveurl/lib/resolveurl/plugins/filelions.py
             r'''sources:\s*\[{file:\s*["'](?P<url>[^"']+)''',
-            r'''["']hls[24]["']:\s*["'](?P<url>[^"']+)'''
+            r'''["']hls4["']:\s*["'](?P<url>[^"']+)''',
+            r'''["']hls2["']:\s*["'](?P<url>[^"']+)'''
         ]
 
         final_url = await eval_solver(self, url, headers, patterns)
