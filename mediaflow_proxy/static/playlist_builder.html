@@ -11,6 +11,7 @@
         h2 { color: #2c5aa0; border-bottom: 2px solid #2c5aa0; padding-bottom: 5px; text-align: left; margin-top: 30px; }
         .form-group { margin-bottom: 15px; }
         label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
+        .proxy-label { display: inline-block; margin-left: 5px; font-weight: normal; }
         input[type="text"], input[type="url"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
         .btn { display: inline-block; padding: 10px 20px; background: #2c5aa0; color: white; text-decoration: none; border-radius: 5px; margin: 5px; cursor: pointer; border: none; font-size: 16px; }
         .btn:hover { background: #1e3d6f; }
@@ -60,6 +61,10 @@
                 <label>M3U Playlist URL</label>
                 <input type="url" class="playlist-url" placeholder="Ex: http://provider.com/playlist.m3u">
             </div>
+            <div class="form-group">
+                <input type="checkbox" class="proxy-playlist" checked>
+                <label class="proxy-label">Proxy this playlist</label>
+            </div>
         </div>
     </template>
 
@@ -94,8 +99,13 @@
             for (const entry of entries) {
                 const playlistUrl = entry.querySelector('.playlist-url').value.trim();
                 if (playlistUrl) {
+                    const shouldProxy = entry.querySelector('.proxy-playlist').checked;
+                    let definition = playlistUrl;
+                    if (!shouldProxy) {
+                        definition = 'no_proxy:' + playlistUrl;
+                    }
                     if (playlistUrl.startsWith('http://') || playlistUrl.startsWith('https://')) {
-                        definitions.push(playlistUrl);
+                        definitions.push(definition);
                     } else {
                         alert('Invalid URL: ' + playlistUrl + '. URLs must start with http:// or https://');
                         return;
