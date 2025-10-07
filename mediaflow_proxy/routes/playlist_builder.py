@@ -59,7 +59,6 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                 current_ext_headers = {}  # Resetta in caso di errore
 
         if is_header_tag:
-            yield line_with_newline
             continue
         
         if logical_line and not logical_line.startswith('#') and \
