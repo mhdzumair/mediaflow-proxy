@@ -14,6 +14,7 @@ from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
 logger = logging.getLogger(__name__)
 
+# Silenzia l'errore ConnectionResetError su Windows
 logging.getLogger('asyncio').setLevel(logging.CRITICAL)
 warnings.filterwarnings('ignore', category=ResourceWarning)
 warnings.filterwarnings('ignore', message='.*ConnectionResetError.*')
@@ -27,6 +28,7 @@ class DLHDExtractor(BaseExtractor):
     - Multi-domain support for daddylive.sx / dlhd.dad
     - Robust extraction of auth parameters and server lookup
     - Uses retries/timeouts via BaseExtractor where possible
+    - Multi-iframe fallback for resilience
     """
 
 
@@ -79,6 +81,78 @@ class DLHDExtractor(BaseExtractor):
                 response = await client.request(method, url, headers=headers or {}, timeout=timeout)
                 response.raise_for_status()
                 return response
+
+
+    async def _extract_lovecdn_stream(self, iframe_url: str, iframe_content: str, headers: dict) -> Dict[str, Any]:
+        """
+        Estrattore alternativo per iframe lovecdn.ru che usa un formato diverso.
+        """
+        try:
+            # Cerca pattern di stream URL diretto
+            m3u8_patterns = [
+                r'["\']([^"\']*\.m3u8[^"\']*)["\']',
+                r'source[:\s]+["\']([^"\']+)["\']',
+                r'file[:\s]+["\']([^"\']+\.m3u8[^"\']*)["\']',
+                r'hlsManifestUrl[:\s]*["\']([^"\']+)["\']',
+            ]
+            
+            stream_url = None
+            for pattern in m3u8_patterns:
+                matches = re.findall(pattern, iframe_content)
+                for match in matches:
+                    if '.m3u8' in match and match.startswith('http'):
+                        stream_url = match
+                        logger.info(f"Found direct m3u8 URL: {stream_url}")
+                        break
+                if stream_url:
+                    break
+            
+            # Pattern 2: Cerca costruzione dinamica URL
+            if not stream_url:
+                channel_match = re.search(r'(?:stream|channel)["\s:=]+["\']([^"\']+)["\']', iframe_content)
+                server_match = re.search(r'(?:server|domain|host)["\s:=]+["\']([^"\']+)["\']', iframe_content)
+                
+                if channel_match:
+                    channel_name = channel_match.group(1)
+                    server = server_match.group(1) if server_match else 'newkso.ru'
+                    stream_url = f"https://{server}/{channel_name}/mono.m3u8"
+                    logger.info(f"Constructed stream URL: {stream_url}")
+            
+            if not stream_url:
+                # Fallback: cerca qualsiasi URL che sembri uno stream
+                url_pattern = r'https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*'
+                matches = re.findall(url_pattern, iframe_content)
+                if matches:
+                    stream_url = matches[0]
+                    logger.info(f"Found fallback stream URL: {stream_url}")
+            
+            if not stream_url:
+                raise ExtractorError(f"Could not find stream URL in lovecdn.ru iframe")
+            
+            # Usa iframe URL come referer
+            iframe_origin = f"https://{urlparse(iframe_url).netloc}"
+            stream_headers = {
+                'User-Agent': headers['User-Agent'],
+                'Referer': iframe_url,
+                'Origin': iframe_origin
+            }
+            
+            # Determina endpoint in base al dominio dello stream
+            if "newkso.ru" in stream_url:
+                endpoint = "hls_key_proxy"
+            else:
+                endpoint = "hls_key_proxy"
+            
+            logger.info(f"Using lovecdn.ru stream with endpoint: {endpoint}")
+            
+            return {
+                "destination_url": stream_url,
+                "request_headers": stream_headers,
+                "mediaflow_endpoint": endpoint,
+            }
+            
+        except Exception as e:
+            raise ExtractorError(f"Failed to extract lovecdn.ru stream: {e}")
 
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
@@ -150,22 +224,25 @@ class DLHDExtractor(BaseExtractor):
                 'Referer': baseurl,
                 'Origin': daddy_origin
             }
-        
+
+
             # 1. Request initial page
             resp1 = await self._make_request(initial_url, headers=daddylive_headers, timeout=15)
             player_links = re.findall(r'<button[^>]*data-url="([^"]+)"[^>]*>Player\s*\d+</button>', resp1.text)
             if not player_links:
                 raise ExtractorError("No player links found on the page.")
-        
-            # MODIFICATO: Prova tutti i player e raccogli tutti gli iframe validi
+
+
+            # Prova tutti i player e raccogli tutti gli iframe validi
             last_player_error = None
-            iframe_candidates = []  # Lista di iframe da provare
+            iframe_candidates = []
             
             for player_url in player_links:
                 try:
                     if not player_url.startswith('http'):
                         player_url = baseurl + player_url.lstrip('/')
-        
+
+
                     daddylive_headers['Referer'] = player_url
                     daddylive_headers['Origin'] = player_url
                     resp2 = await self._make_request(player_url, headers=daddylive_headers, timeout=12)
@@ -181,48 +258,58 @@ class DLHDExtractor(BaseExtractor):
                     last_player_error = e
                     logger.warning(f"Failed to process player link {player_url}: {e}")
                     continue
-        
+
+
             if not iframe_candidates:
                 if last_player_error:
                     raise ExtractorError(f"All player links failed. Last error: {last_player_error}")
                 raise ExtractorError("No valid iframe found in any player page")
-        
-            # NUOVO: Prova ogni iframe finché uno non funziona
+
+
+            # Prova ogni iframe finché uno non funziona
             last_iframe_error = None
-            for iframe_url in iframe_candidates:
+            iframe_url = None
+            iframe_content = None
+            
+            for iframe_candidate in iframe_candidates:
                 try:
-                    logger.info(f"Trying iframe: {iframe_url}")
+                    logger.info(f"Trying iframe: {iframe_candidate}")
                     
-                    # Verifica prima che il dominio sia raggiungibile
-                    iframe_domain = urlparse(iframe_url).netloc
+                    iframe_domain = urlparse(iframe_candidate).netloc
                     if not iframe_domain:
-                        logger.warning(f"Invalid iframe URL format: {iframe_url}")
+                        logger.warning(f"Invalid iframe URL format: {iframe_candidate}")
                         continue
                         
-                    # store iframe context for newkso headers
-                    self._iframe_context = iframe_url
+                    self._iframe_context = iframe_candidate
                     
                     try:
-                        resp3 = await self._make_request(iframe_url, headers=daddylive_headers, timeout=12)
-                        iframe_content = resp3.text
-                        
-                        # Se arriviamo qui, l'iframe è valido - prosegui con l'estrazione
+                        resp3 = await self._make_request(iframe_candidate, headers=daddylive_headers, timeout=12)
+                        temp_content = resp3.text
                         logger.info(f"Successfully loaded iframe from: {iframe_domain}")
-                        break  # Esci dal loop, abbiamo trovato un iframe funzionante
+                        
+                        # Gestisci formati iframe diversi
+                        if 'lovecdn.ru' in iframe_domain:
+                            logger.info("Detected lovecdn.ru iframe - using alternative extraction")
+                            return await self._extract_lovecdn_stream(iframe_candidate, temp_content, daddylive_headers)
+                        
+                        # Formato standard con base64
+                        iframe_url = iframe_candidate
+                        iframe_content = temp_content
+                        break
                         
                     except Exception as dns_error:
                         logger.warning(f"DNS/Connection error for {iframe_domain}: {dns_error}")
                         last_iframe_error = dns_error
-                        continue  # Prova il prossimo iframe
+                        continue
                         
                 except Exception as e:
-                    logger.warning(f"Failed to process iframe {iframe_url}: {e}")
+                    logger.warning(f"Failed to process iframe {iframe_candidate}: {e}")
                     last_iframe_error = e
                     continue
             
-            else:
-                # Se siamo qui, nessun iframe ha funzionato
+            if not iframe_url or not iframe_content:
                 raise ExtractorError(f"All iframe candidates failed. Last error: {last_iframe_error}")
+
 
             def _extract_auth_params_dynamic(js: str) -> Dict[str, Optional[str]]:
                 """
@@ -252,8 +339,7 @@ class DLHDExtractor(BaseExtractor):
                                 "auth_sig": base64.b64decode(obj_data['b_sig']).decode('utf-8')
                             }
                         
-                        # NUOVO: Ricerca flessibile per nomi chiavi alternativi
-                        # Mappa possibili varianti di nomi alle chiavi finali
+                        # Ricerca flessibile per nomi chiavi alternativi
                         key_mappings = {
                             'auth_host': ['host', 'b_host', 'server', 'domain', 'auth_host'],
                             'auth_php': ['script', 'b_script', 'php', 'path', 'auth_php'],
@@ -265,17 +351,14 @@ class DLHDExtractor(BaseExtractor):
                         result = {}
                         for target_key, possible_names in key_mappings.items():
                             for possible_name in possible_names:
-                                if possible_name in obj_data:
-                                    # Prova a decodificare se è base64, altrimenti usa direttamente
+                                if possible_name in obj_
                                     try:
                                         decoded_value = base64.b64decode(obj_data[possible_name]).decode('utf-8')
                                         result[target_key] = decoded_value
                                     except Exception:
-                                        # Se fallisce la decodifica, usa il valore così com'è
                                         result[target_key] = obj_data[possible_name]
-                                    break  # Trovata la chiave, passa alla prossima
+                                    break
                         
-                        # Se abbiamo trovato tutte e 5 le chiavi richieste
                         if len(result) == 5:
                             logger.info(f"Found auth data with alternative key names: {list(obj_data.keys())}")
                             return result
@@ -283,28 +366,27 @@ class DLHDExtractor(BaseExtractor):
                     except Exception:
                         continue
                 
-                # Fallback: cerca anche base64 più corti (>30 caratteri) se non trova nulla
-                if True:  # Secondo tentativo
-                    pattern_short = r'(?:const|var|let)\s+[A-Z0-9_]+\s*=\s*["\']([a-zA-Z0-9+/=]{30,})["\']'
-                    matches_short = re.finditer(pattern_short, js)
-                    
-                    for match in matches_short:
-                        b64_data = match.group(1)
-                        try:
-                            json_data = base64.b64decode(b64_data).decode('utf-8')
-                            obj_data = json.loads(json_data)
-                            
-                            if all(k in obj_data for k in ['b_host', 'b_script', 'b_ts', 'b_rnd', 'b_sig']):
-                                logger.info(f"Found auth data with shorter base64: {b64_data[:20]}...")
-                                return {
-                                    "auth_host": base64.b64decode(obj_data['b_host']).decode('utf-8'),
-                                    "auth_php": base64.b64decode(obj_data['b_script']).decode('utf-8'),
-                                    "auth_ts": base64.b64decode(obj_data['b_ts']).decode('utf-8'),
-                                    "auth_rnd": base64.b64decode(obj_data['b_rnd']).decode('utf-8'),
-                                    "auth_sig": base64.b64decode(obj_data['b_sig']).decode('utf-8')
-                                }
-                        except Exception:
-                            continue
+                # Fallback: cerca anche base64 più corti (>30 caratteri)
+                pattern_short = r'(?:const|var|let)\s+[A-Z0-9_]+\s*=\s*["\']([a-zA-Z0-9+/=]{30,})["\']'
+                matches_short = re.finditer(pattern_short, js)
+                
+                for match in matches_short:
+                    b64_data = match.group(1)
+                    try:
+                        json_data = base64.b64decode(b64_data).decode('utf-8')
+                        obj_data = json.loads(json_data)
+                        
+                        if all(k in obj_data for k in ['b_host', 'b_script', 'b_ts', 'b_rnd', 'b_sig']):
+                            logger.info(f"Found auth data with shorter base64: {b64_data[:20]}...")
+                            return {
+                                "auth_host": base64.b64decode(obj_data['b_host']).decode('utf-8'),
+                                "auth_php": base64.b64decode(obj_data['b_script']).decode('utf-8'),
+                                "auth_ts": base64.b64decode(obj_data['b_ts']).decode('utf-8'),
+                                "auth_rnd": base64.b64decode(obj_data['b_rnd']).decode('utf-8'),
+                                "auth_sig": base64.b64decode(obj_data['b_sig']).decode('utf-8')
+                            }
+                    except Exception:
+                        continue
                 
                 return {}
             
