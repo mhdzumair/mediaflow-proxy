@@ -150,46 +150,79 @@ class DLHDExtractor(BaseExtractor):
                 'Referer': baseurl,
                 'Origin': daddy_origin
             }
-
-
+        
             # 1. Request initial page
             resp1 = await self._make_request(initial_url, headers=daddylive_headers, timeout=15)
             player_links = re.findall(r'<button[^>]*data-url="([^"]+)"[^>]*>Player\s*\d+</button>', resp1.text)
             if not player_links:
                 raise ExtractorError("No player links found on the page.")
-
-
+        
+            # MODIFICATO: Prova tutti i player e raccogli tutti gli iframe validi
             last_player_error = None
-            iframe_url = None
+            iframe_candidates = []  # Lista di iframe da provare
+            
             for player_url in player_links:
                 try:
                     if not player_url.startswith('http'):
                         player_url = baseurl + player_url.lstrip('/')
-
-
+        
                     daddylive_headers['Referer'] = player_url
                     daddylive_headers['Origin'] = player_url
                     resp2 = await self._make_request(player_url, headers=daddylive_headers, timeout=12)
                     iframes2 = re.findall(r'iframe src="([^"]*)', resp2.text)
-                    if iframes2:
-                        iframe_url = iframes2[0]
-                        break
+                    
+                    # Raccogli tutti gli iframe trovati
+                    for iframe in iframes2:
+                        if iframe not in iframe_candidates:
+                            iframe_candidates.append(iframe)
+                            logger.info(f"Found iframe candidate: {iframe}")
+                            
                 except Exception as e:
                     last_player_error = e
                     logger.warning(f"Failed to process player link {player_url}: {e}")
                     continue
-
-
-            if not iframe_url:
+        
+            if not iframe_candidates:
                 if last_player_error:
                     raise ExtractorError(f"All player links failed. Last error: {last_player_error}")
                 raise ExtractorError("No valid iframe found in any player page")
-
-
-            # store iframe context for newkso headers
-            self._iframe_context = iframe_url
-            resp3 = await self._make_request(iframe_url, headers=daddylive_headers, timeout=12)
-            iframe_content = resp3.text
+        
+            # NUOVO: Prova ogni iframe finché uno non funziona
+            last_iframe_error = None
+            for iframe_url in iframe_candidates:
+                try:
+                    logger.info(f"Trying iframe: {iframe_url}")
+                    
+                    # Verifica prima che il dominio sia raggiungibile
+                    iframe_domain = urlparse(iframe_url).netloc
+                    if not iframe_domain:
+                        logger.warning(f"Invalid iframe URL format: {iframe_url}")
+                        continue
+                        
+                    # store iframe context for newkso headers
+                    self._iframe_context = iframe_url
+                    
+                    try:
+                        resp3 = await self._make_request(iframe_url, headers=daddylive_headers, timeout=12)
+                        iframe_content = resp3.text
+                        
+                        # Se arriviamo qui, l'iframe è valido - prosegui con l'estrazione
+                        logger.info(f"Successfully loaded iframe from: {iframe_domain}")
+                        break  # Esci dal loop, abbiamo trovato un iframe funzionante
+                        
+                    except Exception as dns_error:
+                        logger.warning(f"DNS/Connection error for {iframe_domain}: {dns_error}")
+                        last_iframe_error = dns_error
+                        continue  # Prova il prossimo iframe
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to process iframe {iframe_url}: {e}")
+                    last_iframe_error = e
+                    continue
+            
+            else:
+                # Se siamo qui, nessun iframe ha funzionato
+                raise ExtractorError(f"All iframe candidates failed. Last error: {last_iframe_error}")
 
             def _extract_auth_params_dynamic(js: str) -> Dict[str, Optional[str]]:
                 """
