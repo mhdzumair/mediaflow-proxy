@@ -351,7 +351,7 @@ class DLHDExtractor(BaseExtractor):
                         result = {}
                         for target_key, possible_names in key_mappings.items():
                             for possible_name in possible_names:
-                                if possible_name in obj_
+                                if possible_name in obj_:
                                     try:
                                         decoded_value = base64.b64decode(obj_data[possible_name]).decode('utf-8')
                                         result[target_key] = decoded_value
