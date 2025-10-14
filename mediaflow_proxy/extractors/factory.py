@@ -3,6 +3,7 @@ from typing import Dict, Type
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 from mediaflow_proxy.extractors.dlhd import DLHDExtractor
 from mediaflow_proxy.extractors.doodstream import DoodStreamExtractor
+from mediaflow_proxy.extractors.sportsonline import SportsonlineExtractor
 from mediaflow_proxy.extractors.filelions import FileLionsExtractor
 from mediaflow_proxy.extractors.filemoon import FileMoonExtractor
 from mediaflow_proxy.extractors.livetv import LiveTVExtractor
@@ -38,7 +39,8 @@ class ExtractorFactory:
         "DLHD": DLHDExtractor,
         "Vavoo": VavooExtractor,
         "Fastream": FastreamExtractor,
-        "Voe": VoeExtractor
+        "Voe": VoeExtractor,
+        "Sportsonline": SportsonlineExtractor,
     }
 
     @classmethod

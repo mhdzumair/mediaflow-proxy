@@ -490,6 +490,12 @@ def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
     """
     request_headers = {k: v for k, v in request.headers.items() if k in SUPPORTED_REQUEST_HEADERS}
     request_headers.update({k[2:].lower(): v for k, v in request.query_params.items() if k.startswith("h_")})
+
+    # Handle common misspelling of referer
+    if "referrer" in request_headers:
+        if "referer" not in request_headers:
+            request_headers["referer"] = request_headers.pop("referrer")
+
     response_headers = {k[2:].lower(): v for k, v in request.query_params.items() if k.startswith("r_")}
     return ProxyRequestHeaders(request_headers, response_headers)
 
