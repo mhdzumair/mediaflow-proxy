@@ -209,11 +209,7 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
                 duration_val = first_segment.get("duration_mpd_timescale")
                 if time_val is not None and duration_val and duration_val > 0:
                     calculated_sequence = math.floor(time_val / duration_val)
-                    # For live streams with very large sequence numbers, use modulo to keep reasonable range
-                    if mpd_dict.get("isLive", False) and calculated_sequence > 100000:
-                        sequence = calculated_sequence % 100000
-                    else:
-                        sequence = calculated_sequence
+                    sequence = calculated_sequence
                 else:
                     sequence = first_segment.get("number", 1)
 
