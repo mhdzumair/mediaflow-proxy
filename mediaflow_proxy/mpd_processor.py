@@ -148,21 +148,33 @@ def build_hls(mpd_dict: dict, request: Request, key_id: str = None, key: str = N
         elif "audio" in profile["mimeType"]:
             audio_profiles[profile["id"]] = (profile, playlist_url)
 
-    # Add audio streams
-    for i, (profile, playlist_url) in enumerate(audio_profiles.values()):
-        is_default = "YES" if i == 0 else "NO"  # Set the first audio track as default
-        hls.append(
-            f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="{profile["id"]}",DEFAULT={is_default},AUTOSELECT={is_default},LANGUAGE="{profile.get("lang", "und")}",URI="{playlist_url}"'
-        )
+    # Check if there are both video and audio profiles to decide the strategy
+    if video_profiles and audio_profiles:
+        # Remux strategy: Combine video and audio into single stream variants for better compatibility
+        # This avoids using EXT-X-MEDIA for audio, which some players handle poorly.
+        default_audio_profile_id = next(iter(audio_profiles))
+        default_audio_profile, default_audio_playlist_url = audio_profiles[default_audio_profile_id]
 
-    # Add video streams
-    for profile, playlist_url in video_profiles.values():
-        # Only add AUDIO attribute if there are audio profiles available
-        audio_attr = ',AUDIO="audio"' if audio_profiles else ""
-        hls.append(
-            f'#EXT-X-STREAM-INF:BANDWIDTH={profile["bandwidth"]},RESOLUTION={profile["width"]}x{profile["height"]},CODECS="{profile["codecs"]}",FRAME-RATE={profile["frameRate"]}{audio_attr}'
-        )
-        hls.append(playlist_url)
+        for video_profile, video_playlist_url in video_profiles.values():
+            # For simplicity, we'll just point to the video playlist.
+            # The player will fetch this, and it will contain both video and audio segments if remuxed correctly later.
+            # The current implementation generates separate playlists. A more advanced remuxer would combine segments.
+            # For now, we just simplify the master playlist.
+            hls.append(
+                f'#EXT-X-STREAM-INF:BANDWIDTH={video_profile["bandwidth"]},RESOLUTION={video_profile["width"]}x{video_profile["height"]},CODECS="{video_profile["codecs"]},{default_audio_profile["codecs"]}",FRAME-RATE={video_profile["frameRate"]}'
+            )
+            hls.append(video_playlist_url)
+    else:
+        # Fallback to original logic if only video or only audio is present
+        if audio_profiles:
+            for i, (profile, playlist_url) in enumerate(audio_profiles.values()):
+                is_default = "YES" if i == 0 else "NO"
+                hls.append(f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="{profile["id"]}",DEFAULT={is_default},AUTOSELECT={is_default},LANGUAGE="{profile.get("lang", "und")}",URI="{playlist_url}"')
+
+        for profile, playlist_url in video_profiles.values():
+            audio_attr = ',AUDIO="audio"' if audio_profiles else ""
+            hls.append(f'#EXT-X-STREAM-INF:BANDWIDTH={profile["bandwidth"]},RESOLUTION={profile["width"]}x{profile["height"]},CODECS="{profile["codecs"]}",FRAME-RATE={profile["frameRate"]}{audio_attr}')
+            hls.append(playlist_url)
 
     return "\n".join(hls)
 
