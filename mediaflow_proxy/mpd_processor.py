@@ -181,6 +181,10 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
     """
     hls = ["#EXTM3U", "#EXT-X-VERSION:6"]
 
+    # Per i flussi VOD, potremmo dover gestire la paginazione dei segmenti
+    # se il player non supporta playlist enormi.
+    start_segment_index = int(request.query_params.get("start_segment", 0))
+    max_segments_per_playlist = 100  # Limite di segmenti per richiesta
     added_segments = 0
 
     proxy_url = request.url_for("segment_endpoint")
@@ -192,14 +196,39 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
             logger.warning(f"No segments found for profile {profile['id']}")
             continue
 
+        total_segments = len(segments)
+        paginated_segments = segments[start_segment_index : start_segment_index + max_segments_per_playlist]
+
+        if not paginated_segments:
+            logger.warning(f"No segments to process for profile {profile['id']} at start index {start_segment_index}")
+            continue
+
         # Add headers for only the first profile
         if index == 0:
-            first_segment = segments[0]
-            extinf_values = [f["extinf"] for f in segments if "extinf" in f]
+            # Usa il primo segmento della finestra paginata per calcolare la sequenza
+            first_segment_in_window = paginated_segments[0]
+            extinf_values = [f["extinf"] for f in paginated_segments if "extinf" in f]
             target_duration = math.ceil(max(extinf_values)) if extinf_values else 3
 
-            # Use the segment number directly, as it's the most reliable value for live streams.
-            sequence = first_segment.get("number", 1)
+            # Calculate media sequence using adaptive logic for different MPD types
+            mpd_start_number = profile.get("segment_template_start_number")
+            if mpd_start_number and mpd_start_number >= 1000:
+                # Amazon-style: Use absolute segment numbering
+                sequence = first_segment_in_window.get("number", mpd_start_number)
+            else:
+                # Sky-style: Use time-based calculation if available
+                time_val = first_segment_in_window.get("time")
+                duration_val = first_segment_in_window.get("duration_mpd_timescale")
+                if time_val is not None and duration_val and duration_val > 0:
+                    calculated_sequence = math.floor(time_val / duration_val)
+                    # For live streams with very large sequence numbers, use modulo to keep reasonable range
+                    if mpd_dict.get("isLive", False) and calculated_sequence > 100000:
+                        sequence = calculated_sequence % 100000
+                    else:
+                        sequence = calculated_sequence
+                else:
+                    sequence = first_segment_in_window.get("number", 1) + start_segment_index
+
             hls.extend(
                 [
                     f"#EXT-X-TARGETDURATION:{target_duration}",
@@ -218,7 +247,7 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
         query_params.pop("d", None)
         has_encrypted = query_params.pop("has_encrypted", False)
 
-        for segment in segments:
+        for segment in paginated_segments:
             hls.append(f'#EXTINF:{segment["extinf"]:.3f},')
             query_params.update(
                 {"init_url": init_url, "segment_url": segment["media"], "mime_type": profile["mimeType"]}
@@ -232,8 +261,25 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
             )
             added_segments += 1
 
-    if not mpd_dict["isLive"]:
-        hls.append("#EXT-X-ENDLIST")
+    # Se è un VOD e ci sono altri segmenti, non aggiungere ENDLIST
+    # e il player continuerà a chiedere la playlist.
+    # Altrimenti, se è l'ultima pagina o un live, gestisci di conseguenza.
+    is_last_page = (start_segment_index + max_segments_per_playlist) >= total_segments
 
-    logger.info(f"Added {added_segments} segments to HLS playlist")
+    if mpd_dict.get("isLive", False):
+        # Per i live, non aggiungiamo mai ENDLIST
+        pass
+    elif is_last_page:
+        # Se è un VOD e questa è l'ultima pagina di segmenti, chiudi la playlist
+        hls.append("#EXT-X-ENDLIST")
+    else:
+        # Se è un VOD ma ci sono altre pagine, non chiudere la playlist.
+        # Il player ricaricherà la playlist. Alcuni player potrebbero non farlo
+        # per VOD, ma questo è il miglior compromesso.
+        # Non aggiungiamo nulla, il player dovrebbe ricaricare la stessa URL
+        # (anche se idealmente dovrebbe chiedere la pagina successiva).
+        # Per ora, questo approccio limita la dimensione della playlist iniziale.
+        pass
+
+    logger.info(f"Added {added_segments} segments to HLS playlist (start_index: {start_segment_index}, total: {total_segments})")
     return "\n".join(hls)
