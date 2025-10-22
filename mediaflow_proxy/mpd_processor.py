@@ -198,21 +198,8 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
             extinf_values = [f["extinf"] for f in segments if "extinf" in f]
             target_duration = math.ceil(max(extinf_values)) if extinf_values else 3
 
-            # Calculate media sequence using adaptive logic for different MPD types
-            mpd_start_number = profile.get("segment_template_start_number")
-            if mpd_start_number and mpd_start_number >= 1000:
-                # Amazon-style: Use absolute segment numbering
-                sequence = first_segment.get("number", mpd_start_number)
-            else:
-                # Sky-style: Use time-based calculation if available
-                time_val = first_segment.get("time")
-                duration_val = first_segment.get("duration_mpd_timescale")
-                if time_val is not None and duration_val and duration_val > 0:
-                    calculated_sequence = math.floor(time_val / duration_val)
-                    sequence = calculated_sequence
-                else:
-                    sequence = first_segment.get("number", 1)
-
+            # Use the segment number directly, as it's the most reliable value for live streams.
+            sequence = first_segment.get("number", 1)
             hls.extend(
                 [
                     f"#EXT-X-TARGETDURATION:{target_duration}",
