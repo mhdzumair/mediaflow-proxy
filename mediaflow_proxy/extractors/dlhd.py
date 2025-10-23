@@ -205,7 +205,7 @@ class DLHDExtractor(BaseExtractor):
             match_player = re.search(r'/(?:watch|stream|cast|player)/stream-(\d+)\.php', u)
             if match_player:
                 return match_player.group(1)
-            match_watch_id = re.search(r'watch\.php\?id=(\d+)', u)
+            match_watch_id = re.search(r'watch(?:topembed|streamed|extra|pulsematch)?\.php\?id=(\d+)', u)
             if match_watch_id:
                 return match_watch_id.group(1)
             match_encoded = re.search(r'(?:%2F|/)stream-(\d+)\.php', u, re.IGNORECASE)
