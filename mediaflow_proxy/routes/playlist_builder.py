@@ -20,6 +20,7 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
     includendo gli headers da #EXTVLCOPT e #EXTHTTP. Yields rewritten lines.
     """
     current_ext_headers: Dict[str, str] = {}  # Dizionario per conservare gli headers dalle direttive
+    current_kodi_props: Dict[str, str] = {}  # Dizionario per conservare le proprietà KODI
     
     for line_with_newline in m3u_lines_iterator:
         line_content = line_with_newline.rstrip('\n')
@@ -57,9 +58,19 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
             except Exception as e:
                 logger.error(f"⚠️ Error parsing #EXTHTTP '{logical_line}': {e}")
                 current_ext_headers = {}  # Resetta in caso di errore
+        
+        elif logical_line.startswith('#KODIPROP:'):
+            is_header_tag = True
+            try:
+                prop_str = logical_line.split(':', 1)[1]
+                if '=' in prop_str:
+                    key_kodi, value_kodi = prop_str.split('=', 1)
+                    current_kodi_props[key_kodi.strip()] = value_kodi.strip()
+            except Exception as e:
+                logger.error(f"⚠️ Error parsing #KODIPROP '{logical_line}': {e}")
+
 
         if is_header_tag:
-            yield line_with_newline
             continue
         
         if logical_line and not logical_line.startswith('#') and \
@@ -80,42 +91,50 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                 encoded_url = urllib.parse.quote(logical_line, safe='')
                 processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}"
             elif '.mpd' in logical_line:
-                # Estrai parametri DRM dall'URL MPD se presenti
+                # Estrai parametri DRM dall'URL MPD se presenti (es. &key_id=...&key=...)
                 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
                 
                 # Parse dell'URL per estrarre parametri
                 parsed_url = urlparse(logical_line)
                 query_params = parse_qs(parsed_url.query)
                 
-                # Estrai key_id e key se presenti
+                # Estrai key_id e key se presenti nei parametri della query
                 key_id = query_params.get('key_id', [None])[0]
                 key = query_params.get('key', [None])[0]
                 
                 # Rimuovi key_id e key dai parametri originali
-                clean_params = {k: v for k, v in query_params.items() if k not in ['key_id', 'key']}
+                clean_query_params = {k: v for k, v in query_params.items() if k not in ['key_id', 'key']}
                 
                 # Ricostruisci l'URL senza i parametri DRM
-                clean_query = urlencode(clean_params, doseq=True) if clean_params else ''
+                clean_query = urlencode(clean_query_params, doseq=True)
                 clean_url = urlunparse((
                     parsed_url.scheme,
                     parsed_url.netloc,
                     parsed_url.path,
                     parsed_url.params,
                     clean_query,
-                    parsed_url.fragment
+                    ''  # Rimuovi il frammento per evitare problemi
                 ))
                 
-                # Encode the MPD URL like other URL types
-                clean_url_for_param = urllib.parse.quote(clean_url, safe='')
-
-                # Costruisci l'URL MediaFlow con parametri DRM separati
-                processed_url_content = f"{base_url}/proxy/mpd/manifest.m3u8?d={clean_url_for_param}"
+                # Codifica l'URL pulito per il parametro 'd'
+                encoded_clean_url = urllib.parse.quote(clean_url, safe='')
                 
-                # Aggiungi parametri DRM se presenti
+                # Costruisci l'URL MediaFlow con parametri DRM separati
+                processed_url_content = f"{base_url}/proxy/mpd/manifest.m3u8?d={encoded_clean_url}"
+                
+                # Aggiungi i parametri DRM all'URL di MediaFlow se sono stati trovati
                 if key_id:
                     processed_url_content += f"&key_id={key_id}"
                 if key:
                     processed_url_content += f"&key={key}"
+            
+            # Aggiungi chiavi da #KODIPROP se presenti
+            license_key = current_kodi_props.get('inputstream.adaptive.license_key')
+            if license_key and ':' in license_key:
+                key_id_kodi, key_kodi = license_key.split(':', 1)
+                processed_url_content += f"&key_id={key_id_kodi}"
+                processed_url_content += f"&key={key_kodi}"
+
             elif '.php' in logical_line:
                 encoded_url = urllib.parse.quote(logical_line, safe='')
                 processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}"
@@ -129,6 +148,9 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                 header_params_str = "".join([f"&h_{urllib.parse.quote(key)}={urllib.parse.quote(value)}" for key, value in current_ext_headers.items()])
                 processed_url_content += header_params_str
                 current_ext_headers = {}
+            
+            # Resetta le proprietà KODI dopo averle usate
+            current_kodi_props = {}
             
             # Aggiungi api_password sempre alla fine
             if api_password:
@@ -166,33 +188,45 @@ async def async_download_m3u_playlist(url: str) -> list[str]:
 
 async def async_generate_combined_playlist(playlist_definitions: list[str], base_url: str, api_password: Optional[str]):
     """Genera una playlist combinata da multiple definizioni, scaricando in parallelo."""
-    # Prepara gli URL
-    playlist_urls = []
+    # Prepara i task di download
+    download_tasks = []
     for definition in playlist_definitions:
-        if '&' in definition:
-            parts = definition.split('&', 1)
-            playlist_url_str = parts[1] if len(parts) > 1 else parts[0]
-        else:
-            playlist_url_str = definition
-        playlist_urls.append(playlist_url_str)
+        should_proxy = True
+        playlist_url_str = definition
+
+        if definition.startswith('no_proxy:'):
+            should_proxy = False
+            playlist_url_str = definition[len('no_proxy:'):]
+        
+        download_tasks.append({
+            "url": playlist_url_str,
+            "proxy": should_proxy
+        })
 
     # Scarica tutte le playlist in parallelo
-    results = await asyncio.gather(*[async_download_m3u_playlist(url) for url in playlist_urls], return_exceptions=True)
+    results = await asyncio.gather(*[async_download_m3u_playlist(task["url"]) for task in download_tasks], return_exceptions=True)
 
     first_playlist_header_handled = False
     for idx, lines in enumerate(results):
+        task_info = download_tasks[idx]
         if isinstance(lines, Exception):
-            yield f"# ERROR processing playlist {playlist_urls[idx]}: {str(lines)}\n"
+            yield f"# ERROR processing playlist {task_info['url']}: {str(lines)}\n"
             continue
+        
         playlist_lines: list[str] = lines  # type: ignore
         current_playlist_had_lines = False
         first_line_of_this_segment = True
-        lines_processed_for_current_playlist = 0
-        rewritten_lines_iter = rewrite_m3u_links_streaming(iter(playlist_lines), base_url, api_password)
-        for line in rewritten_lines_iter:
+        
+        # Scegli se riscrivere i link o meno
+        if task_info["proxy"]:
+            lines_iterator = rewrite_m3u_links_streaming(iter(playlist_lines), base_url, api_password)
+        else:
+            lines_iterator = iter(playlist_lines)
+
+        for line in lines_iterator:
             current_playlist_had_lines = True
             is_extm3u_line = line.strip().startswith('#EXTM3U')
-            lines_processed_for_current_playlist += 1
+            
             if not first_playlist_header_handled:
                 yield line
                 if is_extm3u_line:

@@ -19,6 +19,9 @@ class TransportConfig(BaseSettings):
     proxy_url: Optional[str] = Field(
         None, description="Primary proxy URL. Example: socks5://user:pass@proxy:1080 or http://proxy:8080"
     )
+    disable_ssl_verification_globally: bool = Field(
+        False, description="Disable SSL verification for all requests globally."
+    )
     all_proxy: bool = Field(False, description="Enable proxy for all routes by default")
     transport_routes: Dict[str, RouteConfig] = Field(
         default_factory=dict, description="Pattern-based route configuration"
@@ -33,11 +36,13 @@ class TransportConfig(BaseSettings):
         """
         mounts = {}
         transport_cls = httpx.AsyncHTTPTransport if async_http else httpx.HTTPTransport
+        global_verify = not self.disable_ssl_verification_globally
 
         # Configure specific routes
         for pattern, route in self.transport_routes.items():
             mounts[pattern] = transport_cls(
-                verify=route.verify_ssl, proxy=route.proxy_url or self.proxy_url if route.proxy else None
+                verify=route.verify_ssl if global_verify else False,
+                proxy=route.proxy_url or self.proxy_url if route.proxy else None,
             )
 
         # Hardcoded configuration for jxoplay.xyz domain - SSL verification disabled
@@ -53,9 +58,15 @@ class TransportConfig(BaseSettings):
             verify=False, proxy=self.proxy_url if self.all_proxy else None
         )
 
+        # Apply global settings for proxy and SSL
+        default_proxy_url = self.proxy_url if self.all_proxy else None
+        if default_proxy_url or not global_verify:
+            mounts["all://"] = transport_cls(proxy=default_proxy_url, verify=global_verify)
+
         # Set default proxy for all routes if enabled
-        if self.all_proxy:
-            mounts["all://"] = transport_cls(proxy=self.proxy_url)
+        # This part is now handled above to combine proxy and SSL settings
+        # if self.all_proxy:
+        #     mounts["all://"] = transport_cls(proxy=self.proxy_url)
 
         return mounts
 
