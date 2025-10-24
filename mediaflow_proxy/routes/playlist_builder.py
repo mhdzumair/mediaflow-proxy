@@ -28,6 +28,9 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
         
         is_header_tag = False
         if logical_line.startswith('#EXTVLCOPT:'):
+            # Yield the original line to preserve it
+            yield line_with_newline
+            
             is_header_tag = True
             try:
                 option_str = logical_line.split(':', 1)[1]
@@ -50,6 +53,9 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                 logger.error(f"⚠️ Error parsing #EXTVLCOPT '{logical_line}': {e}")
         
         elif logical_line.startswith('#EXTHTTP:'):
+            # Yield the original line to preserve it
+            yield line_with_newline
+            
             is_header_tag = True
             try:
                 json_str = logical_line.split(':', 1)[1]
@@ -60,6 +66,9 @@ def rewrite_m3u_links_streaming(m3u_lines_iterator: Iterator[str], base_url: str
                 current_ext_headers = {}  # Resetta in caso di errore
         
         elif logical_line.startswith('#KODIPROP:'):
+            # Yield the original line to preserve it
+            yield line_with_newline
+            
             is_header_tag = True
             try:
                 prop_str = logical_line.split(':', 1)[1]
@@ -269,11 +278,12 @@ async def async_generate_combined_playlist(playlist_definitions: list[str], base
         # Estrai le entry dei canali
         # Modifica: Estrai le entry e mantieni l'informazione sul proxy
         channel_entries_with_proxy_info = []
-        for result, task_info in zip(results, download_tasks):
-            if task_info.get("sort") and not isinstance(result, Exception):
-                entries = parse_channel_entries(result)
+        for idx, result in enumerate(results):
+            task_info = download_tasks[idx]
+            if task_info.get("sort") and isinstance(result, list):
+                entries = parse_channel_entries(result) # result è la lista di linee della playlist
                 for info, url in entries:
-                    channel_entries_with_proxy_info.append((info, url, task_info["proxy"]))
+                    channel_entries_with_proxy_info.append((info, url, task_info["proxy"])) # Associa l'opzione proxy
 
         # Ordina le entry in base al nome del canale (da #EXTINF)
         channel_entries_with_proxy_info.sort(key=lambda x: x[0].split(',')[-1].strip())
