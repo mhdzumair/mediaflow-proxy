@@ -195,20 +195,25 @@ async def async_download_m3u_playlist(url: str) -> list[str]:
         raise
     return lines
 
-def parse_channel_entries(lines: list[str]) -> list[tuple[str, str]]:
+def parse_channel_entries(lines: list[str]) -> list[list[str]]:
     """
     Analizza le linee di una playlist M3U e le raggruppa in entry di canali.
-    Ogni entry è una tupla (info_line, url_line).
+    Ogni entry è una lista di linee che compongono un singolo canale
+    (da #EXTINF fino all'URL, incluse le righe intermedie).
     """
     entries = []
-    info_line = None
+    current_entry = []
     for line in lines:
         stripped_line = line.strip()
         if stripped_line.startswith('#EXTINF:'):
-            info_line = line
-        elif info_line and stripped_line and not stripped_line.startswith('#'):
-            entries.append((info_line, line))
-            info_line = None
+            if current_entry: # In caso di #EXTINF senza URL precedente
+                logger.warning(f"Found a new #EXTINF tag before a URL was found for the previous entry. Discarding: {current_entry}")
+            current_entry = [line]
+        elif current_entry:
+            current_entry.append(line)
+            if stripped_line and not stripped_line.startswith('#'):
+                entries.append(current_entry)
+                current_entry = []
     return entries
 
 
@@ -282,11 +287,13 @@ async def async_generate_combined_playlist(playlist_definitions: list[str], base
             task_info = download_tasks[idx]
             if task_info.get("sort") and isinstance(result, list):
                 entries = parse_channel_entries(result) # result è la lista di linee della playlist
-                for info, url in entries:
-                    channel_entries_with_proxy_info.append((info, url, task_info["proxy"])) # Associa l'opzione proxy
+                for entry_lines in entries:
+                    # L'opzione proxy si applica a tutto il blocco del canale
+                    channel_entries_with_proxy_info.append((entry_lines, task_info["proxy"]))
 
         # Ordina le entry in base al nome del canale (da #EXTINF)
-        channel_entries_with_proxy_info.sort(key=lambda x: x[0].split(',')[-1].strip())
+        # La prima riga di ogni entry è sempre #EXTINF
+        channel_entries_with_proxy_info.sort(key=lambda x: x[0][0].split(',')[-1].strip())
         
         # Gestisci l'header una sola volta per il blocco ordinato
         if not first_playlist_header_handled:
@@ -294,8 +301,13 @@ async def async_generate_combined_playlist(playlist_definitions: list[str], base
             first_playlist_header_handled = True
             
         # Applica la riscrittura dei link in modo selettivo
-        for info, url, should_proxy in channel_entries_with_proxy_info:
-            yield info # Yield #EXTINF line
+        for entry_lines, should_proxy in channel_entries_with_proxy_info:
+            # L'URL è l'ultima riga dell'entry
+            url = entry_lines[-1]
+            # Yield tutte le righe prima dell'URL
+            for line in entry_lines[:-1]:
+                yield line
+            
             if should_proxy:
                 # Usa un iteratore fittizio per processare una sola linea
                 rewritten_url_iter = rewrite_m3u_links_streaming(iter([url]), base_url, api_password)
