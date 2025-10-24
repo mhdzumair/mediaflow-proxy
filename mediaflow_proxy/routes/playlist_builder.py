@@ -224,7 +224,8 @@ async def async_generate_combined_playlist(playlist_definitions: list[str], base
 
         download_tasks.append({
             "url": playlist_url_str,
-            "proxy": should_proxy
+            "proxy": should_proxy,
+            "sort": should_sort
         })
 
     # Scarica tutte le playlist in parallelo
