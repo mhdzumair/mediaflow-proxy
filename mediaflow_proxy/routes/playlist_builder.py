@@ -186,6 +186,23 @@ async def async_download_m3u_playlist(url: str) -> list[str]:
         raise
     return lines
 
+def parse_channel_entries(lines: list[str]) -> list[tuple[str, str]]:
+    """
+    Analizza le linee di una playlist M3U e le raggruppa in entry di canali.
+    Ogni entry è una tupla (info_line, url_line).
+    """
+    entries = []
+    info_line = None
+    for line in lines:
+        stripped_line = line.strip()
+        if stripped_line.startswith('#EXTINF:'):
+            info_line = line
+        elif info_line and stripped_line and not stripped_line.startswith('#'):
+            entries.append((info_line, line))
+            info_line = None
+    return entries
+
+
 async def async_generate_combined_playlist(playlist_definitions: list[str], base_url: str, api_password: Optional[str]):
     """Genera una playlist combinata da multiple definizioni, scaricando in parallelo."""
     # Prepara i task di download
@@ -193,11 +210,18 @@ async def async_generate_combined_playlist(playlist_definitions: list[str], base
     for definition in playlist_definitions:
         should_proxy = True
         playlist_url_str = definition
+        should_sort = False
 
-        if definition.startswith('no_proxy:'):
+        if definition.startswith('sort:'):
+            should_sort = True
+            definition = definition[len('sort:'):]
+
+        if definition.startswith('no_proxy:'): # Può essere combinato con sort:
             should_proxy = False
             playlist_url_str = definition[len('no_proxy:'):]
-        
+        else:
+            playlist_url_str = definition
+
         download_tasks.append({
             "url": playlist_url_str,
             "proxy": should_proxy
@@ -205,40 +229,71 @@ async def async_generate_combined_playlist(playlist_definitions: list[str], base
 
     # Scarica tutte le playlist in parallelo
     results = await asyncio.gather(*[async_download_m3u_playlist(task["url"]) for task in download_tasks], return_exceptions=True)
-
-    first_playlist_header_handled = False
-    for idx, lines in enumerate(results):
+    
+    # Raggruppa le playlist da ordinare e quelle da non ordinare
+    sorted_playlist_lines = []
+    unsorted_playlists_data = []
+    
+    for idx, result in enumerate(results):
         task_info = download_tasks[idx]
-        if isinstance(lines, Exception):
-            yield f"# ERROR processing playlist {task_info['url']}: {str(lines)}\n"
+        if isinstance(result, Exception):
+            # Aggiungi errore come playlist non ordinata
+            unsorted_playlists_data.append({'lines': [f"# ERROR processing playlist {task_info['url']}: {str(result)}\n"], 'proxy': False})
             continue
         
-        playlist_lines: list[str] = lines  # type: ignore
-        current_playlist_had_lines = False
-        first_line_of_this_segment = True
-        
-        # Scegli se riscrivere i link o meno
-        if task_info["proxy"]:
-            lines_iterator = rewrite_m3u_links_streaming(iter(playlist_lines), base_url, api_password)
+        if task_info.get("sort", False):
+            sorted_playlist_lines.extend(result)
         else:
-            lines_iterator = iter(playlist_lines)
+            unsorted_playlists_data.append({'lines': result, 'proxy': task_info['proxy']})
 
-        for line in lines_iterator:
-            current_playlist_had_lines = True
-            is_extm3u_line = line.strip().startswith('#EXTM3U')
-            
-            if not first_playlist_header_handled:
-                yield line
-                if is_extm3u_line:
+    # Gestione dell'header #EXTM3U
+    first_playlist_header_handled = False
+    def yield_header_once(lines_iter):
+        nonlocal first_playlist_header_handled
+        has_header = False
+        for line in lines_iter:
+            is_extm3u = line.strip().startswith('#EXTM3U')
+            if is_extm3u:
+                has_header = True
+                if not first_playlist_header_handled:
                     first_playlist_header_handled = True
-            else:
-                if first_line_of_this_segment and is_extm3u_line:
-                    pass
-                else:
                     yield line
-            first_line_of_this_segment = False
-        if current_playlist_had_lines and not first_playlist_header_handled:
-            first_playlist_header_handled = True
+            else:
+                yield line
+        if has_header and not first_playlist_header_handled:
+             first_playlist_header_handled = True
+
+    # 1. Processa e ordina le playlist marcate con 'sort'
+    if sorted_playlist_lines:
+        # Estrai le entry dei canali
+        channel_entries = parse_channel_entries(sorted_playlist_lines)
+        # Ordina le entry in base al nome del canale (da #EXTINF)
+        channel_entries.sort(key=lambda x: x[0].split(',')[-1].strip())
+        
+        # Ricostruisci le linee della playlist ordinata
+        sorted_lines_for_processing = []
+        if not any(line.strip().startswith('#EXTM3U') for line in sorted_playlist_lines):
+            sorted_lines_for_processing.append("#EXTM3U\n")
+        else:
+             sorted_lines_for_processing.append("#EXTM3U\n")
+
+        for info, url in channel_entries:
+            sorted_lines_for_processing.append(info)
+            sorted_lines_for_processing.append(url)
+
+        # Applica la riscrittura dei link
+        processed_sorted_lines = rewrite_m3u_links_streaming(iter(sorted_lines_for_processing), base_url, api_password)
+        for line in yield_header_once(processed_sorted_lines):
+            yield line
+
+    # 2. Accoda le playlist non ordinate
+    for playlist_data in unsorted_playlists_data:
+        lines_iterator = iter(playlist_data['lines'])
+        if playlist_data['proxy']:
+            lines_iterator = rewrite_m3u_links_streaming(lines_iterator, base_url, api_password)
+        
+        for line in yield_header_once(lines_iterator):
+            yield line
 
 
 @playlist_builder_router.get("/playlist")
