@@ -267,25 +267,32 @@ async def async_generate_combined_playlist(playlist_definitions: list[str], base
     # 1. Processa e ordina le playlist marcate con 'sort'
     if sorted_playlist_lines:
         # Estrai le entry dei canali
-        channel_entries = parse_channel_entries(sorted_playlist_lines)
+        # Modifica: Estrai le entry e mantieni l'informazione sul proxy
+        channel_entries_with_proxy_info = []
+        for result, task_info in zip(results, download_tasks):
+            if task_info.get("sort") and not isinstance(result, Exception):
+                entries = parse_channel_entries(result)
+                for info, url in entries:
+                    channel_entries_with_proxy_info.append((info, url, task_info["proxy"]))
+
         # Ordina le entry in base al nome del canale (da #EXTINF)
-        channel_entries.sort(key=lambda x: x[0].split(',')[-1].strip())
+        channel_entries_with_proxy_info.sort(key=lambda x: x[0].split(',')[-1].strip())
         
-        # Ricostruisci le linee della playlist ordinata
-        sorted_lines_for_processing = []
-        if not any(line.strip().startswith('#EXTM3U') for line in sorted_playlist_lines):
-            sorted_lines_for_processing.append("#EXTM3U\n")
-        else:
-             sorted_lines_for_processing.append("#EXTM3U\n")
+        # Gestisci l'header una sola volta per il blocco ordinato
+        if not first_playlist_header_handled:
+            yield "#EXTM3U\n"
+            first_playlist_header_handled = True
+            
+        # Applica la riscrittura dei link in modo selettivo
+        for info, url, should_proxy in channel_entries_with_proxy_info:
+            yield info # Yield #EXTINF line
+            if should_proxy:
+                # Usa un iteratore fittizio per processare una sola linea
+                rewritten_url_iter = rewrite_m3u_links_streaming(iter([url]), base_url, api_password)
+                yield next(rewritten_url_iter, url) # Prende l'URL riscritto, con fallback all'originale
+            else:
+                yield url # Lascia l'URL invariato
 
-        for info, url in channel_entries:
-            sorted_lines_for_processing.append(info)
-            sorted_lines_for_processing.append(url)
-
-        # Applica la riscrittura dei link
-        processed_sorted_lines = rewrite_m3u_links_streaming(iter(sorted_lines_for_processing), base_url, api_password)
-        for line in yield_header_once(processed_sorted_lines):
-            yield line
 
     # 2. Accoda le playlist non ordinate
     for playlist_data in unsorted_playlists_data:
