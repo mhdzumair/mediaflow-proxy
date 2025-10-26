@@ -22,6 +22,7 @@ from .utils.http_utils import (
 )
 from .utils.m3u8_processor import M3U8Processor
 from .utils.mpd_utils import pad_base64
+from .configs import settings
 
 logger = logging.getLogger(__name__)
 
@@ -390,7 +391,13 @@ async def get_segment(
         Response: The HTTP response with the processed segment.
     """
     try:
-        init_content = await get_cached_init_segment(segment_params.init_url, proxy_headers.request)
+        live_cache_ttl = settings.mpd_live_init_cache_ttl if segment_params.is_live else None
+        init_content = await get_cached_init_segment(
+            segment_params.init_url,
+            proxy_headers.request,
+            cache_token=segment_params.key_id,
+            ttl=live_cache_ttl,
+        )
         segment_content = await download_file_with_retry(segment_params.segment_url, proxy_headers.request)
     except Exception as e:
         return handle_exceptions(e)

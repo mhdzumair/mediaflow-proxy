@@ -65,6 +65,10 @@
                 <input type="checkbox" class="proxy-playlist" checked>
                 <label class="proxy-label">Proxy this playlist</label>
             </div>
+            <div class="form-group">
+                <input type="checkbox" class="sort-playlist">
+                <label class="proxy-label">Sort this playlist</label>
+            </div>
         </div>
     </template>
 
@@ -100,11 +104,12 @@
                 const playlistUrl = entry.querySelector('.playlist-url').value.trim();
                 if (playlistUrl) {
                     const shouldProxy = entry.querySelector('.proxy-playlist').checked;
-                    let definition = playlistUrl;
-                    if (!shouldProxy) {
-                        definition = 'no_proxy:' + playlistUrl;
-                    }
+                    const shouldSort = entry.querySelector('.sort-playlist').checked;
+                    
+                    let definition = (shouldSort ? 'sort:' : '') + (shouldProxy ? '' : 'no_proxy:') + playlistUrl;
+
                     if (playlistUrl.startsWith('http://') || playlistUrl.startsWith('https://')) {
+                        // Se l'URL non ha proxy, ma ha sort, il prefisso sarà 'sort:no_proxy:'
                         definitions.push(definition);
                     } else {
                         alert('Invalid URL: ' + playlistUrl + '. URLs must start with http:// or https://');

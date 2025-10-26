@@ -192,30 +192,34 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
             logger.warning(f"No segments found for profile {profile['id']}")
             continue
 
+        if mpd_dict["isLive"]:
+            depth = max(settings.mpd_live_playlist_depth, 1)
+            trimmed_segments = segments[-depth:]
+        else:
+            trimmed_segments = segments
+
         # Add headers for only the first profile
         if index == 0:
-            first_segment = segments[0]
-            extinf_values = [f["extinf"] for f in segments if "extinf" in f]
+            first_segment = trimmed_segments[0]
+            extinf_values = [f["extinf"] for f in trimmed_segments if "extinf" in f]
             target_duration = math.ceil(max(extinf_values)) if extinf_values else 3
 
-            # Calculate media sequence using adaptive logic for different MPD types
+            # Align HLS media sequence with MPD-provided numbering when available
             mpd_start_number = profile.get("segment_template_start_number")
-            if mpd_start_number and mpd_start_number >= 1000:
-                # Amazon-style: Use absolute segment numbering
-                sequence = first_segment.get("number", mpd_start_number)
-            else:
-                # Sky-style: Use time-based calculation if available
-                time_val = first_segment.get("time")
-                duration_val = first_segment.get("duration_mpd_timescale")
-                if time_val is not None and duration_val and duration_val > 0:
-                    calculated_sequence = math.floor(time_val / duration_val)
-                    # For live streams with very large sequence numbers, use modulo to keep reasonable range
-                    if mpd_dict.get("isLive", False) and calculated_sequence > 100000:
-                        sequence = calculated_sequence % 100000
-                    else:
-                        sequence = calculated_sequence
+            sequence = first_segment.get("number")
+
+            if sequence is None:
+                # Fallback to MPD template start number
+                if mpd_start_number is not None:
+                    sequence = mpd_start_number
                 else:
-                    sequence = first_segment.get("number", 1)
+                    # As a last resort, derive from timeline information
+                    time_val = first_segment.get("time")
+                    duration_val = first_segment.get("duration_mpd_timescale")
+                    if time_val is not None and duration_val and duration_val > 0:
+                        sequence = math.floor(time_val / duration_val)
+                    else:
+                        sequence = 1
 
             hls.extend(
                 [
@@ -235,10 +239,18 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
         query_params.pop("d", None)
         has_encrypted = query_params.pop("has_encrypted", False)
 
-        for segment in segments:
+        for segment in trimmed_segments:
+            program_date_time = segment.get("program_date_time")
+            if program_date_time:
+                hls.append(f"#EXT-X-PROGRAM-DATE-TIME:{program_date_time}")
             hls.append(f'#EXTINF:{segment["extinf"]:.3f},')
             query_params.update(
-                {"init_url": init_url, "segment_url": segment["media"], "mime_type": profile["mimeType"]}
+                {
+                    "init_url": init_url,
+                    "segment_url": segment["media"],
+                    "mime_type": profile["mimeType"],
+                    "is_live": "true" if mpd_dict.get("isLive") else "false",
+                }
             )
             hls.append(
                 encode_mediaflow_proxy_url(
