@@ -175,12 +175,27 @@ class HybridCache:
         if not isinstance(data, (bytes, bytearray, memoryview)):
             raise ValueError("Data must be bytes, bytearray, or memoryview")
 
-        expires_at = time.time() + (ttl or self.ttl)
+        ttl_seconds = self.ttl if ttl is None else ttl
+
+        key = self._get_md5_hash(key)
+
+        if ttl_seconds <= 0:
+            # Explicit request to avoid caching - remove any previous entry and return success
+            self.memory_cache.remove(key)
+            try:
+                file_path = self._get_file_path(key)
+                await aiofiles.os.remove(file_path)
+            except FileNotFoundError:
+                pass
+            except Exception as e:
+                logger.error(f"Error removing cache file: {e}")
+            return True
+
+        expires_at = time.time() + ttl_seconds
 
         # Create cache entry
         entry = CacheEntry(data=data, expires_at=expires_at, access_count=0, last_access=time.time(), size=len(data))
 
-        key = self._get_md5_hash(key)
         # Update memory cache
         self.memory_cache.set(key, entry)
         file_path = self._get_file_path(key)
@@ -210,10 +225,11 @@ class HybridCache:
 
     async def delete(self, key: str) -> bool:
         """Delete item from both caches."""
-        self.memory_cache.remove(key)
+        hashed_key = self._get_md5_hash(key)
+        self.memory_cache.remove(hashed_key)
 
         try:
-            file_path = self._get_file_path(key)
+            file_path = self._get_file_path(hashed_key)
             await aiofiles.os.remove(file_path)
             return True
         except FileNotFoundError:
@@ -237,7 +253,13 @@ class AsyncMemoryCache:
     async def set(self, key: str, data: Union[bytes, bytearray, memoryview], ttl: Optional[int] = None) -> bool:
         """Set value in cache."""
         try:
-            expires_at = time.time() + (ttl or 3600)  # Default 1 hour TTL if not specified
+            ttl_seconds = 3600 if ttl is None else ttl
+
+            if ttl_seconds <= 0:
+                self.memory_cache.remove(key)
+                return True
+
+            expires_at = time.time() + ttl_seconds
             entry = CacheEntry(
                 data=data, expires_at=expires_at, access_count=0, last_access=time.time(), size=len(data)
             )
@@ -276,18 +298,35 @@ EXTRACTOR_CACHE = HybridCache(
 
 
 # Specific cache implementations
-async def get_cached_init_segment(init_url: str, headers: dict) -> Optional[bytes]:
-    """Get initialization segment from cache or download it."""
-    # Try cache first
-    cached_data = await INIT_SEGMENT_CACHE.get(init_url)
-    if cached_data is not None:
-        return cached_data
+async def get_cached_init_segment(
+    init_url: str,
+    headers: dict,
+    cache_token: str | None = None,
+    ttl: Optional[int] = None,
+) -> Optional[bytes]:
+    """Get initialization segment from cache or download it.
 
-    # Download if not cached
+    cache_token allows differentiating entries that share the same init_url but
+    rely on different DRM keys or initialization payloads (e.g. key rotation).
+
+    ttl overrides the default cache TTL; pass a value <= 0 to skip caching entirely.
+    """
+
+    use_cache = ttl is None or ttl > 0
+    cache_key = f"{init_url}|{cache_token}" if cache_token else init_url
+
+    if use_cache:
+        cached_data = await INIT_SEGMENT_CACHE.get(cache_key)
+        if cached_data is not None:
+            return cached_data
+    else:
+        # Remove any previously cached entry when caching is disabled
+        await INIT_SEGMENT_CACHE.delete(cache_key)
+
     try:
         init_content = await download_file_with_retry(init_url, headers)
-        if init_content:
-            await INIT_SEGMENT_CACHE.set(init_url, init_content)
+        if init_content and use_cache:
+            await INIT_SEGMENT_CACHE.set(cache_key, init_content, ttl=ttl)
         return init_content
     except Exception as e:
         logger.error(f"Error downloading init segment: {e}")

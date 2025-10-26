@@ -97,6 +97,8 @@ class Settings(BaseSettings):
     dash_prebuffer_cache_size: int = 50  # Maximum number of segments to cache in memory.
     dash_prebuffer_max_memory_percent: int = 80  # Maximum percentage of system memory to use for DASH pre-buffer cache.
     dash_prebuffer_emergency_threshold: int = 90  # Emergency threshold percentage to trigger aggressive cache cleanup.
+    mpd_live_init_cache_ttl: int = 0  # TTL (seconds) for live init segment cache; 0 disables caching.
+    mpd_live_playlist_depth: int = 8  # Number of recent segments to expose per live playlist variant.
 
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"  # The user agent to use for HTTP requests.
