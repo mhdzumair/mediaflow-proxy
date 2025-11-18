@@ -34,7 +34,6 @@ class VidmolyExtractor(BaseExtractor):
         variants = re.findall(
             r'#EXT-X-STREAM-INF:.*?BANDWIDTH=(\d+).*?[\r\n]+([^\r\n]+)',
             playlist_text,
-            flags=re.DOTALL
         )
 
         if not variants:
@@ -50,9 +49,10 @@ class VidmolyExtractor(BaseExtractor):
                 best_url = urljoin(master_url, best_url)
 
         # Return the structure required by MediaFlow Proxy
-        self.base_headers["referer"] = url
+        headers = self.base_headers.copy()
+        headers["referer"] = url
         return {
             "destination_url": best_url,
-            "request_headers": self.base_headers,
+            "request_headers": headers,
             "mediaflow_endpoint": self.mediaflow_endpoint,
         }
