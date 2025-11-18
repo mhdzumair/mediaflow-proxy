@@ -1,6 +1,6 @@
 import re
 from typing import Dict, Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
@@ -22,13 +22,17 @@ class VidmolyExtractor(BaseExtractor):
 
         master_url = match.group(1)
 
+        parsed = urlparse(master_url)
+        if not parsed.scheme or parsed.scheme not in ("http", "https"):
+            raise ExtractorError("VIDMOLY: Invalid stream URL scheme")
+
         # --- Fetch master playlist ---
         playlist_resp = await self._make_request(master_url)
         playlist_text = playlist_resp.text
 
         # Parse variant streams (bandwidth + URL)
         variants = re.findall(
-            r'#EXT-X-STREAM-INF:.*?BANDWIDTH=(\d+).*?\n([^\n]+)',
+            r'#EXT-X-STREAM-INF:.*?BANDWIDTH=(\d+).*?[\r\n]+([^\r\n]+)',
             playlist_text,
             flags=re.DOTALL
         )
