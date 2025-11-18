@@ -1,48 +1,54 @@
 import re
-import requests
+from typing import Dict, Any
+from urllib.parse import urljoin
 
-def extract_vidmoly_best(url: str):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Referer": "https://vidmoly.net/",
-        "Sec-Fetch-Dest": "iframe"
-    }
+from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
-    r = requests.get(url, headers=headers, timeout=10)
-    if r.status_code != 200:
-        return {"error": f"HTTP {r.status_code}"}
 
-    # Extract initial m3u8 URL
-    match = re.search(r'sources\s*:\s*\[\{file:"([^"]+)"', r.text)
-    if not match:
-        return {"error": "stream URL not found"}
+class VidmolyExtractor(BaseExtractor):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.mediaflow_endpoint = "hls_manifest_proxy"
 
-    master_url = match.group(1)
+    async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
+        # --- Request the main embed page ---
+        response = await self._make_request(url)
+        html = response.text
 
-    # Fetch master playlist
-    r2 = requests.get(master_url, headers=headers, timeout=10)
-    if r2.status_code != 200:
-        return {"error": "failed to fetch master playlist"}
+        # Extract the initial m3u8 URL
+        match = re.search(r'sources\s*:\s*\[\{file:"([^"]+)"', html)
+        if not match:
+            raise ExtractorError("VIDMOLY: stream URL not found")
 
-    playlist_text = r2.text
+        master_url = match.group(1)
 
-    # Parse all variant streams
-    variants = re.findall(r'#EXT-X-STREAM-INF:.*BANDWIDTH=(\d+).*?\n([^\n]+)', playlist_text)
-    if not variants:
-        # No variants, use master URL as-is
-        return {"streams": [{"quality": "default", "type": "hls", "url": master_url}]}
+        # --- Fetch master playlist ---
+        playlist_resp = await self._make_request(master_url)
+        playlist_text = playlist_resp.text
 
-    # Pick highest bandwidth
-    variants.sort(key=lambda x: int(x[0]), reverse=True)
-    best_url = variants[0][1]
+        # Parse variant streams (bandwidth + URL)
+        variants = re.findall(
+            r'#EXT-X-STREAM-INF:.*?BANDWIDTH=(\d+).*?\n([^\n]+)',
+            playlist_text,
+            flags=re.DOTALL
+        )
 
-    # If the variant URL is relative, join with master base URL
-    if not best_url.startswith("http"):
-        from urllib.parse import urljoin
-        best_url = urljoin(master_url, best_url)
+        if not variants:
+            # No variants → use master URL directly
+            best_url = master_url
+        else:
+            # Pick highest bandwidth variant
+            variants.sort(key=lambda x: int(x[0]), reverse=True)
+            best_url = variants[0][1]
 
-    return {
-        "streams": [
-            {"quality": "best", "type": "hls", "url": best_url}
-        ]
-    }
+            # Fix relative URLs
+            if not best_url.startswith("http"):
+                best_url = urljoin(master_url, best_url)
+
+        # Return the structure required by MediaFlow Proxy
+        self.base_headers["referer"] = url
+        return {
+            "destination_url": best_url,
+            "request_headers": self.base_headers,
+            "mediaflow_endpoint": self.mediaflow_endpoint,
+        }
