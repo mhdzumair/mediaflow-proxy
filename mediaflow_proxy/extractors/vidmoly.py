@@ -10,7 +10,11 @@ class VidmolyExtractor(BaseExtractor):
         super().__init__(*args, **kwargs)
         self.mediaflow_endpoint = "hls_manifest_proxy"
 
-    async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
+    async def extract(self, url: str) -> Dict[str, Any]:
+        parsed = urlparse(url)
+        if not parsed.hostname or not parsed.hostname.endswith('vidmoly.net'):
+             raise ExtractorError("VIDMOLY: Invalid domain")
+        
         # --- Request the main embed page ---
         response = await self._make_request(url)
         html = response.text
