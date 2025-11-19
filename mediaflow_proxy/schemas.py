@@ -109,7 +109,7 @@ class MPDSegmentParams(GenericParams):
 
 class ExtractorURLParams(GenericParams):
     host: Literal[
-        "Doodstream", "FileLions", "FileMoon", "Mixdrop", "Uqload", "Streamtape", "Supervideo", "VixCloud", "Okru", "Maxstream", "LiveTV", "LuluStream", "DLHD", "Fastream", "Voe", "Sportsonline"
+        "Doodstream", "FileLions", "FileMoon", "Mixdrop", "Uqload", "Streamtape", "Supervideo", "VixCloud", "Okru", "Maxstream", "LiveTV", "LuluStream", "DLHD", "Fastream", "Vidmoly", "Voe", "Sportsonline"
     ] = Field(..., description="The host to extract the URL from.")
     destination: str = Field(..., description="The URL of the stream.", alias="d")
     redirect_stream: bool = Field(False, description="Whether to redirect to the stream endpoint automatically.")
