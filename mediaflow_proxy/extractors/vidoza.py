@@ -20,7 +20,7 @@ class VidozaExtractor(BaseExtractor):
 
         # Accept vidoza.net / vidoza.co / videzz.net
         valid_domains = ("vidoza.net", "vidoza.co", "videzz.net")
-        if not parsed.hostname or not any(d in parsed.hostname for d in valid_domains):
+        if not parsed.hostname or not (parsed.hostname in valid_domains or any(parsed.hostname.endswith(f".{d}") for d in valid_domains)):
             raise ExtractorError("Vidoza: Invalid domain")
 
         # Fetch embed page
@@ -40,11 +40,11 @@ class VidozaExtractor(BaseExtractor):
         if not match:
             raise ExtractorError("Vidoza: direct MP4 URL not found")
 
-        mp4_url = match.group("url")
+        mp4_url = matches[0]
 
         # Ensure MP4 URL is valid
         parsed_mp4 = urlparse(mp4_url)
-        if not parsed_mp4.scheme:
+        if parsed_mp4.scheme not in ("http", "https"):
             raise ExtractorError("Vidoza: Invalid MP4 URL scheme")
 
         # Build headers
