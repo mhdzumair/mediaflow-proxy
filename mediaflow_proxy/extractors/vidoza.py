@@ -20,7 +20,8 @@ class VidozaExtractor(BaseExtractor):
 
         # Accept vidoza.net / vidoza.co / videzz.net
         valid_domains = ("vidoza.net", "vidoza.co", "videzz.net")
-        if not parsed.hostname or not (parsed.hostname in valid_domains or any(parsed.hostname.endswith(f".{d}") for d in valid_domains)):
+        hostname = parsed.hostname.lower() if parsed.hostname else ""
+        if not hostname or not (hostname in valid_domains or any(hostname.endswith(f".{d}") for d in valid_domains)):
             raise ExtractorError("Vidoza: Invalid domain")
 
         # Fetch embed page
