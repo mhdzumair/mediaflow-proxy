@@ -112,11 +112,8 @@ class DLHDExtractor(BaseExtractor):
             }
             
             # Determina endpoint in base al dominio dello stream
-            if "newkso.ru" in stream_url:
-                endpoint = "hls_key_proxy"
-            else:
-                endpoint = "hls_key_proxy"
-            
+            endpoint = "hls_key_proxy"
+
             logger.info(f"Using lovecdn.ru stream with endpoint: {endpoint}")
             
             return {
@@ -198,6 +195,7 @@ class DLHDExtractor(BaseExtractor):
 
         # 3. Build final stream URL
         channel_key = params['channel_key']
+        auth_token = params['auth_token']
         # The JS logic uses .css, not .m3u8
         if server_key == 'top1/cdn':
             stream_url = f'https://top1.newkso.ru/top1/cdn/{channel_key}/mono.css'
@@ -205,9 +203,6 @@ class DLHDExtractor(BaseExtractor):
             stream_url = f'https://{server_key}new.newkso.ru/{server_key}/{channel_key}/mono.css'
         
         logger.info(f'New auth flow: Constructed stream URL: {stream_url}')
-
-        channel_key = params['channel_key']
-        auth_token = params['auth_token']
 
         stream_headers = {
             'User-Agent': headers['User-Agent'],
