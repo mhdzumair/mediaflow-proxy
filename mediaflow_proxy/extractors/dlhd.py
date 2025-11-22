@@ -153,28 +153,37 @@ class DLHDExtractor(BaseExtractor):
         
         # 1. Initial Auth POST
         auth_url = 'https://security.newkso.ru/auth2.php'
-        form_data = {
-            'channelKey': params["channel_key"],
-            'country': params["auth_country"],
-            'timestamp': params["auth_ts"],
-            'expiry': params["auth_expiry"],
-            'token': params["auth_token"],
+        # Use files parameter to force multipart/form-data which is required by the server
+        # (None, value) tells httpx to send it as a form field, not a file upload
+        multipart_data = {
+            'channelKey': (None, params["channel_key"]),
+            'country': (None, params["auth_country"]),
+            'timestamp': (None, params["auth_ts"]),
+            'expiry': (None, params["auth_expiry"]),
+            'token': (None, params["auth_token"]),
         }
 
         iframe_origin = f"https://{urlparse(iframe_url).netloc}"
         auth_headers = headers.copy()
         auth_headers.update({
-            'Referer': iframe_url,
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
             'Origin': iframe_origin,
+            'Referer': iframe_url,
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'cross-site',
+            'Priority': 'u=1, i',
         })
         
         from mediaflow_proxy.utils.http_utils import create_httpx_client
         try:
             async with create_httpx_client(verify=False) as client:
-                auth_resp = await client.post(auth_url, data=form_data, headers=auth_headers, timeout=12)
+                # Note: using 'files' instead of 'data' to ensure multipart/form-data Content-Type
+                auth_resp = await client.post(auth_url, files=multipart_data, headers=auth_headers, timeout=12)
                 auth_resp.raise_for_status()
                 auth_data = auth_resp.json()
-                if not auth_data.get("valid"):
+                if not (auth_data.get("valid") or auth_data.get("success")):
                     raise ExtractorError(f"Initial auth failed with response: {auth_data}")
             logger.info("New auth flow: Initial auth successful.")
         except Exception as e:
