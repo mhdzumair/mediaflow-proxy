@@ -270,7 +270,7 @@ def parse_representation(
     if item:
         profile["segments"] = parse_segment_template(parsed_dict, item, profile, source)
     else:
-        profile["segments"] = parse_segment_base(representation, source)
+        profile["segments"] = parse_segment_base(representation, profile, source)
 
     return profile
 
@@ -547,7 +547,7 @@ def create_segment_data(segment: Dict, item: dict, profile: dict, source: str, t
     return segment_data
 
 
-def parse_segment_base(representation: dict, source: str) -> List[Dict]:
+def parse_segment_base(representation: dict, profile: dict, source: str) -> List[Dict]:
     """
     Parses segment base information and extracts segment data. This is used for single-segment representations.
 
@@ -562,6 +562,12 @@ def parse_segment_base(representation: dict, source: str) -> List[Dict]:
     start, end = map(int, segment["@indexRange"].split("-"))
     if "Initialization" in segment:
         start, _ = map(int, segment["Initialization"]["@range"].split("-"))
+    
+    # Set initUrl for SegmentBase
+    if not representation['BaseURL'].startswith("http"):
+        profile["initUrl"] = f"{source}/{representation['BaseURL']}"
+    else:
+        profile["initUrl"] = representation['BaseURL']
 
     return [
         {
