@@ -136,12 +136,30 @@ class Streamer:
         if not self.response:
             raise RuntimeError("No response available for streaming")
 
+        FAKE_PNG_HEADER = b"\x89PNG\r\n\x1a\n"
+        IEND = b"\x49\x45\x4E\x44\xAE\x42\x60\x82"
+
+        def strip_png(chunk: bytes) -> bytes:
+            """Remove PNG junk from TurboVid/StreamWish segments."""
+            if not chunk.startswith(FAKE_PNG_HEADER):
+                return chunk
+
+            # find the IEND marker
+            end = chunk.find(IEND)
+            if end == -1:
+                # cannot fix, return as-is
+                return b""
+
+            pos = end + len(IEND)
+
+            # skip padding (00/FF)
+            while pos < len(chunk) and chunk[pos] in (0x00, 0xFF):
+                pos += 1
+
+            return chunk[pos:]
+
         try:
             self.parse_content_range()
-
-            # --- Strip first 8 bytes ---
-            FAKE_PNG_HEADER = b"\x89PNG\r\n\x1a\n"
-            first_chunk_processed = False
 
             if settings.enable_streaming_progress:
                 with tqdm_asyncio(
@@ -154,32 +172,24 @@ class Streamer:
                     ncols=100,
                     mininterval=1,
                 ) as self.progress_bar:
+
                     async for chunk in self.response.aiter_bytes():
+                        fixed = strip_png(chunk)
 
-                        # Remove StreamWish fake PNG header (only on first chunk)
-                        if not first_chunk_processed:
-                            first_chunk_processed = True
-                            if chunk.startswith(FAKE_PNG_HEADER):
-                                chunk = chunk[len(FAKE_PNG_HEADER):]
-
-                        yield chunk
-                        self.bytes_transferred += len(chunk)
-                        self.progress_bar.update(len(chunk))
+                        yield fixed
+                        self.bytes_transferred += len(fixed)
+                        self.progress_bar.update(len(fixed))
 
             else:
                 async for chunk in self.response.aiter_bytes():
+                    fixed = strip_png(chunk)
 
-                    # *** STREAMWISH 8-BYTE HEADER CUT ***
-                    if not first_chunk_processed:
-                        first_chunk_processed = True
-                        if chunk.startswith(FAKE_PNG_HEADER):
-                            chunk = chunk[len(FAKE_PNG_HEADER):]
+                    yield fixed
+                    self.bytes_transferred += len(fixed)
 
-                    yield chunk
-                    self.bytes_transferred += len(chunk)
-
-        except Exception as e:
+        except Exception:
             raise
+
             
     @staticmethod
     def format_bytes(size) -> str:
