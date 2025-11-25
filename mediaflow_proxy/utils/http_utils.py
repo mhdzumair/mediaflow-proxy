@@ -139,7 +139,7 @@ class Streamer:
         try:
             self.parse_content_range()
 
-            # --- STREAMWISH FIX ---
+            # --- Strip first 8 bytes ---
             FAKE_PNG_HEADER = b"\x89PNG\r\n\x1a\n"
             first_chunk_processed = False
 
