@@ -133,11 +133,14 @@ class Streamer:
             raise RuntimeError(f"Error creating streaming response: {e}")
 
     async def stream_content(self) -> typing.AsyncGenerator[bytes, None]:
-        """
-        Streams the content from the response.
-        """
         if not self.response:
             raise RuntimeError("No response available for streaming")
+
+    # ---- StreamWish / FileMoon fake PNG header ----
+        FAKE_PNG_HEADER = b"\x89PNG\r\n\x1a\n"
+        IEND = b"\x49\x45\x4E\x44\xAE\x42\x60\x82"
+
+        first_chunk = True  # <-- VERY IMPORTANT
 
         try:
             self.parse_content_range()
@@ -153,44 +156,57 @@ class Streamer:
                     ncols=100,
                     mininterval=1,
                 ) as self.progress_bar:
+
                     async for chunk in self.response.aiter_bytes():
+
+                    # ---------------------------------------------------
+                    # Strip fake PNG header ONLY from FIRST chunk
+                    # ---------------------------------------------------
+                        if first_chunk:
+                            first_chunk = False
+
+                            if chunk.startswith(FAKE_PNG_HEADER):
+                                end = chunk.find(IEND)
+                                if end != -1:
+                                    pos = end + len(IEND)
+
+                                # skip padding bytes
+                                    while pos < len(chunk) and chunk[pos] in (0x00, 0xFF):
+                                        pos += 1
+
+                                    chunk = chunk[pos:]
+
                         yield chunk
-                        chunk_size = len(chunk)
-                        self.bytes_transferred += chunk_size
-                        self.progress_bar.set_postfix_str(
-                            f"📥 : {self.format_bytes(self.bytes_transferred)}", refresh=False
-                        )
-                        self.progress_bar.update(chunk_size)
+                        self.bytes_transferred += len(chunk)
+                        self.progress_bar.update(len(chunk))
+
             else:
                 async for chunk in self.response.aiter_bytes():
+
+                # ---------------------------------------------------
+                # Strip fake PNG header ONLY from FIRST chunk
+                # ---------------------------------------------------
+                    if first_chunk:
+                        first_chunk = False
+
+                        if chunk.startswith(FAKE_PNG_HEADER):
+                            end = chunk.find(IEND)
+                            if end != -1:
+                                pos = end + len(IEND)
+
+                            # skip padding bytes
+                                while pos < len(chunk) and chunk[pos] in (0x00, 0xFF):
+                                    pos += 1
+
+                                chunk = chunk[pos:]
+
                     yield chunk
                     self.bytes_transferred += len(chunk)
 
-        except httpx.TimeoutException:
-            logger.warning("Timeout while streaming")
-            raise DownloadError(409, "Timeout while streaming")
-        except httpx.RemoteProtocolError as e:
-            # Special handling for connection closed errors
-            if "peer closed connection without sending complete message body" in str(e):
-                logger.warning(f"Remote server closed connection prematurely: {e}")
-                # If we've received some data, just log the warning and return normally
-                if self.bytes_transferred > 0:
-                    logger.info(
-                        f"Partial content received ({self.bytes_transferred} bytes). Continuing with available data."
-                    )
-                    return
-                else:
-                    # If we haven't received any data, raise an error
-                    raise DownloadError(502, f"Remote server closed connection without sending any data: {e}")
-            else:
-                logger.error(f"Protocol error while streaming: {e}")
-                raise DownloadError(502, f"Protocol error while streaming: {e}")
-        except GeneratorExit:
-            logger.info("Streaming session stopped by the user")
-        except Exception as e:
-            logger.error(f"Error streaming content: {e}")
+        except Exception:
             raise
 
+            
     @staticmethod
     def format_bytes(size) -> str:
         power = 2**10
