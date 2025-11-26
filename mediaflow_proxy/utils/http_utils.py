@@ -140,7 +140,7 @@ class Streamer:
         IEND = b"\x49\x45\x4E\x44\xAE\x42\x60\x82"
 
         def strip_png(chunk: bytes) -> bytes:
-            """Remove PNG junk from segments."""
+            """Remove PNG junk from TurboVid/StreamWish segments."""
             if not chunk.startswith(FAKE_PNG_HEADER):
                 return chunk
 
@@ -158,6 +158,7 @@ class Streamer:
 
             return chunk[pos:]
 
+        try:
             self.parse_content_range()
 
             if settings.enable_streaming_progress:
@@ -174,8 +175,6 @@ class Streamer:
 
                     async for chunk in self.response.aiter_bytes():
                         fixed = strip_png(chunk)
-                        if not fixed:
-                            continue
 
                         yield fixed
                         self.bytes_transferred += len(fixed)
@@ -184,11 +183,14 @@ class Streamer:
             else:
                 async for chunk in self.response.aiter_bytes():
                     fixed = strip_png(chunk)
-                    if not fixed:
-                        continue
 
                     yield fixed
                     self.bytes_transferred += len(fixed)
+
+        except Exception:
+            raise
+
+            
     @staticmethod
     def format_bytes(size) -> str:
         power = 2**10
