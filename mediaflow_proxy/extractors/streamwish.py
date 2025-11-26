@@ -10,7 +10,7 @@ class StreamWishExtractor(BaseExtractor):
         super().__init__(*args, **kwargs)
         self.mediaflow_endpoint = "hls_manifest_proxy"  # same as FileMoon
 
-    async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
+    async def extract(self, url: str, **_kwargs: Any) -> Dict[str, Any]:
         #
         # 1. Load embed page
         #
@@ -57,7 +57,7 @@ class StreamWishExtractor(BaseExtractor):
         #
         # 5. Set referer correctly
         #
-        self.base_headers["referer"] = url
+        self.base_headers["Referer"] = url
 
         #
         # 6. Output to MediaFlow
