@@ -136,27 +136,11 @@ class Streamer:
         if not self.response:
             raise RuntimeError("No response available for streaming")
 
+    # ---- StreamWish / FileMoon fake PNG header ----
         FAKE_PNG_HEADER = b"\x89PNG\r\n\x1a\n"
         IEND = b"\x49\x45\x4E\x44\xAE\x42\x60\x82"
 
-        def strip_png(chunk: bytes) -> bytes:
-            """Remove PNG junk from TurboVid/StreamWish segments."""
-            if not chunk.startswith(FAKE_PNG_HEADER):
-                return chunk
-
-            # find the IEND marker
-            end = chunk.find(IEND)
-            if end == -1:
-                # cannot fix, return as-is
-                return chunk
-
-            pos = end + len(IEND)
-
-            # skip padding (00/FF)
-            while pos < len(chunk) and chunk[pos] in (0x00, 0xFF):
-                pos += 1
-
-            return chunk[pos:]
+        first_chunk = True  # <-- VERY IMPORTANT
 
         try:
             self.parse_content_range()
@@ -174,18 +158,50 @@ class Streamer:
                 ) as self.progress_bar:
 
                     async for chunk in self.response.aiter_bytes():
-                        fixed = strip_png(chunk)
 
-                        yield fixed
-                        self.bytes_transferred += len(fixed)
-                        self.progress_bar.update(len(fixed))
+                    # ---------------------------------------------------
+                    # Strip fake PNG header ONLY from FIRST chunk
+                    # ---------------------------------------------------
+                        if first_chunk:
+                            first_chunk = False
+
+                            if chunk.startswith(FAKE_PNG_HEADER):
+                                end = chunk.find(IEND)
+                                if end != -1:
+                                    pos = end + len(IEND)
+
+                                # skip padding bytes
+                                    while pos < len(chunk) and chunk[pos] in (0x00, 0xFF):
+                                        pos += 1
+
+                                    chunk = chunk[pos:]
+
+                        yield chunk
+                        self.bytes_transferred += len(chunk)
+                        self.progress_bar.update(len(chunk))
 
             else:
                 async for chunk in self.response.aiter_bytes():
-                    fixed = strip_png(chunk)
 
-                    yield fixed
-                    self.bytes_transferred += len(fixed)
+                # ---------------------------------------------------
+                # Strip fake PNG header ONLY from FIRST chunk
+                # ---------------------------------------------------
+                    if first_chunk:
+                        first_chunk = False
+
+                        if chunk.startswith(FAKE_PNG_HEADER):
+                            end = chunk.find(IEND)
+                            if end != -1:
+                                pos = end + len(IEND)
+
+                            # skip padding bytes
+                                while pos < len(chunk) and chunk[pos] in (0x00, 0xFF):
+                                    pos += 1
+
+                                chunk = chunk[pos:]
+
+                    yield chunk
+                    self.bytes_transferred += len(chunk)
 
         except Exception:
             raise
