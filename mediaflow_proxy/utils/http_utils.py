@@ -148,7 +148,7 @@ class Streamer:
             end = chunk.find(IEND)
             if end == -1:
                 # cannot fix, return as-is
-                return b""
+                return chunk
 
             pos = end + len(IEND)
 
@@ -189,8 +189,6 @@ class Streamer:
 
                     yield fixed
                     self.bytes_transferred += len(fixed)
-
-            
     @staticmethod
     def format_bytes(size) -> str:
         power = 2**10
