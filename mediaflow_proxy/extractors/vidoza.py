@@ -6,34 +6,65 @@ from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
 
 class VidozaExtractor(BaseExtractor):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Use segment_endpoint since final URL is a direct .mp4
-        self.base_url = "https://videzz.net"
+    def __init__(self, request_headers: dict):
+        super().__init__(request_headers)
+        # if your base doesn’t set this, keep it; otherwise you can remove:
+        self.mediaflow_endpoint = "proxy_stream_endpoint"
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         parsed = urlparse(url)
-        # Accept videzz.net domain (redirect from vidoza.net)
-        if not parsed.hostname or not parsed.hostname.endswith("videzz.net"):
+
+        # Accept vidoza + videzz
+        if not parsed.hostname or not (
+            parsed.hostname.endswith("vidoza.net")
+            or parsed.hostname.endswith("videzz.net")
+        ):
             raise ExtractorError("VIDOZA: Invalid domain")
 
-        # Fetch the embed page
-        response = await self._make_request(
-            url,
-            headers={"referer": "https://vidoza.net/"}  # required for IP-locked .mp4
-        )
-        html = response.text
-
-        # Extract the .mp4 URL
-        match = re.search(r'https://[^"]+\.mp4', html)
-        if not match:
-            raise ExtractorError("VIDOZA: Unable to find video URL in embed page")
-
-        mp4_url = match.group(0)
-
-        # Prepare headers for proxy request
         headers = self.base_headers.copy()
-        headers["referer"] = "https://vidoza.net/"
+        headers.update(
+            {
+                "referer": "https://vidoza.net/",
+                "user-agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+                "accept": "*/*",
+                "accept-language": "en-US,en;q=0.9",
+            }
+        )
+
+        # 1) Fetch the embed page (or whatever URL you pass in)
+        response = await self._make_request(url, headers=headers)
+        html = response.text or ""
+
+        if not html:
+            raise ExtractorError("VIDOZA: Empty HTML from Vidoza")
+
+        cookies = response.cookies or {}
+
+        # 2) Extract final link with REGEX
+        pattern = re.compile(
+            r"""["']?\s*(?:file|src)\s*["']?\s*[:=,]?\s*["'](?P<url>[^"']+)"""
+            r"""(?:[^}>\]]+)["']?\s*res\s*["']?\s*[:=]\s*["']?(?P<label>[^"',]+)""",
+            re.IGNORECASE,
+        )
+
+        match = pattern.search(html)
+        if not match:
+            raise ExtractorError("VIDOZA: Unable to extract video + label from JS")
+
+        mp4_url = match.group("url")
+        label = match.group("label").strip()
+
+        # Fix URLs like //str38.vidoza.net/...
+        if mp4_url.startswith("//"):
+            mp4_url = "https:" + mp4_url
+
+        # 3) Attach cookies (token may depend on these)
+        if cookies:
+            headers["cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
 
         return {
             "destination_url": mp4_url,
