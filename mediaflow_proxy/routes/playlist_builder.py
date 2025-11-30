@@ -181,7 +181,7 @@ async def async_download_m3u_playlist(url: str) -> list[str]:
     }
     lines = []
     try:
-         async with httpx.AsyncClient(verify=True, timeout=30) as client:
+         async with httpx.AsyncClient(verify=True, timeout=30, follow_redirects=True) as client:
              async with client.stream('GET', url, headers=headers) as response:
                 response.raise_for_status()
                 async for line_bytes in response.aiter_lines():
