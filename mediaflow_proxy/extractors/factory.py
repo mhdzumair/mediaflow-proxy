@@ -12,6 +12,7 @@ from mediaflow_proxy.extractors.maxstream import MaxstreamExtractor
 from mediaflow_proxy.extractors.mixdrop import MixdropExtractor
 from mediaflow_proxy.extractors.okru import OkruExtractor
 from mediaflow_proxy.extractors.streamtape import StreamtapeExtractor
+from mediaflow_proxy.extractors.streamwish import StreamWishExtractor
 from mediaflow_proxy.extractors.supervideo import SupervideoExtractor
 from mediaflow_proxy.extractors.uqload import UqloadExtractor
 from mediaflow_proxy.extractors.vavoo import VavooExtractor
@@ -32,6 +33,7 @@ class ExtractorFactory:
         "Uqload": UqloadExtractor,
         "Mixdrop": MixdropExtractor,
         "Streamtape": StreamtapeExtractor,
+        "StreamWish": StreamWishExtractor,
         "Supervideo": SupervideoExtractor,
         "VixCloud": VixCloudExtractor,
         "Okru": OkruExtractor,
