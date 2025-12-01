@@ -3,7 +3,7 @@ import typing
 from dataclasses import dataclass
 from functools import partial
 from urllib import parse
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import anyio
 import h11
@@ -81,6 +81,10 @@ async def fetch_with_retry(client, method, url, headers, follow_redirects=True, 
 
 
 class Streamer:
+    # PNG signature and IEND marker for fake PNG header detection (StreamWish/FileMoon)
+    _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+    _PNG_IEND_MARKER = b"\x49\x45\x4E\x44\xAE\x42\x60\x82"
+
     def __init__(self, client):
         """
         Initializes the Streamer with an HTTP client.
@@ -132,12 +136,47 @@ class Streamer:
             logger.error(f"Error creating streaming response: {e}")
             raise RuntimeError(f"Error creating streaming response: {e}")
 
+    @staticmethod
+    def _strip_fake_png_wrapper(chunk: bytes) -> bytes:
+        """
+        Strip fake PNG wrapper from chunk data.
+
+        Some streaming services (StreamWish, FileMoon) prepend a fake PNG image
+        to video data to evade detection. This method detects and removes it.
+
+        Args:
+            chunk: The raw chunk data that may contain a fake PNG header.
+
+        Returns:
+            The chunk with fake PNG wrapper removed, or original chunk if not present.
+        """
+        if not chunk.startswith(Streamer._PNG_SIGNATURE):
+            return chunk
+
+        # Find the IEND marker that signals end of PNG data
+        iend_pos = chunk.find(Streamer._PNG_IEND_MARKER)
+        if iend_pos == -1:
+            # IEND not found in this chunk - return as-is to avoid data corruption
+            logger.debug("PNG signature detected but IEND marker not found in chunk")
+            return chunk
+
+        # Calculate position after IEND marker
+        content_start = iend_pos + len(Streamer._PNG_IEND_MARKER)
+
+        # Skip any padding bytes (null or 0xFF) between PNG and actual content
+        while content_start < len(chunk) and chunk[content_start] in (0x00, 0xFF):
+            content_start += 1
+
+        stripped_bytes = content_start
+        logger.debug(f"Stripped {stripped_bytes} bytes of fake PNG wrapper from stream")
+
+        return chunk[content_start:]
+
     async def stream_content(self) -> typing.AsyncGenerator[bytes, None]:
-        """
-        Streams the content from the response.
-        """
         if not self.response:
             raise RuntimeError("No response available for streaming")
+
+        is_first_chunk = True
 
         try:
             self.parse_content_range()
@@ -154,15 +193,19 @@ class Streamer:
                     mininterval=1,
                 ) as self.progress_bar:
                     async for chunk in self.response.aiter_bytes():
+                        if is_first_chunk:
+                            is_first_chunk = False
+                            chunk = self._strip_fake_png_wrapper(chunk)
+
                         yield chunk
-                        chunk_size = len(chunk)
-                        self.bytes_transferred += chunk_size
-                        self.progress_bar.set_postfix_str(
-                            f"📥 : {self.format_bytes(self.bytes_transferred)}", refresh=False
-                        )
-                        self.progress_bar.update(chunk_size)
+                        self.bytes_transferred += len(chunk)
+                        self.progress_bar.update(len(chunk))
             else:
                 async for chunk in self.response.aiter_bytes():
+                    if is_first_chunk:
+                        is_first_chunk = False
+                        chunk = self._strip_fake_png_wrapper(chunk)
+
                     yield chunk
                     self.bytes_transferred += len(chunk)
 
@@ -191,6 +234,7 @@ class Streamer:
             logger.error(f"Error streaming content: {e}")
             raise
 
+            
     @staticmethod
     def format_bytes(size) -> str:
         power = 2**10
@@ -495,6 +539,16 @@ def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
     if "referrer" in request_headers:
         if "referer" not in request_headers:
             request_headers["referer"] = request_headers.pop("referrer")
+            
+    dest = request.query_params.get("d", "")
+    host = urlparse(dest).netloc.lower()
+            
+    if "vidoza" in host or "videzz" in host:
+        # Remove ALL empty headers
+        for h in list(request_headers.keys()):
+            v = request_headers[h]
+            if v is None or v.strip() == "":
+                request_headers.pop(h, None)
 
     response_headers = {k[2:].lower(): v for k, v in request.query_params.items() if k.startswith("r_")}
     return ProxyRequestHeaders(request_headers, response_headers)

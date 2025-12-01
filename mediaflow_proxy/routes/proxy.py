@@ -629,8 +629,8 @@ async def proxy_stream_endpoint(
     if proxy_headers.request.get("if-range", "").strip() == "":
         proxy_headers.request.pop("if-range", None)
     
-    #if "range" not in proxy_headers.request:
-        #proxy_headers.request["range"] = "bytes=0-"
+    if "range" not in proxy_headers.request:
+        proxy_headers.request["range"] = "bytes=0-"
     
     if filename:
         # If a filename is provided, set it in the headers using RFC 6266 format
