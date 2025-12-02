@@ -642,6 +642,12 @@ async def proxy_stream_endpoint(
 
         proxy_headers.response.update({"content-disposition": content_disposition})
 
+    async with httpx.AsyncClient(headers=proxy_headers.request, follow_redirects=True) as client:
+        test_resp = await client.get(destination)
+
+        if test_resp.status_code == 404:
+            return Response(status_code=404)
+
     return await proxy_stream(request.method, destination, proxy_headers)
 
 
