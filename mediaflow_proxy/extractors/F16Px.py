@@ -1,4 +1,4 @@
-# mediaflow_proxy/extractors/F16Px.py
+# https://github.com/Gujal00/ResolveURL/blob/55c7f66524ebd65bc1f88650614e627b00167fa0/script.module.resolveurl/lib/resolveurl/plugins/f16px.py
 
 import base64
 import json
