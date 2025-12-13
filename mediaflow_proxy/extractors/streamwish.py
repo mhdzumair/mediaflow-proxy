@@ -11,7 +11,7 @@ class StreamWishExtractor(BaseExtractor):
         super().__init__(*args, **kwargs)
         self.mediaflow_endpoint = "hls_manifest_proxy"
 
-    async def extract(self, url: str, **kwargs: Any) -> Dict[str, Any]:
+    async def extract(self, url: str, **_kwargs: Any) -> Dict[str, Any]:
         referer = self.base_headers.get("Referer")
         if not referer:
             parsed = urlparse(url)
@@ -25,7 +25,7 @@ class StreamWishExtractor(BaseExtractor):
             response.text,
             re.DOTALL
         )
-        iframe_url = iframe_match.group(1) if iframe_match else url
+        iframe_url = urljoin(url, iframe_match.group(1)) if iframe_match else url
 
         iframe_response = await self._make_request(
             iframe_url,
