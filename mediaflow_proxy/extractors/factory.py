@@ -17,6 +17,7 @@ from mediaflow_proxy.extractors.supervideo import SupervideoExtractor
 from mediaflow_proxy.extractors.turbovidplay import TurboVidPlayExtractor
 from mediaflow_proxy.extractors.uqload import UqloadExtractor
 from mediaflow_proxy.extractors.vavoo import VavooExtractor
+from mediaflow_proxy.extractors.vidguard import VidGuardExtractor
 from mediaflow_proxy.extractors.vidmoly import VidmolyExtractor
 from mediaflow_proxy.extractors.vidoza import VidozaExtractor
 from mediaflow_proxy.extractors.vixcloud import VixCloudExtractor
@@ -44,6 +45,7 @@ class ExtractorFactory:
         "LuluStream": LuluStreamExtractor,
         "DLHD": DLHDExtractor,
         "Vavoo": VavooExtractor,
+        "VidGuard": VidGuardExtractor,
         "Vidmoly": VidmolyExtractor,
         "Vidoza": VidozaExtractor,
         "Fastream": FastreamExtractor,
