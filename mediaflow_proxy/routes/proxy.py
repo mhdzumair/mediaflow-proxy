@@ -1,13 +1,13 @@
+import asyncio
 from typing import Annotated
 from urllib.parse import quote, unquote
 import re
 import logging
 import httpx
 import time
-from collections import defaultdict
 
 from fastapi import Request, Depends, APIRouter, Query, HTTPException
-from fastapi.responses import Response, RedirectResponse
+from fastapi.responses import Response
 
 from mediaflow_proxy.handlers import (
     handle_hls_stream_proxy,
