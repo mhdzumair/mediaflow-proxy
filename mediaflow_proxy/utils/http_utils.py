@@ -687,17 +687,12 @@ class EnhancedStreamingResponse(Response):
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         async with anyio.create_task_group() as task_group:
-            streaming_completed = False
             stream_func = partial(self.stream_response, send)
             listen_func = partial(self.listen_for_disconnect, receive)
 
             async def wrap(func: typing.Callable[[], typing.Awaitable[None]]) -> None:
                 try:
                     await func()
-                    # If this is the stream_response function and it completes successfully, mark as done
-                    if func == stream_func:
-                        nonlocal streaming_completed
-                        streaming_completed = True
                 except Exception as e:
                     # Note: stream_response and listen_for_disconnect handle their own exceptions
                     # internally. This is a safety net for any unexpected exceptions that might
@@ -707,10 +702,10 @@ class EnhancedStreamingResponse(Response):
                         # Re-raise unexpected errors to surface bugs rather than silently swallowing them
                         raise
                 finally:
-                    # Only cancel the task group if we're in disconnect listener or
-                    # if streaming_completed is True (meaning we finished normally)
-                    if func == listen_func or streaming_completed:
-                        task_group.cancel_scope.cancel()
+                    # Cancel task group when either task completes or fails:
+                    # - stream_func finished (success or failure) -> stop listening for disconnect
+                    # - listen_func finished (client disconnected) -> stop streaming
+                    task_group.cancel_scope.cancel()
 
             # Start the streaming response in a separate task
             task_group.start_soon(wrap, stream_func)
