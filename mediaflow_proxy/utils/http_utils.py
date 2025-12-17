@@ -699,13 +699,12 @@ class EnhancedStreamingResponse(Response):
                         nonlocal streaming_completed
                         streaming_completed = True
                 except Exception as e:
-                    # Handle expected streaming errors gracefully without crashing the ASGI app
-                    if isinstance(e, (httpx.RemoteProtocolError, httpx.ReadError, h11._util.LocalProtocolError, DownloadError)):
-                        # These are expected errors during streaming (upstream disconnects, network issues)
-                        logger.warning(f"Streaming error (handled gracefully): {type(e).__name__}: {e}")
-                    elif not isinstance(e, anyio.get_cancelled_exc_class()):
-                        logger.exception("Error in streaming task")
-                        # Only re-raise if it's not an expected streaming error or cancellation
+                    # Note: stream_response and listen_for_disconnect handle their own exceptions
+                    # internally. This is a safety net for any unexpected exceptions that might
+                    # escape due to future code changes.
+                    if not isinstance(e, anyio.get_cancelled_exc_class()):
+                        logger.exception(f"Unexpected error in streaming task: {type(e).__name__}: {e}")
+                        # Re-raise unexpected errors to surface bugs rather than silently swallowing them
                         raise
                 finally:
                     # Only cancel the task group if we're in disconnect listener or
