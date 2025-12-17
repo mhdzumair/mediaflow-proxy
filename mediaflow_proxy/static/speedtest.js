@@ -425,12 +425,14 @@ class MediaFlowSpeedTest {
             'Content-Type': 'application/json',
         };
 
-        // Add current API password to headers if provided
+        // Build URL with api_password as query parameter if provided
+        // This is more reliable than headers when behind reverse proxies
+        let configUrl = '/speedtest/config';
         if (currentApiPassword) {
-            headers['api_password'] = currentApiPassword;
+            configUrl += `?api_password=${encodeURIComponent(currentApiPassword)}`;
         }
 
-        const response = await fetch('/speedtest/config', {
+        const response = await fetch(configUrl, {
             method: 'POST',
             headers: headers,
             body: JSON.stringify(requestBody)
