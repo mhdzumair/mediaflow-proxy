@@ -230,6 +230,14 @@ class Streamer:
                 raise DownloadError(502, f"Protocol error while streaming: {e}")
         except GeneratorExit:
             logger.info("Streaming session stopped by the user")
+        except httpx.ReadError as e:
+            # Handle network read errors gracefully - these occur when upstream connection drops
+            logger.warning(f"ReadError while streaming: {e}")
+            if self.bytes_transferred > 0:
+                logger.info(f"Partial content received ({self.bytes_transferred} bytes) before ReadError. Graceful termination.")
+                return
+            else:
+                raise DownloadError(502, f"ReadError while streaming: {e}")
         except Exception as e:
             logger.error(f"Error streaming content: {e}")
             raise
@@ -587,6 +595,8 @@ class EnhancedStreamingResponse(Response):
             logger.error(f"Error in listen_for_disconnect: {str(e)}")
 
     async def stream_response(self, send: Send) -> None:
+        # Track if response headers have been sent to prevent duplicate headers
+        response_started = False
         try:
             # Initialize headers
             headers = list(self.raw_headers)
@@ -610,6 +620,7 @@ class EnhancedStreamingResponse(Response):
                     "headers": headers,
                 }
             )
+            response_started = True
 
             # Track if we've sent any data
             data_sent = False
@@ -628,27 +639,27 @@ class EnhancedStreamingResponse(Response):
 
                 # Successfully streamed all content
                 await send({"type": "http.response.body", "body": b"", "more_body": False})
-            except (httpx.RemoteProtocolError, h11._util.LocalProtocolError) as e:
-                # Handle connection closed errors
+            except (httpx.RemoteProtocolError, httpx.ReadError, h11._util.LocalProtocolError) as e:
+                # Handle connection closed / read errors gracefully
                 if data_sent:
                     # We've sent some data to the client, so try to complete the response
-                    logger.warning(f"Remote protocol error after partial streaming: {e}")
+                    logger.warning(f"Upstream connection error after partial streaming: {e}")
                     try:
                         await send({"type": "http.response.body", "body": b"", "more_body": False})
                         logger.info(
                             f"Response finalized after partial content ({self.actual_content_length} bytes transferred)"
                         )
                     except Exception as close_err:
-                        logger.warning(f"Could not finalize response after remote error: {close_err}")
+                        logger.warning(f"Could not finalize response after upstream error: {close_err}")
                 else:
                     # No data was sent, re-raise the error
-                    logger.error(f"Protocol error before any data was streamed: {e}")
+                    logger.error(f"Upstream error before any data was streamed: {e}")
                     raise
         except Exception as e:
             logger.exception(f"Error in stream_response: {str(e)}")
-            if not isinstance(e, (ConnectionResetError, anyio.BrokenResourceError)):
+            if not isinstance(e, (ConnectionResetError, anyio.BrokenResourceError)) and not response_started:
+                # Only attempt to send error response if headers haven't been sent yet
                 try:
-                    # Try to send an error response if client is still connected
                     await send(
                         {
                             "type": "http.response.start",
@@ -660,6 +671,12 @@ class EnhancedStreamingResponse(Response):
                     await send({"type": "http.response.body", "body": error_message, "more_body": False})
                 except Exception:
                     # If we can't send an error response, just log it
+                    pass
+            elif response_started:
+                # Response already started - gracefully close the stream
+                try:
+                    await send({"type": "http.response.body", "body": b"", "more_body": False})
+                except Exception:
                     pass
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -676,12 +693,13 @@ class EnhancedStreamingResponse(Response):
                         nonlocal streaming_completed
                         streaming_completed = True
                 except Exception as e:
-                    if isinstance(e, (httpx.RemoteProtocolError, h11._util.LocalProtocolError)):
-                        # Handle protocol errors more gracefully
-                        logger.warning(f"Protocol error during streaming: {e}")
+                    # Handle expected streaming errors gracefully without crashing the ASGI app
+                    if isinstance(e, (httpx.RemoteProtocolError, httpx.ReadError, h11._util.LocalProtocolError, DownloadError)):
+                        # These are expected errors during streaming (upstream disconnects, network issues)
+                        logger.warning(f"Streaming error (handled gracefully): {type(e).__name__}: {e}")
                     elif not isinstance(e, anyio.get_cancelled_exc_class()):
                         logger.exception("Error in streaming task")
-                        # Only re-raise if it's not a protocol error or cancellation
+                        # Only re-raise if it's not an expected streaming error or cancellation
                         raise
                 finally:
                     # Only cancel the task group if we're in disconnect listener or
