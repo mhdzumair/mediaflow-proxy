@@ -597,6 +597,8 @@ class EnhancedStreamingResponse(Response):
     async def stream_response(self, send: Send) -> None:
         # Track if response headers have been sent to prevent duplicate headers
         response_started = False
+        # Track if response finalization (more_body: False) has been sent to prevent ASGI protocol violation
+        finalization_sent = False
         try:
             # Initialize headers
             headers = list(self.raw_headers)
@@ -639,6 +641,7 @@ class EnhancedStreamingResponse(Response):
 
                 # Successfully streamed all content
                 await send({"type": "http.response.body", "body": b"", "more_body": False})
+                finalization_sent = True
             except (httpx.RemoteProtocolError, httpx.ReadError, h11._util.LocalProtocolError) as e:
                 # Handle connection closed / read errors gracefully
                 if data_sent:
@@ -646,6 +649,7 @@ class EnhancedStreamingResponse(Response):
                     logger.warning(f"Upstream connection error after partial streaming: {e}")
                     try:
                         await send({"type": "http.response.body", "body": b"", "more_body": False})
+                        finalization_sent = True
                         logger.info(
                             f"Response finalized after partial content ({self.actual_content_length} bytes transferred)"
                         )
@@ -669,13 +673,15 @@ class EnhancedStreamingResponse(Response):
                     )
                     error_message = f"Streaming error: {str(e)}".encode("utf-8")
                     await send({"type": "http.response.body", "body": error_message, "more_body": False})
+                    finalization_sent = True
                 except Exception:
                     # If we can't send an error response, just log it
                     pass
-            elif response_started:
-                # Response already started - gracefully close the stream
+            elif response_started and not finalization_sent:
+                # Response already started but not finalized - gracefully close the stream
                 try:
                     await send({"type": "http.response.body", "body": b"", "more_body": False})
+                    finalization_sent = True
                 except Exception:
                     pass
 
