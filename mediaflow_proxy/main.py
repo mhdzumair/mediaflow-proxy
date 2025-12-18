@@ -92,6 +92,10 @@ async def generate_url(request: GenerateUrlRequest):
     """Generate a single encoded URL based on the provided request."""
     encryption_handler = EncryptionHandler(request.api_password) if request.api_password else None
 
+    if request.request_headers is None:
+        request.request_headers = {}
+    request.request_headers["User-Agent"] = "KSPlayer/1.0"
+    
     # Ensure api_password is in query_params if provided
     query_params = request.query_params.copy()
     if "api_password" not in query_params and request.api_password:
@@ -142,7 +146,10 @@ async def generate_urls(request: GenerateMultiUrlRequest):
         query_params = url_item.query_params.copy()
         if "api_password" not in query_params and request.api_password:
             query_params["api_password"] = request.api_password
-
+        if url_item.request_headers is None:
+            url_item.request_headers = {}
+        url_item.request_headers["User-Agent"] = "KSPlayer/1.0"
+        
         # Generate the encoded URL
         return encode_mediaflow_proxy_url(
             mediaflow_proxy_url=request.mediaflow_proxy_url,
