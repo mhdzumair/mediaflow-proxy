@@ -603,17 +603,6 @@ class EnhancedStreamingResponse(Response):
             # Initialize headers
             headers = list(self.raw_headers)
 
-            # Set the transfer-encoding to chunked for streamed responses with content-length
-            # when content-length is present. This ensures we don't hit protocol errors
-            # if the upstream connection is closed prematurely.
-            for i, (name, _) in enumerate(headers):
-                if name.lower() == b"content-length":
-                    # Replace content-length with transfer-encoding: chunked for streaming
-                    headers[i] = (b"transfer-encoding", b"chunked")
-                    headers = [h for h in headers if h[0].lower() != b"content-length"]
-                    logger.debug("Switched from content-length to chunked transfer-encoding for streaming")
-                    break
-
             # Start the response
             await send(
                 {
