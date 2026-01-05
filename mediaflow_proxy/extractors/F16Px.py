@@ -32,9 +32,6 @@ class F16PxExtractor(BaseExtractor):
         host = parsed.netloc
         origin = f"{parsed.scheme}://{parsed.netloc}"
 
-        if not (host.endswith("f16px.com") or host.endswith("bysesayeveum.com")):
-            raise ExtractorError("F16PX: Invalid domain")
-
         match = re.search(r"/e/([A-Za-z0-9]+)", parsed.path or "")
         if not match:
             raise ExtractorError("F16PX: Invalid embed URL")
