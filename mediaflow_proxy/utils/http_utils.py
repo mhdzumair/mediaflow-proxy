@@ -581,6 +581,8 @@ class EnhancedStreamingResponse(Response):
         self.media_type = self.media_type if media_type is None else media_type
         self.background = background
         self.init_headers(headers)
+        if "content-length" in self.headers:
+            headers.pop("content-length", None)
         self.actual_content_length = 0
 
     @staticmethod
