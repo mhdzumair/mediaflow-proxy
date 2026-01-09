@@ -542,6 +542,7 @@ def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
     """
     request_headers = {k: v for k, v in request.headers.items() if k in SUPPORTED_REQUEST_HEADERS}
     request_headers.update({k[2:].lower(): v for k, v in request.query_params.items() if k.startswith("h_")})
+    request_headers.setdefault("user-agent", settings.user_agent)
 
     # Handle common misspelling of referer
     if "referrer" in request_headers:
