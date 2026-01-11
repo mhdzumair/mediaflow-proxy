@@ -348,6 +348,7 @@ def encode_mediaflow_proxy_url(
     query_params: typing.Optional[dict] = None,
     request_headers: typing.Optional[dict] = None,
     response_headers: typing.Optional[dict] = None,
+    remove_response_headers: typing.Optional[list[str]] = None,
     encryption_handler: EncryptionHandler = None,
     expiration: int = None,
     ip: str = None,
@@ -363,6 +364,7 @@ def encode_mediaflow_proxy_url(
         query_params (dict, optional): Additional query parameters to include. Defaults to None.
         request_headers (dict, optional): Headers to include as query parameters. Defaults to None.
         response_headers (dict, optional): Headers to include as query parameters. Defaults to None.
+        remove_response_headers (list[str], optional): List of response header names to remove. Defaults to None.
         encryption_handler (EncryptionHandler, optional): The encryption handler to use. Defaults to None.
         expiration (int, optional): The expiration time for the encrypted token. Defaults to None.
         ip (str, optional): The public IP address to include in the query parameters. Defaults to None.
@@ -376,15 +378,19 @@ def encode_mediaflow_proxy_url(
     if destination_url is not None:
         query_params["d"] = destination_url
 
-    # Add headers if provided
+    # Add headers if provided (always use lowercase prefix for consistency)
     if request_headers:
         query_params.update(
-            {key if key.startswith("h_") else f"h_{key}": value for key, value in request_headers.items()}
+            {key if key.lower().startswith("h_") else f"h_{key}": value for key, value in request_headers.items()}
         )
     if response_headers:
         query_params.update(
-            {key if key.startswith("r_") else f"r_{key}": value for key, value in response_headers.items()}
+            {key if key.lower().startswith("r_") else f"r_{key}": value for key, value in response_headers.items()}
         )
+    
+    # Add remove headers if provided (x_ prefix for "exclude")
+    if remove_response_headers:
+        query_params["x_headers"] = ",".join(remove_response_headers)
 
     # Construct the base URL
     if endpoint is None:
@@ -528,6 +534,27 @@ def get_original_scheme(request: Request) -> str:
 class ProxyRequestHeaders:
     request: dict
     response: dict
+    remove: list  # headers to remove from response
+
+
+def apply_header_manipulation(base_headers: dict, proxy_headers: ProxyRequestHeaders) -> dict:
+    """
+    Apply response header additions and removals.
+    
+    This function filters out headers specified in proxy_headers.remove,
+    then merges in headers from proxy_headers.response.
+    
+    Args:
+        base_headers (dict): The base headers to start with.
+        proxy_headers (ProxyRequestHeaders): The proxy headers containing response additions and removals.
+    
+    Returns:
+        dict: The manipulated headers.
+    """
+    remove_set = set(h.lower() for h in proxy_headers.remove)
+    result = {k: v for k, v in base_headers.items() if k.lower() not in remove_set}
+    result.update(proxy_headers.response)
+    return result
 
 
 def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
@@ -538,10 +565,10 @@ def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
         request (Request): The incoming HTTP request.
 
     Returns:
-        ProxyRequest: A named tuple containing the request headers and response headers.
+        ProxyRequest: A named tuple containing the request headers, response headers, and headers to remove.
     """
     request_headers = {k: v for k, v in request.headers.items() if k in SUPPORTED_REQUEST_HEADERS}
-    request_headers.update({k[2:].lower(): v for k, v in request.query_params.items() if k.startswith("h_")})
+    request_headers.update({k[2:].lower(): v for k, v in request.query_params.items() if k.lower().startswith("h_")})
     request_headers.setdefault("user-agent", settings.user_agent)
 
     # Handle common misspelling of referer
@@ -559,8 +586,13 @@ def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
             if v is None or v.strip() == "":
                 request_headers.pop(h, None)
 
-    response_headers = {k[2:].lower(): v for k, v in request.query_params.items() if k.startswith("r_")}
-    return ProxyRequestHeaders(request_headers, response_headers)
+    response_headers = {k[2:].lower(): v for k, v in request.query_params.items() if k.lower().startswith("r_")}
+    
+    # Parse headers to remove from response (x_headers parameter)
+    x_headers_param = request.query_params.get("x_headers", "")
+    remove_headers = [h.strip().lower() for h in x_headers_param.split(",") if h.strip()] if x_headers_param else []
+    
+    return ProxyRequestHeaders(request_headers, response_headers, remove_headers)
 
 
 class EnhancedStreamingResponse(Response):

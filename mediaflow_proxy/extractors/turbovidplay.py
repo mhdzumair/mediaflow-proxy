@@ -64,5 +64,6 @@ class TurboVidPlayExtractor(BaseExtractor):
         return {
             "destination_url": real_m3u8,
             "request_headers": self.base_headers,
+            "remove_response_headers": ["content-length"],
             "mediaflow_endpoint": "hls_manifest_proxy",
         }
