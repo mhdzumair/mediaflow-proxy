@@ -61,15 +61,11 @@ jobs:
         # Verify the change
         grep '^version = ' pyproject.toml
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.13'
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
 
-    - name: Install dependencies
-      run: |
-        pip install poetry
-        poetry build
+    - name: Build package
+      run: uv build
 
     - name: Build and publish
       uses: pypa/gh-action-pypi-publish@release/v1
