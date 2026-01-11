@@ -1,9 +1,47 @@
 import logging
 import re
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 from urllib.parse import urljoin
 
 logger = logging.getLogger(__name__)
+
+
+def find_stream_by_resolution(streams: List[Dict[str, Any]], target_resolution: str) -> Optional[Dict[str, Any]]:
+    """
+    Find stream matching target resolution (e.g., '1080p', '720p').
+    Falls back to closest lower resolution if exact match not found.
+
+    Args:
+        streams: List of stream dictionaries with 'resolution' key as (width, height) tuple.
+        target_resolution: Target resolution string (e.g., '1080p', '720p').
+
+    Returns:
+        The matching stream dictionary, or None if no streams available.
+    """
+    # Parse target height from "1080p" -> 1080
+    target_height = int(target_resolution.rstrip('p'))
+
+    # Filter streams with valid resolution (height > 0), sort by height descending
+    valid_streams = [s for s in streams if s.get("resolution", (0, 0))[1] > 0]
+    if not valid_streams:
+        logger.warning("No streams with valid resolution found")
+        return streams[0] if streams else None
+
+    sorted_streams = sorted(valid_streams, key=lambda s: s["resolution"][1], reverse=True)
+
+    # Find exact match or closest lower
+    for stream in sorted_streams:
+        stream_height = stream["resolution"][1]
+        if stream_height <= target_height:
+            logger.info(f"Selected stream with resolution {stream['resolution']} for target {target_resolution}")
+            return stream
+
+    # If all streams are higher than target, return lowest available
+    lowest_stream = sorted_streams[-1]
+    logger.info(
+        f"All streams higher than target {target_resolution}, using lowest: {lowest_stream['resolution']}"
+    )
+    return lowest_stream
 
 
 def parse_hls_playlist(playlist_content: str, base_url: Optional[str] = None) -> List[Dict[str, Any]]:
