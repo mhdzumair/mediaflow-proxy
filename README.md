@@ -35,6 +35,8 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 ### Additional Features
 - Built-in speed test for RealDebrid and AllDebrid services
 - Custom header injection and modification
+- **Response header removal** - Remove problematic headers from upstream responses (e.g., incorrect Content-Length)
+- **Resolution selection** - Select specific resolution (e.g., 720p, 1080p) for HLS and DASH streams
 - Real-time HLS manifest manipulation
 - HLS Key URL modifications for bypassing stream restrictions
 - **Base64 URL Support** - Automatic detection and processing of base64 encoded URLs
@@ -655,10 +657,10 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
    > **Note**
    > > Omit `--forwarded-allow-ips "*"` when running locally.
 
-#### Using git & poetry
+#### Using git & uv
 
 > [!IMPORTANT]
-> Ensure that you have Python 3.10 or higher installed.
+> Ensure that you have Python 3.10 or higher and [uv](https://docs.astral.sh/uv/getting-started/installation/) installed.
 
 
 1. Clone the repository:
@@ -667,9 +669,9 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
    cd mediaflow-proxy
    ```
 
-2. Install dependencies using Poetry:
+2. Install dependencies using uv:
    ```
-   poetry install
+   uv sync
    ```
 
 3. Set the `API_PASSWORD` environment variable in `.env`:
@@ -679,7 +681,7 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
 
 4. Run the FastAPI server:
    ```
-   poetry run uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888 --workers 4 --forwarded-allow-ips "*"
+   uv run uvicorn mediaflow_proxy.main:app --host 0.0.0.0 --port 8888 --workers 4 --forwarded-allow-ips "*"
    ```
 
    > **Note**
@@ -754,18 +756,31 @@ Ideal for users who want a reliable, plug-and-play solution without the technica
 
 Once the server is running, for more details on the available endpoints and their parameters, visit the Swagger UI at `http://localhost:8888/docs`.
 
-### New URL Parameters
+### URL Parameters
 
 **`&max_res=true`**  
 Forces playback at the highest available quality (maximum resolution) supported by the stream.  
 - **Usage:** Add `&max_res=true` to the proxy URL  
 - **Effect:** Only the highest quality rendition will be selected and served.  
-- **Note:** This parameter is mainly effective with VixSrc (and similar) sources.
+- **Note:** This parameter is effective with HLS and MPD streams.
+
+**`&resolution=720p`**  
+Select a specific resolution stream instead of the highest or default.  
+- **Usage:** Add `&resolution=720p` (or `1080p`, `480p`, `360p`, etc.) to the proxy URL  
+- **Effect:** Selects the stream matching the specified resolution. Falls back to the closest lower resolution if exact match is not found.  
+- **Supported Endpoints:** `/proxy/hls/manifest.m3u8`, `/proxy/mpd/manifest.m3u8`
 
 **`&no_proxy=true`**  
 Disables the proxy for the current destination, performing a direct request.  
 - **Usage:** Add `&no_proxy=true` to the proxy URL  
 - **Effect:** Bypasses all proxy functions for the destination, useful for debugging or testing stream access directly.
+
+**`&x_headers=content-length,transfer-encoding`**  
+Remove specific headers from the proxied response.  
+- **Usage:** Add `&x_headers=header1,header2` to the proxy URL (comma-separated list)  
+- **Effect:** Removes the specified headers from the upstream response before forwarding to the client.  
+- **Use Case:** Useful when upstream servers send incorrect headers (e.g., wrong `Content-Length`) that cause playback issues.  
+- **Example:** `&x_headers=content-length` removes the Content-Length header, allowing chunked transfer encoding.
 
 ### Examples
 
@@ -810,6 +825,23 @@ http://localhost:8888/proxy/hls/manifest.m3u8?d=https://iptv.provider.com/stream
 - **M3U_Plus Playlists**: Extended m3u format with additional metadata
 - **Provider-Specific Streams**: IPTV services with custom playlist formats
 - **Authentication Required**: Streams that need specific headers or authentication
+
+#### HLS Stream with Resolution Selection
+
+```bash
+# Select specific resolution (720p)
+mpv "http://localhost:8888/proxy/hls/manifest.m3u8?d=https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8&resolution=720p&api_password=your_password"
+
+# Select highest resolution
+mpv "http://localhost:8888/proxy/hls/manifest.m3u8?d=https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8&max_res=true&api_password=your_password"
+```
+
+#### Stream with Header Removal (Fix Content-Length Issues)
+
+```bash
+# Remove content-length header for streams with incorrect content-length
+mpv "http://localhost:8888/proxy/stream?d=https://example.com/video.mp4&x_headers=content-length&api_password=your_password"
+```
 
 #### Live DASH Stream (Non-DRM Protected)
 
@@ -886,6 +918,10 @@ data = {
         "referer": "https://example.com/",
         "origin": "https://example.com",
     },
+    "response_headers": {
+        "cache-control": "no-cache",  # Optional: Add custom response headers
+    },
+    "remove_response_headers": ["content-length"],  # Optional: Remove specific response headers
     "expiration": 3600,  # URL will expire in 1 hour (only for encrypted URLs)
     "ip": "123.123.123.123",  # Optional: Restrict access to this IP (only for encrypted URLs)
     "api_password": "your_password",  # Add here for encrypted URLs
@@ -901,6 +937,7 @@ print(encoded_url)
 > - If you add `api_password` at the root level of the request, the URL will be **encrypted**.
 > - If you add `api_password` inside the `query_params` object, the URL will only be **encoded** (not encrypted).
 > - The `filename` parameter is optional and should only be used with the `/proxy/stream` endpoint, not with MPD or HLS proxy endpoints.
+> - The `remove_response_headers` parameter is useful when upstream servers send incorrect headers (e.g., wrong `Content-Length`) that cause playback issues.
 > - The legacy endpoint `/generate_encrypted_or_encoded_url` is still available but deprecated. It's recommended to use `/generate_url` instead.
 
 #### Multiple URLs Generation
