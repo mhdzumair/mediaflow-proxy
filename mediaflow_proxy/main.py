@@ -66,6 +66,11 @@ async def show_speedtest_page():
     return RedirectResponse(url="/speedtest.html")
 
 
+@app.get("/url-generator")
+async def show_url_generator_page():
+    return RedirectResponse(url="/url_generator.html")
+
+
 @app.post(
     "/generate_encrypted_or_encoded_url",
     description="Generate a single encoded URL",

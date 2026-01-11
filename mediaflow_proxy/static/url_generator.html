@@ -1,0 +1,1295 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediaFlow URL Generator</title>
+    <link rel="icon" href="/logo.png" type="image/x-icon">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        'display': ['Satoshi', 'system-ui', 'sans-serif'],
+                        'mono': ['JetBrains Mono', 'Fira Code', 'monospace'],
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.3s ease-out',
+                        'slide-up': 'slideUp 0.3s ease-out',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap');
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(10px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .tab-active {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+        }
+        
+        .input-field {
+            transition: all 0.2s ease;
+        }
+        
+        .input-field:focus {
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.3);
+        }
+        
+        .url-output {
+            background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        .copy-btn {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            transition: all 0.2s ease;
+        }
+        
+        .copy-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+        }
+        
+        .generate-btn {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            transition: all 0.2s ease;
+        }
+        
+        .generate-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.5);
+        }
+        
+        .checkbox-custom {
+            accent-color: #8b5cf6;
+        }
+        
+        select option {
+            background-color: #1f2937;
+            color: white;
+        }
+        
+        .collapsible-header {
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .collapsible-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+        
+        .collapsible-content.open {
+            max-height: 2000px;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 via-gray-100 to-slate-200 dark:from-slate-900 dark:via-gray-900 dark:to-slate-800 min-h-full font-display">
+    <!-- Theme Toggle -->
+    <div class="fixed top-4 right-4 z-50">
+        <button id="themeToggle" class="p-2.5 rounded-full bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 shadow-lg">
+            <svg id="sunIcon" class="w-5 h-5 text-amber-500 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+            </svg>
+            <svg id="moonIcon" class="w-5 h-5 text-indigo-600 block dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+            </svg>
+        </button>
+    </div>
+
+    <!-- Back to Home -->
+    <div class="fixed top-4 left-4 z-50">
+        <a href="/" class="flex items-center gap-2 px-4 py-2 rounded-full bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 shadow-lg text-gray-700 dark:text-gray-200 text-sm font-medium">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+            </svg>
+            Home
+        </a>
+    </div>
+
+    <main class="container mx-auto px-4 py-12 max-w-5xl">
+        <!-- Header -->
+        <div class="text-center mb-10 animate-fade-in">
+            <div class="flex items-center justify-center gap-3 mb-3">
+                <img src="/logo.png" alt="MediaFlow" class="w-12 h-12 rounded-xl shadow-lg">
+                <h1 class="text-4xl font-bold bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 bg-clip-text text-transparent">
+                    URL Generator
+                </h1>
+            </div>
+            <p class="text-gray-600 dark:text-gray-400 text-lg">
+                Generate proxy URLs, extractor links, and encoded URLs for MediaFlow
+            </p>
+        </div>
+
+        <!-- API Password (Global) -->
+        <div class="mb-6 animate-slide-up">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-5 border border-gray-200 dark:border-gray-700">
+                <div class="flex items-center gap-3 mb-3">
+                    <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                    </svg>
+                    <label class="text-sm font-semibold text-gray-700 dark:text-gray-200">API Password</label>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">(optional - for protected instances)</span>
+                </div>
+                <input type="password" id="globalApiPassword" placeholder="Enter API password if required"
+                    class="input-field w-full px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+            </div>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="flex flex-wrap gap-2 mb-6 animate-slide-up" style="animation-delay: 0.1s;">
+            <button onclick="switchTab('proxy')" id="tab-proxy" class="tab-btn tab-active px-6 py-3 rounded-xl font-semibold text-sm transition-all duration-200">
+                🔗 Proxy URLs
+            </button>
+            <button onclick="switchTab('extractor')" id="tab-extractor" class="tab-btn px-6 py-3 rounded-xl font-semibold text-sm bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 shadow-md">
+                🎬 Extractor
+            </button>
+            <button onclick="switchTab('encoded')" id="tab-encoded" class="tab-btn px-6 py-3 rounded-xl font-semibold text-sm bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 shadow-md">
+                🔐 Encoded URL
+            </button>
+        </div>
+
+        <!-- Proxy URL Generator Tab -->
+        <div id="panel-proxy" class="tab-panel animate-fade-in">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-gray-200 dark:border-gray-700">
+                <h2 class="text-xl font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-sm">🔗</span>
+                    Proxy URL Generator
+                </h2>
+
+                <!-- Proxy Type Selector -->
+                <div class="mb-6">
+                    <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Proxy Type</label>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <button onclick="selectProxyType('hls')" id="proxy-type-hls" class="proxy-type-btn active-proxy-type px-4 py-3 rounded-xl border-2 border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium text-sm transition-all">
+                            📺 HLS Manifest
+                        </button>
+                        <button onclick="selectProxyType('mpd')" id="proxy-type-mpd" class="proxy-type-btn px-4 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-700 dark:text-gray-300 font-medium text-sm transition-all hover:border-indigo-300">
+                            🎥 MPD/DASH
+                        </button>
+                        <button onclick="selectProxyType('stream')" id="proxy-type-stream" class="proxy-type-btn px-4 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-700 dark:text-gray-300 font-medium text-sm transition-all hover:border-indigo-300">
+                            📡 Stream
+                        </button>
+                    </div>
+                </div>
+
+                <!-- HLS Form -->
+                <div id="form-hls" class="proxy-form space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Destination URL <span class="text-red-500">*</span></label>
+                        <input type="url" id="hls-destination" placeholder="https://example.com/playlist.m3u8"
+                            class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Key URL <span class="text-gray-400 font-normal">(optional)</span></label>
+                        <input type="url" id="hls-key-url" placeholder="https://example.com/key"
+                            class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Replace the original key URL (useful for bypassing protection)</p>
+                    </div>
+                    
+                    <!-- HLS Options -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Options</h4>
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="hls-force-playlist" class="checkbox-custom w-4 h-4 rounded">
+                                <span class="text-sm text-gray-700 dark:text-gray-300">Force Playlist Proxy</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="hls-key-only" class="checkbox-custom w-4 h-4 rounded">
+                                <span class="text-sm text-gray-700 dark:text-gray-300">Key Only Proxy</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="hls-no-proxy" class="checkbox-custom w-4 h-4 rounded">
+                                <span class="text-sm text-gray-700 dark:text-gray-300">No Proxy</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="hls-max-res" class="checkbox-custom w-4 h-4 rounded">
+                                <span class="text-sm text-gray-700 dark:text-gray-300">Max Resolution</span>
+                            </label>
+                        </div>
+                        
+                        <!-- Resolution Selection -->
+                        <div class="mt-4">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Resolution <span class="text-gray-400 font-normal">(optional)</span></label>
+                            <select id="hls-resolution" class="input-field w-full sm:w-48 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                                <option value="">Auto (no preference)</option>
+                                <option value="2160p">2160p (4K)</option>
+                                <option value="1440p">1440p (2K)</option>
+                                <option value="1080p">1080p (Full HD)</option>
+                                <option value="720p">720p (HD)</option>
+                                <option value="480p">480p (SD)</option>
+                                <option value="360p">360p</option>
+                                <option value="240p">240p</option>
+                            </select>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Select specific resolution (falls back to closest lower if not available)</p>
+                        </div>
+                        
+                        <div class="mt-3 text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                            <p><strong>Force Playlist Proxy:</strong> Force all playlist URLs to be proxied regardless of content routing settings</p>
+                            <p><strong>Key Only Proxy:</strong> Only proxy the key URL, leaving segment URLs direct</p>
+                            <p><strong>No Proxy:</strong> Returns manifest without proxying internal URLs</p>
+                            <p><strong>Max Resolution:</strong> Redirects to the highest resolution stream</p>
+                        </div>
+                    </div>
+                    
+                    <!-- HLS Response Headers Section -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Response Headers <span class="text-gray-400 font-normal">(Advanced)</span></h4>
+                        <div class="space-y-4">
+                            <div>
+                                <div class="flex items-center justify-between mb-2">
+                                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Add Response Headers <span class="text-gray-400 font-normal">(r_ prefix)</span></label>
+                                    <button onclick="addHlsResponseHeader()" class="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-medium flex items-center gap-1">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                                        </svg>
+                                        Add
+                                    </button>
+                                </div>
+                                <div id="hls-response-headers-container" class="space-y-2">
+                                    <!-- Response headers will be added here dynamically -->
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Remove Response Headers <span class="text-gray-400 font-normal">(x_headers)</span></label>
+                                <input type="text" id="hls-remove-headers" placeholder="X-Frame-Options, Content-Security-Policy"
+                                    class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Comma-separated list of response headers to remove</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- MPD Form -->
+                <div id="form-mpd" class="proxy-form space-y-4 hidden">
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Destination URL <span class="text-red-500">*</span></label>
+                        <input type="url" id="mpd-destination" placeholder="https://example.com/manifest.mpd"
+                            class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500">
+                    </div>
+                    
+                    <!-- DRM Section -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">DRM Parameters (Clear Key)</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Key ID</label>
+                                <input type="text" id="mpd-key-id" placeholder="eb676abbcb345e96bbcf616630f1a3da"
+                                    class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 font-mono text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Key</label>
+                                <input type="text" id="mpd-key" placeholder="100b6c20940f779a4589152b57d2dacb"
+                                    class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 font-mono text-sm">
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">For Clear Key DRM-protected streams. Leave empty for non-DRM content.</p>
+                    </div>
+                    
+                    <!-- Resolution Selection -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Resolution</h4>
+                        <select id="mpd-resolution" class="input-field w-full sm:w-48 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                            <option value="">Auto (no preference)</option>
+                            <option value="2160p">2160p (4K)</option>
+                            <option value="1440p">1440p (2K)</option>
+                            <option value="1080p">1080p (Full HD)</option>
+                            <option value="720p">720p (HD)</option>
+                            <option value="480p">480p (SD)</option>
+                            <option value="360p">360p</option>
+                            <option value="240p">240p</option>
+                        </select>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Select specific resolution (falls back to closest lower if not available)</p>
+                    </div>
+                    
+                    <!-- MPD Response Headers Section -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Response Headers <span class="text-gray-400 font-normal">(Advanced)</span></h4>
+                        <div class="space-y-4">
+                            <div>
+                                <div class="flex items-center justify-between mb-2">
+                                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Add Response Headers <span class="text-gray-400 font-normal">(r_ prefix)</span></label>
+                                    <button onclick="addMpdResponseHeader()" class="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-medium flex items-center gap-1">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                                        </svg>
+                                        Add
+                                    </button>
+                                </div>
+                                <div id="mpd-response-headers-container" class="space-y-2">
+                                    <!-- Response headers will be added here dynamically -->
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Remove Response Headers <span class="text-gray-400 font-normal">(x_headers)</span></label>
+                                <input type="text" id="mpd-remove-headers" placeholder="X-Frame-Options, Content-Security-Policy"
+                                    class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Comma-separated list of response headers to remove</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stream Form -->
+                <div id="form-stream" class="proxy-form space-y-4 hidden">
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Destination URL <span class="text-red-500">*</span></label>
+                        <input type="url" id="stream-destination" placeholder="https://example.com/video.mp4"
+                            class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Filename <span class="text-gray-400 font-normal">(optional)</span></label>
+                        <input type="text" id="stream-filename" placeholder="movie.mp4"
+                            class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Filename for Content-Disposition header (useful for media players like Infuse)</p>
+                    </div>
+                    
+                    <!-- Response Headers Section -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Response Headers</h4>
+                        <div class="space-y-4">
+                            <div>
+                                <div class="flex items-center justify-between mb-2">
+                                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Add Response Headers <span class="text-gray-400 font-normal">(r_ prefix)</span></label>
+                                    <button onclick="addStreamResponseHeader()" class="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-medium flex items-center gap-1">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                                        </svg>
+                                        Add
+                                    </button>
+                                </div>
+                                <div id="stream-response-headers-container" class="space-y-2">
+                                    <!-- Response headers will be added here dynamically -->
+                                </div>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Headers to add to the proxied response (e.g., Cache-Control, Content-Type)</p>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Remove Response Headers <span class="text-gray-400 font-normal">(x_headers)</span></label>
+                                <input type="text" id="stream-remove-headers" placeholder="X-Frame-Options, Content-Security-Policy"
+                                    class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Comma-separated list of response headers to remove from the proxied response</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Request Headers Section -->
+                <div class="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                    <div class="flex items-center justify-between mb-4">
+                        <label class="text-sm font-semibold text-gray-700 dark:text-gray-200">Request Headers <span class="text-gray-400 font-normal">(optional)</span></label>
+                        <button onclick="addProxyHeader()" class="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-medium flex items-center gap-1">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                            </svg>
+                            Add Header
+                        </button>
+                    </div>
+                    <div id="proxy-headers-container" class="space-y-2">
+                        <!-- Headers will be added here dynamically -->
+                    </div>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Headers will be encoded as h_HeaderName=value in the URL</p>
+                </div>
+
+                <!-- Generate Button -->
+                <div class="mt-6">
+                    <button onclick="generateProxyUrl()" class="generate-btn w-full py-3.5 rounded-xl text-white font-semibold text-sm">
+                        Generate Proxy URL
+                    </button>
+                </div>
+
+                <!-- Output -->
+                <div id="proxy-output" class="mt-6 hidden">
+                    <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Generated URL</label>
+                    <div class="url-output rounded-xl p-4 text-green-400 text-sm break-all overflow-x-auto">
+                        <code id="proxy-generated-url"></code>
+                    </div>
+                    <button onclick="copyUrl('proxy-generated-url', event)" class="copy-btn mt-3 px-6 py-2.5 rounded-xl text-white font-semibold text-sm">
+                        📋 Copy to Clipboard
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Extractor Tab -->
+        <div id="panel-extractor" class="tab-panel hidden animate-fade-in">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-gray-200 dark:border-gray-700">
+                <h2 class="text-xl font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-pink-500 to-rose-600 flex items-center justify-center text-white text-sm">🎬</span>
+                    Extractor URL Generator
+                </h2>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Video Host <span class="text-red-500">*</span></label>
+                        <select id="extractor-host" class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500">
+                            <option value="">Select a host...</option>
+                            <option value="Doodstream">Doodstream</option>
+                            <option value="FileLions">FileLions</option>
+                            <option value="FileMoon">FileMoon</option>
+                            <option value="F16Px">F16Px</option>
+                            <option value="Mixdrop">Mixdrop</option>
+                            <option value="Uqload">Uqload</option>
+                            <option value="Streamtape">Streamtape</option>
+                            <option value="StreamWish">StreamWish</option>
+                            <option value="Supervideo">Supervideo</option>
+                            <option value="VixCloud">VixCloud</option>
+                            <option value="Okru">Okru</option>
+                            <option value="Maxstream">Maxstream</option>
+                            <option value="LiveTV">LiveTV</option>
+                            <option value="LuluStream">LuluStream</option>
+                            <option value="DLHD">DLHD</option>
+                            <option value="Fastream">Fastream</option>
+                            <option value="TurboVidPlay">TurboVidPlay</option>
+                            <option value="Vidmoly">Vidmoly</option>
+                            <option value="Vidoza">Vidoza</option>
+                            <option value="Voe">Voe</option>
+                            <option value="Sportsonline">Sportsonline</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Video URL <span class="text-red-500">*</span></label>
+                        <input type="url" id="extractor-destination" placeholder="https://doodstream.com/e/xxxxx"
+                            class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500">
+                    </div>
+
+                    <!-- Extractor Options -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Options</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="extractor-redirect" class="checkbox-custom w-4 h-4 rounded">
+                                <span class="text-sm text-gray-700 dark:text-gray-300">Redirect to Stream</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="extractor-max-res" class="checkbox-custom w-4 h-4 rounded">
+                                <span class="text-sm text-gray-700 dark:text-gray-300">Max Resolution</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="extractor-no-proxy" class="checkbox-custom w-4 h-4 rounded">
+                                <span class="text-sm text-gray-700 dark:text-gray-300">No Proxy</span>
+                            </label>
+                        </div>
+                        <div class="mt-3 text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                            <p><strong>Redirect to Stream:</strong> Automatically redirect to the stream endpoint after extraction</p>
+                            <p><strong>Max Resolution:</strong> Select the highest resolution available</p>
+                            <p><strong>No Proxy:</strong> Return direct URLs without proxying</p>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Extra Parameters <span class="text-gray-400 font-normal">(JSON, optional)</span></label>
+                        <textarea id="extractor-extra-params" rows="3" placeholder='{"stream_title": "My Stream"}'
+                            class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 font-mono text-sm"></textarea>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Additional parameters for specific extractors (e.g., stream_title for LiveTV)</p>
+                    </div>
+                    
+                    <!-- Extractor Headers Section -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Headers <span class="text-gray-400 font-normal">(Advanced)</span></h4>
+                        <div class="space-y-4">
+                            <!-- Request Headers -->
+                            <div>
+                                <div class="flex items-center justify-between mb-2">
+                                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Request Headers <span class="text-gray-400 font-normal">(h_ prefix)</span></label>
+                                    <button onclick="addExtractorRequestHeader()" class="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-medium flex items-center gap-1">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                                        </svg>
+                                        Add
+                                    </button>
+                                </div>
+                                <div id="extractor-request-headers-container" class="space-y-2">
+                                    <!-- Request headers will be added here dynamically -->
+                                </div>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Headers sent when extracting the stream (e.g., Referer, User-Agent)</p>
+                            </div>
+                            
+                            <!-- Response Headers -->
+                            <div>
+                                <div class="flex items-center justify-between mb-2">
+                                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Response Headers <span class="text-gray-400 font-normal">(r_ prefix)</span></label>
+                                    <button onclick="addExtractorResponseHeader()" class="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-medium flex items-center gap-1">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                                        </svg>
+                                        Add
+                                    </button>
+                                </div>
+                                <div id="extractor-response-headers-container" class="space-y-2">
+                                    <!-- Response headers will be added here dynamically -->
+                                </div>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Headers to add to the proxied response (used with redirect_stream)</p>
+                            </div>
+                            
+                            <!-- Remove Headers -->
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Remove Response Headers <span class="text-gray-400 font-normal">(x_headers)</span></label>
+                                <input type="text" id="extractor-remove-headers" placeholder="X-Frame-Options, Content-Security-Policy"
+                                    class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Comma-separated list of response headers to remove</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Generate Button -->
+                <div class="mt-6">
+                    <button onclick="generateExtractorUrl()" class="generate-btn w-full py-3.5 rounded-xl text-white font-semibold text-sm">
+                        Generate Extractor URL
+                    </button>
+                </div>
+
+                <!-- Output -->
+                <div id="extractor-output" class="mt-6 hidden">
+                    <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Generated URL</label>
+                    <div class="url-output rounded-xl p-4 text-green-400 text-sm break-all overflow-x-auto">
+                        <code id="extractor-generated-url"></code>
+                    </div>
+                    <button onclick="copyUrl('extractor-generated-url', event)" class="copy-btn mt-3 px-6 py-2.5 rounded-xl text-white font-semibold text-sm">
+                        📋 Copy to Clipboard
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Encoded URL Tab -->
+        <div id="panel-encoded" class="tab-panel hidden animate-fade-in">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-gray-200 dark:border-gray-700">
+                <h2 class="text-xl font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-sm">🔐</span>
+                    Encoded URL Generator
+                </h2>
+                <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">Generate encrypted/encoded URLs with expiration, IP restriction, and custom headers using the server-side API.</p>
+
+                <div class="space-y-4">
+                    <!-- Basic Settings -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">MediaFlow Proxy URL <span class="text-red-500">*</span></label>
+                            <input type="url" id="encoded-proxy-url" placeholder="https://your-mediaflow-server.com"
+                                class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Endpoint <span class="text-red-500">*</span></label>
+                            <select id="encoded-endpoint" class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500">
+                                <option value="">Select an endpoint...</option>
+                                <option value="/proxy/hls/manifest.m3u8">HLS Manifest (/proxy/hls/manifest.m3u8)</option>
+                                <option value="/proxy/mpd/manifest.m3u8">MPD Manifest (/proxy/mpd/manifest.m3u8)</option>
+                                <option value="/proxy/stream">Stream (/proxy/stream)</option>
+                                <option value="/extractor/video">Extractor (/extractor/video)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Destination URL <span class="text-red-500">*</span></label>
+                        <input type="url" id="encoded-destination" placeholder="https://example.com/stream.m3u8"
+                            class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500">
+                    </div>
+
+                    <!-- Query Parameters -->
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Query Parameters <span class="text-gray-400 font-normal">(JSON, optional)</span></label>
+                        <textarea id="encoded-query-params" rows="2" placeholder='{"key_id": "xxx", "key": "yyy", "host": "Doodstream"}'
+                            class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 font-mono text-sm"></textarea>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Additional query parameters to include in the URL</p>
+                    </div>
+
+                    <!-- Headers Section -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Headers</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Request Headers <span class="text-gray-400 font-normal">(JSON)</span></label>
+                                <textarea id="encoded-request-headers" rows="3" placeholder='{"Referer": "https://example.com", "User-Agent": "Mozilla/5.0"}'
+                                    class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 font-mono text-sm"></textarea>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Response Headers <span class="text-gray-400 font-normal">(JSON)</span></label>
+                                <textarea id="encoded-response-headers" rows="3" placeholder='{"Content-Type": "video/mp4", "Cache-Control": "no-cache"}'
+                                    class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 font-mono text-sm"></textarea>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Remove Response Headers <span class="text-gray-400 font-normal">(comma-separated)</span></label>
+                            <input type="text" id="encoded-remove-headers" placeholder="X-Frame-Options, Content-Security-Policy"
+                                class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Response header names to remove from the proxied response</p>
+                        </div>
+                    </div>
+
+                    <!-- Security & Advanced Options -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Security & Advanced Options</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Expiration <span class="text-gray-400 font-normal">(seconds)</span></label>
+                                <input type="number" id="encoded-expiration" placeholder="3600"
+                                    class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500">
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">URL expires after this time</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">IP Restriction</label>
+                                <input type="text" id="encoded-ip" placeholder="192.168.1.1"
+                                    class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500">
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Restrict URL to this IP</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Filename</label>
+                                <input type="text" id="encoded-filename" placeholder="video.mp4"
+                                    class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500">
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">For media players</p>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="encoded-base64" class="checkbox-custom w-4 h-4 rounded">
+                                <span class="text-sm text-gray-700 dark:text-gray-300">Base64 encode destination URL</span>
+                            </label>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">Encode the destination URL in base64 format before processing</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Generate Button -->
+                <div class="mt-6">
+                    <button onclick="generateEncodedUrl()" class="generate-btn w-full py-3.5 rounded-xl text-white font-semibold text-sm">
+                        Generate Encoded URL
+                    </button>
+                </div>
+
+                <!-- Output -->
+                <div id="encoded-output" class="mt-6 hidden">
+                    <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Generated URL</label>
+                    <div class="url-output rounded-xl p-4 text-green-400 text-sm break-all overflow-x-auto">
+                        <code id="encoded-generated-url"></code>
+                    </div>
+                    <button onclick="copyUrl('encoded-generated-url', event)" class="copy-btn mt-3 px-6 py-2.5 rounded-xl text-white font-semibold text-sm">
+                        📋 Copy to Clipboard
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Theme management
+        const themeToggle = document.getElementById('themeToggle');
+        const html = document.documentElement;
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        html.classList.toggle('dark', savedTheme === 'dark');
+
+        themeToggle.addEventListener('click', () => {
+            html.classList.toggle('dark');
+            const newTheme = html.classList.contains('dark') ? 'dark' : 'light';
+            localStorage.setItem('theme', newTheme);
+        });
+
+        // Initialize server address
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('encoded-proxy-url').value = window.location.origin;
+        });
+
+        // Tab switching
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-panel').forEach(panel => {
+                panel.classList.add('hidden');
+            });
+            
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('tab-active');
+                btn.classList.add('bg-white', 'dark:bg-gray-800', 'text-gray-700', 'dark:text-gray-300', 'shadow-md');
+            });
+            
+            document.getElementById(`panel-${tabName}`).classList.remove('hidden');
+            
+            const activeTab = document.getElementById(`tab-${tabName}`);
+            activeTab.classList.add('tab-active');
+            activeTab.classList.remove('bg-white', 'dark:bg-gray-800', 'text-gray-700', 'dark:text-gray-300', 'shadow-md');
+        }
+
+        // Proxy type switching
+        function selectProxyType(type) {
+            document.querySelectorAll('.proxy-form').forEach(form => {
+                form.classList.add('hidden');
+            });
+            
+            document.querySelectorAll('.proxy-type-btn').forEach(btn => {
+                btn.classList.remove('active-proxy-type', 'border-indigo-500', 'bg-indigo-50', 'dark:bg-indigo-900/30', 'text-indigo-700', 'dark:text-indigo-300');
+                btn.classList.add('border-gray-200', 'dark:border-gray-600', 'bg-gray-50', 'dark:bg-gray-700/50', 'text-gray-700', 'dark:text-gray-300');
+            });
+            
+            document.getElementById(`form-${type}`).classList.remove('hidden');
+            
+            const activeBtn = document.getElementById(`proxy-type-${type}`);
+            activeBtn.classList.add('active-proxy-type', 'border-indigo-500', 'bg-indigo-50', 'dark:bg-indigo-900/30', 'text-indigo-700', 'dark:text-indigo-300');
+            activeBtn.classList.remove('border-gray-200', 'dark:border-gray-600', 'bg-gray-50', 'dark:bg-gray-700/50', 'text-gray-700', 'dark:text-gray-300');
+        }
+
+        // Header management for proxy URLs
+        let proxyHeaderCount = 0;
+        let streamResponseHeaderCount = 0;
+        
+        function addProxyHeader() {
+            const container = document.getElementById('proxy-headers-container');
+            const headerId = `proxy-header-${proxyHeaderCount++}`;
+            
+            const headerRow = document.createElement('div');
+            headerRow.id = headerId;
+            headerRow.className = 'flex gap-2 items-center';
+            headerRow.innerHTML = `
+                <input type="text" placeholder="Header Name (e.g., Referer)" class="header-name flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                <input type="text" placeholder="Header Value" class="header-value flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                <button onclick="removeProxyHeader('${headerId}')" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            `;
+            container.appendChild(headerRow);
+        }
+
+        function removeProxyHeader(headerId) {
+            document.getElementById(headerId).remove();
+        }
+
+        function getProxyHeaders() {
+            const headers = {};
+            document.querySelectorAll('#proxy-headers-container > div').forEach(row => {
+                const name = row.querySelector('.header-name').value.trim();
+                const value = row.querySelector('.header-value').value.trim();
+                if (name && value) {
+                    headers[name] = value;
+                }
+            });
+            return headers;
+        }
+        
+        // Stream response headers management
+        function addStreamResponseHeader() {
+            const container = document.getElementById('stream-response-headers-container');
+            const headerId = `stream-response-header-${streamResponseHeaderCount++}`;
+            
+            const headerRow = document.createElement('div');
+            headerRow.id = headerId;
+            headerRow.className = 'flex gap-2 items-center';
+            headerRow.innerHTML = `
+                <input type="text" placeholder="Header Name (e.g., Cache-Control)" class="response-header-name flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                <input type="text" placeholder="Header Value" class="response-header-value flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                <button onclick="removeStreamResponseHeader('${headerId}')" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            `;
+            container.appendChild(headerRow);
+        }
+
+        function removeStreamResponseHeader(headerId) {
+            document.getElementById(headerId).remove();
+        }
+
+        function getStreamResponseHeaders() {
+            const headers = {};
+            document.querySelectorAll('#stream-response-headers-container > div').forEach(row => {
+                const name = row.querySelector('.response-header-name').value.trim();
+                const value = row.querySelector('.response-header-value').value.trim();
+                if (name && value) {
+                    headers[name] = value;
+                }
+            });
+            return headers;
+        }
+        
+        // HLS response headers management
+        let hlsResponseHeaderCount = 0;
+        
+        function addHlsResponseHeader() {
+            const container = document.getElementById('hls-response-headers-container');
+            const headerId = `hls-response-header-${hlsResponseHeaderCount++}`;
+            
+            const headerRow = document.createElement('div');
+            headerRow.id = headerId;
+            headerRow.className = 'flex gap-2 items-center';
+            headerRow.innerHTML = `
+                <input type="text" placeholder="Header Name (e.g., Cache-Control)" class="response-header-name flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                <input type="text" placeholder="Header Value" class="response-header-value flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                <button onclick="removeHlsResponseHeader('${headerId}')" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            `;
+            container.appendChild(headerRow);
+        }
+
+        function removeHlsResponseHeader(headerId) {
+            document.getElementById(headerId).remove();
+        }
+
+        function getHlsResponseHeaders() {
+            const headers = {};
+            document.querySelectorAll('#hls-response-headers-container > div').forEach(row => {
+                const name = row.querySelector('.response-header-name').value.trim();
+                const value = row.querySelector('.response-header-value').value.trim();
+                if (name && value) {
+                    headers[name] = value;
+                }
+            });
+            return headers;
+        }
+        
+        // MPD response headers management
+        let mpdResponseHeaderCount = 0;
+        
+        function addMpdResponseHeader() {
+            const container = document.getElementById('mpd-response-headers-container');
+            const headerId = `mpd-response-header-${mpdResponseHeaderCount++}`;
+            
+            const headerRow = document.createElement('div');
+            headerRow.id = headerId;
+            headerRow.className = 'flex gap-2 items-center';
+            headerRow.innerHTML = `
+                <input type="text" placeholder="Header Name (e.g., Cache-Control)" class="response-header-name flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                <input type="text" placeholder="Header Value" class="response-header-value flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                <button onclick="removeMpdResponseHeader('${headerId}')" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            `;
+            container.appendChild(headerRow);
+        }
+
+        function removeMpdResponseHeader(headerId) {
+            document.getElementById(headerId).remove();
+        }
+
+        function getMpdResponseHeaders() {
+            const headers = {};
+            document.querySelectorAll('#mpd-response-headers-container > div').forEach(row => {
+                const name = row.querySelector('.response-header-name').value.trim();
+                const value = row.querySelector('.response-header-value').value.trim();
+                if (name && value) {
+                    headers[name] = value;
+                }
+            });
+            return headers;
+        }
+        
+        // Extractor request headers management
+        let extractorRequestHeaderCount = 0;
+        
+        function addExtractorRequestHeader() {
+            const container = document.getElementById('extractor-request-headers-container');
+            const headerId = `extractor-request-header-${extractorRequestHeaderCount++}`;
+            
+            const headerRow = document.createElement('div');
+            headerRow.id = headerId;
+            headerRow.className = 'flex gap-2 items-center';
+            headerRow.innerHTML = `
+                <input type="text" placeholder="Header Name (e.g., Referer)" class="request-header-name flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                <input type="text" placeholder="Header Value" class="request-header-value flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                <button onclick="removeExtractorRequestHeader('${headerId}')" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            `;
+            container.appendChild(headerRow);
+        }
+
+        function removeExtractorRequestHeader(headerId) {
+            document.getElementById(headerId).remove();
+        }
+
+        function getExtractorRequestHeaders() {
+            const headers = {};
+            document.querySelectorAll('#extractor-request-headers-container > div').forEach(row => {
+                const name = row.querySelector('.request-header-name').value.trim();
+                const value = row.querySelector('.request-header-value').value.trim();
+                if (name && value) {
+                    headers[name] = value;
+                }
+            });
+            return headers;
+        }
+        
+        // Extractor response headers management
+        let extractorResponseHeaderCount = 0;
+        
+        function addExtractorResponseHeader() {
+            const container = document.getElementById('extractor-response-headers-container');
+            const headerId = `extractor-response-header-${extractorResponseHeaderCount++}`;
+            
+            const headerRow = document.createElement('div');
+            headerRow.id = headerId;
+            headerRow.className = 'flex gap-2 items-center';
+            headerRow.innerHTML = `
+                <input type="text" placeholder="Header Name (e.g., Cache-Control)" class="response-header-name flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                <input type="text" placeholder="Header Value" class="response-header-value flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                <button onclick="removeExtractorResponseHeader('${headerId}')" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            `;
+            container.appendChild(headerRow);
+        }
+
+        function removeExtractorResponseHeader(headerId) {
+            document.getElementById(headerId).remove();
+        }
+
+        function getExtractorResponseHeaders() {
+            const headers = {};
+            document.querySelectorAll('#extractor-response-headers-container > div').forEach(row => {
+                const name = row.querySelector('.response-header-name').value.trim();
+                const value = row.querySelector('.response-header-value').value.trim();
+                if (name && value) {
+                    headers[name] = value;
+                }
+            });
+            return headers;
+        }
+
+        // Generate Proxy URL
+        function generateProxyUrl() {
+            const baseUrl = window.location.origin;
+            const apiPassword = document.getElementById('globalApiPassword').value.trim();
+            
+            const hlsForm = document.getElementById('form-hls');
+            const mpdForm = document.getElementById('form-mpd');
+            const streamForm = document.getElementById('form-stream');
+            
+            let url = '';
+            let params = new URLSearchParams();
+            
+            if (!hlsForm.classList.contains('hidden')) {
+                const destination = document.getElementById('hls-destination').value.trim();
+                if (!destination) {
+                    alert('Please enter a destination URL');
+                    return;
+                }
+                
+                url = `${baseUrl}/proxy/hls/manifest.m3u8`;
+                params.append('d', destination);
+                
+                const keyUrl = document.getElementById('hls-key-url').value.trim();
+                if (keyUrl) params.append('key_url', keyUrl);
+                
+                if (document.getElementById('hls-force-playlist').checked) params.append('force_playlist_proxy', 'true');
+                if (document.getElementById('hls-key-only').checked) params.append('key_only_proxy', 'true');
+                if (document.getElementById('hls-no-proxy').checked) params.append('no_proxy', 'true');
+                if (document.getElementById('hls-max-res').checked) params.append('max_res', 'true');
+                
+                // Resolution selection
+                const resolution = document.getElementById('hls-resolution').value;
+                if (resolution) params.append('resolution', resolution);
+                
+                // Add HLS response headers (r_ prefix)
+                const hlsResponseHeaders = getHlsResponseHeaders();
+                for (const [name, value] of Object.entries(hlsResponseHeaders)) {
+                    params.append(`r_${name}`, value);
+                }
+                
+                // Add HLS remove headers (x_headers)
+                const hlsRemoveHeaders = document.getElementById('hls-remove-headers').value.trim();
+                if (hlsRemoveHeaders) {
+                    params.append('x_headers', hlsRemoveHeaders);
+                }
+                
+            } else if (!mpdForm.classList.contains('hidden')) {
+                const destination = document.getElementById('mpd-destination').value.trim();
+                if (!destination) {
+                    alert('Please enter a destination URL');
+                    return;
+                }
+                
+                url = `${baseUrl}/proxy/mpd/manifest.m3u8`;
+                params.append('d', destination);
+                
+                const keyId = document.getElementById('mpd-key-id').value.trim();
+                const key = document.getElementById('mpd-key').value.trim();
+                if (keyId) params.append('key_id', keyId);
+                if (key) params.append('key', key);
+                
+                // Resolution selection
+                const resolution = document.getElementById('mpd-resolution').value;
+                if (resolution) params.append('resolution', resolution);
+                
+                // Add MPD response headers (r_ prefix)
+                const mpdResponseHeaders = getMpdResponseHeaders();
+                for (const [name, value] of Object.entries(mpdResponseHeaders)) {
+                    params.append(`r_${name}`, value);
+                }
+                
+                // Add MPD remove headers (x_headers)
+                const mpdRemoveHeaders = document.getElementById('mpd-remove-headers').value.trim();
+                if (mpdRemoveHeaders) {
+                    params.append('x_headers', mpdRemoveHeaders);
+                }
+                
+            } else if (!streamForm.classList.contains('hidden')) {
+                const destination = document.getElementById('stream-destination').value.trim();
+                if (!destination) {
+                    alert('Please enter a destination URL');
+                    return;
+                }
+                
+                const filename = document.getElementById('stream-filename').value.trim();
+                if (filename) {
+                    url = `${baseUrl}/proxy/stream/${encodeURIComponent(filename)}`;
+                } else {
+                    url = `${baseUrl}/proxy/stream`;
+                }
+                params.append('d', destination);
+                
+                // Add stream response headers (r_ prefix)
+                const responseHeaders = getStreamResponseHeaders();
+                for (const [name, value] of Object.entries(responseHeaders)) {
+                    params.append(`r_${name}`, value);
+                }
+                
+                // Add remove headers (x_headers)
+                const removeHeaders = document.getElementById('stream-remove-headers').value.trim();
+                if (removeHeaders) {
+                    params.append('x_headers', removeHeaders);
+                }
+            }
+            
+            // Add request headers
+            const headers = getProxyHeaders();
+            for (const [name, value] of Object.entries(headers)) {
+                params.append(`h_${name}`, value);
+            }
+            
+            // Add API password
+            if (apiPassword) {
+                params.append('api_password', apiPassword);
+            }
+            
+            const finalUrl = `${url}?${params.toString()}`;
+            
+            document.getElementById('proxy-generated-url').textContent = finalUrl;
+            document.getElementById('proxy-output').classList.remove('hidden');
+        }
+
+        // Generate Extractor URL
+        function generateExtractorUrl() {
+            const baseUrl = window.location.origin;
+            const apiPassword = document.getElementById('globalApiPassword').value.trim();
+            
+            const host = document.getElementById('extractor-host').value;
+            const destination = document.getElementById('extractor-destination').value.trim();
+            
+            if (!host) {
+                alert('Please select a video host');
+                return;
+            }
+            if (!destination) {
+                alert('Please enter a video URL');
+                return;
+            }
+            
+            const params = new URLSearchParams();
+            params.append('host', host);
+            params.append('d', destination);
+            
+            if (document.getElementById('extractor-redirect').checked) {
+                params.append('redirect_stream', 'true');
+            }
+            if (document.getElementById('extractor-max-res').checked) {
+                params.append('max_res', 'true');
+            }
+            if (document.getElementById('extractor-no-proxy').checked) {
+                params.append('no_proxy', 'true');
+            }
+            
+            const extraParams = document.getElementById('extractor-extra-params').value.trim();
+            if (extraParams) {
+                try {
+                    JSON.parse(extraParams);
+                    params.append('extra_params', extraParams);
+                } catch (e) {
+                    alert('Invalid JSON in extra parameters');
+                    return;
+                }
+            }
+            
+            // Add request headers (h_ prefix)
+            const requestHeaders = getExtractorRequestHeaders();
+            for (const [name, value] of Object.entries(requestHeaders)) {
+                params.append(`h_${name}`, value);
+            }
+            
+            // Add response headers (r_ prefix)
+            const responseHeaders = getExtractorResponseHeaders();
+            for (const [name, value] of Object.entries(responseHeaders)) {
+                params.append(`r_${name}`, value);
+            }
+            
+            // Add remove headers (x_headers)
+            const removeHeaders = document.getElementById('extractor-remove-headers').value.trim();
+            if (removeHeaders) {
+                params.append('x_headers', removeHeaders);
+            }
+            
+            if (apiPassword) {
+                params.append('api_password', apiPassword);
+            }
+            
+            const finalUrl = `${baseUrl}/extractor/video?${params.toString()}`;
+            
+            document.getElementById('extractor-generated-url').textContent = finalUrl;
+            document.getElementById('extractor-output').classList.remove('hidden');
+        }
+
+        // Generate Encoded URL
+        async function generateEncodedUrl() {
+            const proxyUrl = document.getElementById('encoded-proxy-url').value.trim();
+            const endpoint = document.getElementById('encoded-endpoint').value;
+            const destination = document.getElementById('encoded-destination').value.trim();
+            const apiPassword = document.getElementById('globalApiPassword').value.trim();
+            
+            if (!proxyUrl) {
+                alert('Please enter the MediaFlow proxy URL');
+                return;
+            }
+            if (!endpoint) {
+                alert('Please select an endpoint');
+                return;
+            }
+            if (!destination) {
+                alert('Please enter a destination URL');
+                return;
+            }
+            
+            // Build request body
+            const requestBody = {
+                mediaflow_proxy_url: proxyUrl,
+                endpoint: endpoint,
+                destination_url: destination,
+                query_params: {},
+                request_headers: {},
+                response_headers: {},
+                remove_response_headers: []
+            };
+            
+            // Parse query params
+            const queryParamsStr = document.getElementById('encoded-query-params').value.trim();
+            if (queryParamsStr) {
+                try {
+                    requestBody.query_params = JSON.parse(queryParamsStr);
+                } catch (e) {
+                    alert('Invalid JSON in query parameters');
+                    return;
+                }
+            }
+            
+            // Parse request headers
+            const requestHeadersStr = document.getElementById('encoded-request-headers').value.trim();
+            if (requestHeadersStr) {
+                try {
+                    requestBody.request_headers = JSON.parse(requestHeadersStr);
+                } catch (e) {
+                    alert('Invalid JSON in request headers');
+                    return;
+                }
+            }
+            
+            // Parse response headers
+            const responseHeadersStr = document.getElementById('encoded-response-headers').value.trim();
+            if (responseHeadersStr) {
+                try {
+                    requestBody.response_headers = JSON.parse(responseHeadersStr);
+                } catch (e) {
+                    alert('Invalid JSON in response headers');
+                    return;
+                }
+            }
+            
+            // Parse remove response headers
+            const removeHeadersStr = document.getElementById('encoded-remove-headers').value.trim();
+            if (removeHeadersStr) {
+                requestBody.remove_response_headers = removeHeadersStr.split(',').map(h => h.trim()).filter(h => h);
+            }
+            
+            // Add optional fields
+            const expiration = document.getElementById('encoded-expiration').value.trim();
+            if (expiration) requestBody.expiration = parseInt(expiration);
+            
+            const ip = document.getElementById('encoded-ip').value.trim();
+            if (ip) requestBody.ip = ip;
+            
+            const filename = document.getElementById('encoded-filename').value.trim();
+            if (filename) requestBody.filename = filename;
+            
+            if (apiPassword) requestBody.api_password = apiPassword;
+            
+            if (document.getElementById('encoded-base64').checked) {
+                requestBody.base64_encode_destination = true;
+            }
+            
+            try {
+                const response = await fetch('/generate_url', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to generate URL');
+                }
+                
+                const data = await response.json();
+                document.getElementById('encoded-generated-url').textContent = data.url;
+                document.getElementById('encoded-output').classList.remove('hidden');
+                
+            } catch (error) {
+                alert('Error generating URL: ' + error.message);
+            }
+        }
+
+        // Copy URL to clipboard
+        function copyUrl(elementId, event) {
+            const url = document.getElementById(elementId).textContent;
+            const btn = event.currentTarget;
+            const originalText = btn.innerHTML;
+            
+            navigator.clipboard.writeText(url).then(() => {
+                btn.innerHTML = '✓ Copied!';
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                }, 2000);
+            }).catch(err => {
+                alert('Failed to copy: ' + err);
+            });
+        }
+    </script>
+</body>
+</html>

@@ -1,137 +1,297 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="h-full">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MediaFlow Proxy</title>
     <link rel="icon" href="/logo.png" type="image/x-icon">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        'display': ['Satoshi', 'system-ui', 'sans-serif'],
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.5s ease-out',
+                        'slide-up': 'slideUp 0.5s ease-out',
+                        'float': 'float 6s ease-in-out infinite',
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #f9f9f9;
+        @import url('https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap');
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
         }
-
-        header {
-            background-color: #90aacc;
-            color: #fff;
-            padding: 10px 0;
-            text-align: center;
+        
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
         }
-
-        header img {
-            width: 200px;
-            height: 200px;
-            vertical-align: middle;
-            border-radius: 15px;
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
         }
-
-        header h1 {
-            display: inline;
-            margin-left: 20px;
-            font-size: 36px;
+        
+        .tool-card {
+            transition: all 0.3s ease;
         }
-
-        .feature {
-            background-color: #f4f4f4;
-            border-left: 4px solid #3498db;
-            padding: 10px;
-            margin-bottom: 10px;
+        
+        .tool-card:hover {
+            transform: translateY(-4px);
         }
-
-        .speed-test-section {
-            background-color: #e8f4fd;
-            border-left: 4px solid #2196f3;
-            padding: 15px;
-            margin: 20px 0;
-            border-radius: 5px;
+        
+        .feature-item {
+            transition: all 0.2s ease;
         }
-
-        .speed-test-links {
-            display: flex;
-            gap: 15px;
-            margin-top: 10px;
-            flex-wrap: wrap;
+        
+        .feature-item:hover {
+            transform: translateX(4px);
         }
-
-        .speed-test-link {
-            display: inline-block;
-            padding: 10px 20px;
-            background-color: #2196f3;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            transition: background-color 0.3s;
+        
+        .gradient-text {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
-
-        .speed-test-link:hover {
-            background-color: #1976d2;
-            color: white;
+        
+        .hero-gradient {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 50%, rgba(236, 72, 153, 0.05) 100%);
         }
-
-        .speed-test-link.browser {
-            background-color: #4caf50;
-        }
-
-        .speed-test-link.browser:hover {
-            background-color: #388e3c;
-        }
-
-        a {
-            color: #3498db;
+        
+        .dark .hero-gradient {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.1) 50%, rgba(236, 72, 153, 0.05) 100%);
         }
     </style>
 </head>
-<body>
-<header>
-    <img src="/logo.png" alt="MediaFlow Proxy Logo">
-    <h1>MediaFlow Proxy</h1>
-</header>
-<p>A high-performance proxy server for streaming media, supporting HTTP(S), HLS, and MPEG-DASH with real-time DRM decryption.</p>
-
-<h2>Key Features</h2>
-<div class="feature">Convert MPEG-DASH streams (DRM-protected and non-protected) to HLS</div>
-<div class="feature">Support for Clear Key DRM-protected MPD DASH streams</div>
-<div class="feature">Handle both live and video-on-demand (VOD) DASH streams</div>
-<div class="feature">Proxy HTTP/HTTPS links with custom headers</div>
-<div class="feature">Proxy and modify HLS (M3U8) streams in real-time with custom headers and key URL modifications for bypassing some sneaky restrictions.</div>
-<div class="feature">HLS and DASH pre-buffering for improved streaming performance and reduced latency</div>
-<div class="feature">Protect against unauthorized access and network bandwidth abuses</div>
-
-<div class="speed-test-section">
-    <h3>🚀 Speed Test Tool</h3>
-    <p>Test your connection speed with debrid services to optimize your streaming experience:</p>
-    <div class="speed-test-links">
-        <a href="/speedtest" class="speed-test-link browser">Browser Speed Test</a>
+<body class="bg-gradient-to-br from-slate-50 via-gray-100 to-slate-200 dark:from-slate-900 dark:via-gray-900 dark:to-slate-800 min-h-full font-display">
+    <!-- Theme Toggle -->
+    <div class="fixed top-4 right-4 z-50">
+        <button id="themeToggle" class="p-2.5 rounded-full bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 shadow-lg">
+            <svg id="sunIcon" class="w-5 h-5 text-amber-500 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+            </svg>
+            <svg id="moonIcon" class="w-5 h-5 text-indigo-600 block dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+            </svg>
+        </button>
     </div>
-    <p style="margin-top: 10px; font-size: 14px; color: #666;">
-        <strong>Browser Speed Test:</strong> Tests your actual connection speed through MediaFlow proxy vs direct connection with support for multiple servers, interactive charts, and comprehensive analytics.
-    </p>
-</div>
 
-<div class="speed-test-section">
-    <h3>🔗 Playlist Builder</h3>
-    <p>Create and combine M3U playlists with automatic link rewriting for optimal streaming experience:</p>
-    <div class="speed-test-links">
-        <a href="/playlist/builder" class="speed-test-link browser">Playlist Builder</a>
-    </div>
-    <p style="margin-top: 10px; font-size: 14px; color: #666;">
-        <strong>Playlist Builder:</strong> Combine multiple M3U playlists, automatically rewrite links for optimal streaming, and support custom headers for enhanced compatibility.
-    </p>
-</div>
+    <main class="container mx-auto px-4 py-12 max-w-5xl">
+        <!-- Hero Section -->
+        <div class="hero-gradient rounded-3xl p-8 md:p-12 mb-10 animate-fade-in">
+            <div class="flex flex-col md:flex-row items-center gap-8">
+                <div class="animate-float">
+                    <img src="/logo.png" alt="MediaFlow Proxy Logo" class="w-32 h-32 md:w-40 md:h-40 rounded-2xl shadow-2xl">
+                </div>
+                <div class="text-center md:text-left">
+                    <h1 class="text-4xl md:text-5xl font-bold gradient-text mb-4">
+                        MediaFlow Proxy
+                    </h1>
+                    <p class="text-lg text-gray-600 dark:text-gray-300 max-w-xl">
+                        A high-performance proxy server for streaming media, supporting HTTP(S), HLS, and MPEG-DASH with real-time DRM decryption.
+                    </p>
+                </div>
+            </div>
+        </div>
 
-<h2>Getting Started</h2>
-<p>Visit the <a href="https://github.com/mhdzumair/mediaflow-proxy">GitHub repository</a> for installation instructions and documentation.</p>
+        <!-- Key Features -->
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 md:p-8 mb-10 animate-slide-up" style="animation-delay: 0.1s;">
+            <h2 class="text-2xl font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-3">
+                <span class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-lg">✨</span>
+                Key Features
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="feature-item flex items-start gap-3 p-4 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700">
+                    <span class="text-indigo-500 mt-0.5">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                        </svg>
+                    </span>
+                    <span class="text-gray-700 dark:text-gray-300 text-sm">Convert MPEG-DASH streams (DRM-protected and non-protected) to HLS</span>
+                </div>
+                <div class="feature-item flex items-start gap-3 p-4 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700">
+                    <span class="text-indigo-500 mt-0.5">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                        </svg>
+                    </span>
+                    <span class="text-gray-700 dark:text-gray-300 text-sm">Support for Clear Key DRM-protected MPD DASH streams</span>
+                </div>
+                <div class="feature-item flex items-start gap-3 p-4 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700">
+                    <span class="text-indigo-500 mt-0.5">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                        </svg>
+                    </span>
+                    <span class="text-gray-700 dark:text-gray-300 text-sm">Handle both live and video-on-demand (VOD) DASH streams</span>
+                </div>
+                <div class="feature-item flex items-start gap-3 p-4 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700">
+                    <span class="text-indigo-500 mt-0.5">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                        </svg>
+                    </span>
+                    <span class="text-gray-700 dark:text-gray-300 text-sm">Proxy HTTP/HTTPS links with custom headers</span>
+                </div>
+                <div class="feature-item flex items-start gap-3 p-4 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700">
+                    <span class="text-indigo-500 mt-0.5">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                        </svg>
+                    </span>
+                    <span class="text-gray-700 dark:text-gray-300 text-sm">Proxy and modify HLS (M3U8) streams in real-time with custom headers</span>
+                </div>
+                <div class="feature-item flex items-start gap-3 p-4 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700">
+                    <span class="text-indigo-500 mt-0.5">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                        </svg>
+                    </span>
+                    <span class="text-gray-700 dark:text-gray-300 text-sm">HLS and DASH pre-buffering for improved streaming performance</span>
+                </div>
+                <div class="feature-item flex items-start gap-3 p-4 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700 md:col-span-2">
+                    <span class="text-indigo-500 mt-0.5">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                        </svg>
+                    </span>
+                    <span class="text-gray-700 dark:text-gray-300 text-sm">Protect against unauthorized access and network bandwidth abuses</span>
+                </div>
+            </div>
+        </div>
 
-<h2>Premium Hosted Service</h2>
-<p>For a hassle-free experience, check out <a href="https://store.elfhosted.com/product/mediaflow-proxy">premium hosted service on ElfHosted</a>.</p>
+        <!-- Tools Section -->
+        <h2 class="text-2xl font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-3 animate-slide-up" style="animation-delay: 0.2s;">
+            <span class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-lg">🛠️</span>
+            Tools
+        </h2>
+        
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10 animate-slide-up" style="animation-delay: 0.3s;">
+            <!-- Speed Test Card -->
+            <a href="/speedtest" class="tool-card block bg-white dark:bg-gray-800 rounded-2xl shadow-xl overflow-hidden border border-gray-200 dark:border-gray-700 hover:shadow-2xl">
+                <div class="h-2 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
+                <div class="p-6">
+                    <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white text-2xl mb-4">
+                        🚀
+                    </div>
+                    <h3 class="text-lg font-bold text-gray-800 dark:text-white mb-2">Speed Test</h3>
+                    <p class="text-sm text-gray-600 dark:text-gray-400">
+                        Test your connection speed through MediaFlow proxy vs direct connection with interactive charts.
+                    </p>
+                </div>
+            </a>
 
-<h2>API Documentation</h2>
-<p>Explore the <a href="/docs">Swagger UI</a> for comprehensive details about the API endpoints and their usage.</p>
+            <!-- Playlist Builder Card -->
+            <a href="/playlist/builder" class="tool-card block bg-white dark:bg-gray-800 rounded-2xl shadow-xl overflow-hidden border border-gray-200 dark:border-gray-700 hover:shadow-2xl">
+                <div class="h-2 bg-gradient-to-r from-emerald-500 to-green-500"></div>
+                <div class="p-6">
+                    <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-green-500 flex items-center justify-center text-white text-2xl mb-4">
+                        🔗
+                    </div>
+                    <h3 class="text-lg font-bold text-gray-800 dark:text-white mb-2">Playlist Builder</h3>
+                    <p class="text-sm text-gray-600 dark:text-gray-400">
+                        Combine multiple M3U playlists with automatic link rewriting for optimal streaming.
+                    </p>
+                </div>
+            </a>
 
+            <!-- URL Generator Card -->
+            <a href="/url-generator" class="tool-card block bg-white dark:bg-gray-800 rounded-2xl shadow-xl overflow-hidden border border-gray-200 dark:border-gray-700 hover:shadow-2xl">
+                <div class="h-2 bg-gradient-to-r from-purple-500 to-pink-500"></div>
+                <div class="p-6">
+                    <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white text-2xl mb-4">
+                        🔧
+                    </div>
+                    <h3 class="text-lg font-bold text-gray-800 dark:text-white mb-2">URL Generator</h3>
+                    <p class="text-sm text-gray-600 dark:text-gray-400">
+                        Generate proxy URLs, extractor links for 21+ hosts, and encrypted URLs with custom options.
+                    </p>
+                </div>
+            </a>
+        </div>
+
+        <!-- Quick Links Section -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 animate-slide-up" style="animation-delay: 0.4s;">
+            <!-- Getting Started -->
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-gray-200 dark:border-gray-700">
+                <div class="flex items-center gap-3 mb-4">
+                    <span class="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center text-white text-lg">📚</span>
+                    <h3 class="text-lg font-bold text-gray-800 dark:text-white">Getting Started</h3>
+                </div>
+                <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                    Visit the GitHub repository for installation instructions and documentation.
+                </p>
+                <a href="https://github.com/mhdzumair/mediaflow-proxy" target="_blank" class="inline-flex items-center gap-2 text-sm font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors">
+                    View on GitHub
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                    </svg>
+                </a>
+            </div>
+
+            <!-- Premium Hosted -->
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-gray-200 dark:border-gray-700">
+                <div class="flex items-center gap-3 mb-4">
+                    <span class="w-10 h-10 rounded-xl bg-gradient-to-br from-yellow-500 to-orange-500 flex items-center justify-center text-white text-lg">⭐</span>
+                    <h3 class="text-lg font-bold text-gray-800 dark:text-white">Premium Hosted</h3>
+                </div>
+                <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                    For a hassle-free experience, check out the premium hosted service on ElfHosted.
+                </p>
+                <a href="https://store.elfhosted.com/product/mediaflow-proxy" target="_blank" class="inline-flex items-center gap-2 text-sm font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors">
+                    Get Premium
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                    </svg>
+                </a>
+            </div>
+
+            <!-- API Documentation -->
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-gray-200 dark:border-gray-700">
+                <div class="flex items-center gap-3 mb-4">
+                    <span class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center text-white text-lg">📖</span>
+                    <h3 class="text-lg font-bold text-gray-800 dark:text-white">API Documentation</h3>
+                </div>
+                <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                    Explore the Swagger UI for comprehensive details about the API endpoints.
+                </p>
+                <a href="/docs" class="inline-flex items-center gap-2 text-sm font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors">
+                    View API Docs
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
+                </a>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center mt-12 text-sm text-gray-500 dark:text-gray-400">
+            <p>MediaFlow Proxy &mdash; High-performance streaming proxy</p>
+        </div>
+    </main>
+
+    <script>
+        // Theme management
+        const themeToggle = document.getElementById('themeToggle');
+        const html = document.documentElement;
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        html.classList.toggle('dark', savedTheme === 'dark');
+
+        themeToggle.addEventListener('click', () => {
+            html.classList.toggle('dark');
+            const newTheme = html.classList.contains('dark') ? 'dark' : 'light';
+            localStorage.setItem('theme', newTheme);
+        });
+    </script>
 </body>
 </html>
