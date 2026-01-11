@@ -1,5 +1,6 @@
 import json
-from typing import Literal, Dict, Any, Optional
+import re
+from typing import Annotated, Literal, Dict, Any, Optional
 
 from pydantic import BaseModel, Field, IPvAnyAddress, ConfigDict, field_validator
 
@@ -16,6 +17,9 @@ class GenerateUrlRequest(BaseModel):
     request_headers: Optional[dict] = Field(default_factory=dict, description="Headers to be included in the request.")
     response_headers: Optional[dict] = Field(
         default_factory=dict, description="Headers to be included in the response."
+    )
+    remove_response_headers: Optional[list[str]] = Field(
+        default_factory=list, description="List of response header names to remove from the proxied response."
     )
     expiration: Optional[int] = Field(
         None, description="Expiration time for the URL in seconds. If not provided, the URL will not expire."
@@ -42,6 +46,9 @@ class MultiUrlRequestItem(BaseModel):
     response_headers: Optional[dict] = Field(
         default_factory=dict, description="Headers to be included in the response."
     )
+    remove_response_headers: Optional[list[str]] = Field(
+        default_factory=list, description="List of response header names to remove from the proxied response."
+    )
     filename: Optional[str] = Field(None, description="Filename to be preserved for media players like Infuse.")
 
 
@@ -62,7 +69,7 @@ class GenericParams(BaseModel):
 
 
 class HLSManifestParams(GenericParams):
-    destination: str = Field(..., description="The URL of the HLS manifest.", alias="d")
+    destination: Annotated[str, Field(description="The URL of the HLS manifest.", alias="d")]
     key_url: Optional[str] = Field(
         None,
         description="The HLS Key URL to replace the original key URL. Defaults to None. (Useful for bypassing some sneaky protection)",
@@ -92,7 +99,7 @@ class MPDManifestParams(GenericParams):
 
 
 class MPDPlaylistParams(GenericParams):
-    destination: str = Field(..., description="The URL of the MPD manifest.", alias="d")
+    destination: Annotated[str, Field(description="The URL of the MPD manifest.", alias="d")]
     profile_id: str = Field(..., description="The profile ID to generate the playlist for.")
     key_id: Optional[str] = Field(None, description="The DRM key ID (optional).")
     key: Optional[str] = Field(None, description="The DRM key (optional).")
@@ -104,14 +111,14 @@ class MPDSegmentParams(GenericParams):
     mime_type: str = Field(..., description="The MIME type of the segment.")
     key_id: Optional[str] = Field(None, description="The DRM key ID (optional).")
     key: Optional[str] = Field(None, description="The DRM key (optional).")
-    is_live: Optional[bool] = Field(None, alias="is_live", description="Whether the parent MPD is live.")
+    is_live: Annotated[Optional[bool], Field(default=None, alias="is_live", description="Whether the parent MPD is live.")]
 
 
 class ExtractorURLParams(GenericParams):
     host: Literal[
         "Doodstream", "FileLions", "FileMoon", "F16Px", "Mixdrop", "Uqload", "Streamtape", "StreamWish", "Supervideo", "VixCloud", "Okru", "Maxstream", "LiveTV", "LuluStream", "DLHD", "Fastream", "TurboVidPlay", "Vidmoly", "Vidoza", "Voe", "Sportsonline"
     ] = Field(..., description="The host to extract the URL from.")
-    destination: str = Field(..., description="The URL of the stream.", alias="d")
+    destination: Annotated[str, Field(description="The URL of the stream.", alias="d")]
     redirect_stream: bool = Field(False, description="Whether to redirect to the stream endpoint automatically.")
     extra_params: Dict[str, Any] = Field(
         default_factory=dict,

@@ -19,6 +19,7 @@ from .utils.http_utils import (
     EnhancedStreamingResponse,
     ProxyRequestHeaders,
     create_httpx_client,
+    apply_header_manipulation,
 )
 from .utils.m3u8_processor import M3U8Processor
 from .utils.mpd_utils import pad_base64
@@ -119,7 +120,7 @@ async def handle_hls_stream_proxy(
 
         # Create initial streaming response to check content type
         await streamer.create_streaming_response(hls_params.destination, proxy_headers.request)
-        response_headers = prepare_response_headers(streamer.response.headers, proxy_headers.response)
+        response_headers = prepare_response_headers(streamer.response.headers, proxy_headers.response, proxy_headers.remove)
 
         if "mpegurl" in response_headers.get("content-type", "").lower():
             return await fetch_and_process_m3u8(
@@ -174,7 +175,7 @@ async def handle_stream_request(
                 # Continue with original URL if resolution fails
 
         await streamer.create_streaming_response(video_url, proxy_headers.request)
-        response_headers = prepare_response_headers(streamer.response.headers, proxy_headers.response)
+        response_headers = prepare_response_headers(streamer.response.headers, proxy_headers.response, proxy_headers.remove)
 
         if method == "HEAD":
             # For HEAD requests, just return the headers without streaming content
@@ -193,7 +194,7 @@ async def handle_stream_request(
         return handle_exceptions(e)
 
 
-def prepare_response_headers(original_headers, proxy_response_headers) -> dict:
+def prepare_response_headers(original_headers, proxy_response_headers, remove_headers=None) -> dict:
     """
     Prepare response headers for the proxy response.
 
@@ -203,11 +204,17 @@ def prepare_response_headers(original_headers, proxy_response_headers) -> dict:
     Args:
         original_headers (httpx.Headers): The original headers from the upstream response.
         proxy_response_headers (dict): Additional headers to be included in the proxy response.
+        remove_headers (list, optional): List of header names to remove from the response. Defaults to None.
 
     Returns:
         dict: The prepared headers for the proxy response.
     """
-    response_headers = {k: v for k, v in original_headers.multi_items() if k in SUPPORTED_RESPONSE_HEADERS}
+    # Note: httpx.Headers.multi_items() returns lowercase keys, and SUPPORTED_RESPONSE_HEADERS is lowercase
+    remove_set = set(h.lower() for h in (remove_headers or []))
+    response_headers = {
+        k: v for k, v in original_headers.multi_items() 
+        if k in SUPPORTED_RESPONSE_HEADERS and k not in remove_set
+    }
     response_headers.update(proxy_response_headers)
     return response_headers
 
@@ -260,12 +267,12 @@ async def fetch_and_process_m3u8(
 
         # Initialize processor and response headers
         processor = M3U8Processor(request, key_url, force_playlist_proxy, key_only_proxy, no_proxy)
-        response_headers = {
+        base_headers = {
             "content-disposition": "inline",
             "accept-ranges": "none",
             "content-type": "application/vnd.apple.mpegurl",
         }
-        response_headers.update(proxy_headers.response)
+        response_headers = apply_header_manipulation(base_headers, proxy_headers)
 
         # Create streaming response with on-the-fly processing
         return EnhancedStreamingResponse(
@@ -335,7 +342,7 @@ async def get_manifest(
 
     if drm_info and not drm_info.get("isDrmProtected"):
         # For non-DRM protected MPD, we still create an HLS manifest
-        return await process_manifest(request, mpd_dict, proxy_headers, None, None)
+        return await process_manifest(request, mpd_dict, proxy_headers, None, None, manifest_params.resolution)
 
     key_id, key = await handle_drm_key_data(manifest_params.key_id, manifest_params.key, drm_info)
 
@@ -345,7 +352,7 @@ async def get_manifest(
     if key and len(key) != 32:
         key = base64.urlsafe_b64decode(pad_base64(key)).hex()
 
-    return await process_manifest(request, mpd_dict, proxy_headers, key_id, key)
+    return await process_manifest(request, mpd_dict, proxy_headers, key_id, key, manifest_params.resolution)
 
 
 async def get_playlist(

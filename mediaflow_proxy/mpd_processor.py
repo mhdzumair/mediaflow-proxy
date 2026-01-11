@@ -7,7 +7,7 @@ from fastapi import Request, Response, HTTPException
 
 from mediaflow_proxy.drm.decrypter import decrypt_segment
 from mediaflow_proxy.utils.crypto_utils import encryption_handler
-from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url, get_original_scheme, ProxyRequestHeaders
+from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url, get_original_scheme, ProxyRequestHeaders, apply_header_manipulation
 from mediaflow_proxy.utils.dash_prebuffer import dash_prebuffer
 from mediaflow_proxy.configs import settings
 
@@ -74,7 +74,8 @@ async def process_playlist(
         raise HTTPException(status_code=404, detail="Profile not found")
 
     hls_content = build_hls_playlist(mpd_dict, matching_profiles, request)
-    return Response(content=hls_content, media_type="application/vnd.apple.mpegurl", headers=proxy_headers.response)
+    response_headers = apply_header_manipulation({}, proxy_headers)
+    return Response(content=hls_content, media_type="application/vnd.apple.mpegurl", headers=response_headers)
 
 
 async def process_segment(
@@ -108,7 +109,8 @@ async def process_segment(
         # For non-DRM protected content, we just concatenate init and segment content
         decrypted_content = init_content + segment_content
 
-    return Response(content=decrypted_content, media_type=mimetype, headers=proxy_headers.response)
+    response_headers = apply_header_manipulation({}, proxy_headers)
+    return Response(content=decrypted_content, media_type=mimetype, headers=response_headers)
 
 
 def build_hls(mpd_dict: dict, request: Request, key_id: str = None, key: str = None) -> str:
