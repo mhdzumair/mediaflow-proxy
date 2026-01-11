@@ -137,6 +137,22 @@ class Streamer:
             raise RuntimeError(f"Error creating streaming response: {e}")
 
     @staticmethod
+    def _find_ts_start(buffer: bytes) -> typing.Optional[int]:
+        """
+        Find MPEG-TS sync byte (0x47) aligned on 188 bytes.
+        Returns offset where TS starts or None.
+        """
+        TS_SYNC = 0x47
+        TS_PACKET = 188
+
+        max_i = len(buffer) - TS_PACKET
+        for i in range(max_i):
+            if buffer[i] == TS_SYNC and buffer[i + TS_PACKET] == TS_SYNC:
+                return i
+        return None
+
+
+    @staticmethod
     def _strip_fake_png_wrapper(chunk: bytes) -> bytes:
         """
         Strip fake PNG wrapper from chunk data.
@@ -171,76 +187,85 @@ class Streamer:
         logger.debug(f"Stripped {stripped_bytes} bytes of fake PNG wrapper from stream")
 
         return chunk[content_start:]
-
+        
     async def stream_content(self) -> typing.AsyncGenerator[bytes, None]:
         if not self.response:
             raise RuntimeError("No response available for streaming")
 
-        is_first_chunk = True
+        buffer = bytearray()
+        ts_started = False
+
+        # safety so we never hang forever
+        MAX_PREFETCH = 512 * 1024  # 512 KB
 
         try:
             self.parse_content_range()
 
-            if settings.enable_streaming_progress:
-                with tqdm_asyncio(
-                    total=self.total_size,
-                    initial=self.start_byte,
-                    unit="B",
-                    unit_scale=True,
-                    unit_divisor=1024,
-                    desc="Streaming",
-                    ncols=100,
-                    mininterval=1,
-                ) as self.progress_bar:
-                    async for chunk in self.response.aiter_bytes():
-                        if is_first_chunk:
-                            is_first_chunk = False
-                            chunk = self._strip_fake_png_wrapper(chunk)
-
-                        yield chunk
-                        self.bytes_transferred += len(chunk)
-                        self.progress_bar.update(len(chunk))
-            else:
-                async for chunk in self.response.aiter_bytes():
-                    if is_first_chunk:
-                        is_first_chunk = False
-                        chunk = self._strip_fake_png_wrapper(chunk)
-
+            async for chunk in self.response.aiter_bytes():
+                if ts_started:
+                # Normal streaming once TS has started
                     yield chunk
                     self.bytes_transferred += len(chunk)
+                    continue
+
+            # Prebuffer phase (until we find TS)
+                buffer += chunk
+
+            # Fast-path: if it's an m3u8, don't do TS detection at all
+            # (Some CDNs lie about content-type, so we detect by content too)
+                if len(buffer) >= 6 and buffer[:6] == b"#EXTM3":
+                    yield bytes(buffer)
+                    self.bytes_transferred += len(buffer)
+                    buffer.clear()
+                    ts_started = True
+                    continue
+
+            # Strip fake PNG wrapper if present (may need multiple chunks)
+                if buffer.startswith(self._PNG_SIGNATURE):
+                # Only strip if IEND marker exists in buffer (otherwise keep buffering)
+                    if self._PNG_IEND_MARKER in buffer:
+                        buffer = bytearray(self._strip_fake_png_wrapper(bytes(buffer)))
+
+            # Skip pure FF padding while waiting for TS (TurboVid style)
+            # (don’t drop bytes once TS started — only in prebuffer)
+                while buffer and buffer[0] == 0xFF:
+                    buffer.pop(0)
+
+                ts_offset = self._find_ts_start(bytes(buffer))
+                if ts_offset is None:
+    # keep buffering until we are 100% sure
+                    if len(buffer) > MAX_PREFETCH:
+                        logger.warning("TS sync not found after large prebuffer, forcing passthrough")
+                        yield bytes(buffer)
+                        self.bytes_transferred += len(buffer)
+                        buffer.clear()
+                        ts_started = True
+                    continue
+
+
+            # TS found: emit from ts_offset and switch to pass-through
+                ts_started = True
+                out = bytes(buffer[ts_offset:])
+                buffer.clear()
+
+                if out:
+    # ensure first byte is TS sync
+                    if out[0] != 0x47:
+        # find first sync byte again as safety
+                        idx = out.find(b"\x47")
+                        if idx != -1:
+                            out = out[idx:]
+                    yield out
+
+                    self.bytes_transferred += len(out)
 
         except httpx.TimeoutException:
-            logger.warning("Timeout while streaming")
             raise DownloadError(409, "Timeout while streaming")
-        except httpx.RemoteProtocolError as e:
-            # Special handling for connection closed errors
-            if "peer closed connection without sending complete message body" in str(e):
-                logger.warning(f"Remote server closed connection prematurely: {e}")
-                # If we've received some data, just log the warning and return normally
-                if self.bytes_transferred > 0:
-                    logger.info(
-                        f"Partial content received ({self.bytes_transferred} bytes). Continuing with available data."
-                    )
-                    return
-                else:
-                    # If we haven't received any data, raise an error
-                    raise DownloadError(502, f"Remote server closed connection without sending any data: {e}")
-            else:
-                logger.error(f"Protocol error while streaming: {e}")
-                raise DownloadError(502, f"Protocol error while streaming: {e}")
-        except GeneratorExit:
-            logger.info("Streaming session stopped by the user")
-        except httpx.ReadError as e:
-            # Handle network read errors gracefully - these occur when upstream connection drops
-            logger.warning(f"ReadError while streaming: {e}")
+        except httpx.ReadError:
             if self.bytes_transferred > 0:
-                logger.info(f"Partial content received ({self.bytes_transferred} bytes) before ReadError. Graceful termination.")
                 return
-            else:
-                raise DownloadError(502, f"ReadError while streaming: {e}")
-        except Exception as e:
-            logger.error(f"Error streaming content: {e}")
             raise
+
 
             
     @staticmethod
@@ -348,7 +373,6 @@ def encode_mediaflow_proxy_url(
     query_params: typing.Optional[dict] = None,
     request_headers: typing.Optional[dict] = None,
     response_headers: typing.Optional[dict] = None,
-    remove_response_headers: typing.Optional[list[str]] = None,
     encryption_handler: EncryptionHandler = None,
     expiration: int = None,
     ip: str = None,
@@ -364,7 +388,6 @@ def encode_mediaflow_proxy_url(
         query_params (dict, optional): Additional query parameters to include. Defaults to None.
         request_headers (dict, optional): Headers to include as query parameters. Defaults to None.
         response_headers (dict, optional): Headers to include as query parameters. Defaults to None.
-        remove_response_headers (list[str], optional): List of response header names to remove. Defaults to None.
         encryption_handler (EncryptionHandler, optional): The encryption handler to use. Defaults to None.
         expiration (int, optional): The expiration time for the encrypted token. Defaults to None.
         ip (str, optional): The public IP address to include in the query parameters. Defaults to None.
@@ -378,19 +401,15 @@ def encode_mediaflow_proxy_url(
     if destination_url is not None:
         query_params["d"] = destination_url
 
-    # Add headers if provided (always use lowercase prefix for consistency)
+    # Add headers if provided
     if request_headers:
         query_params.update(
-            {key if key.lower().startswith("h_") else f"h_{key}": value for key, value in request_headers.items()}
+            {key if key.startswith("h_") else f"h_{key}": value for key, value in request_headers.items()}
         )
     if response_headers:
         query_params.update(
-            {key if key.lower().startswith("r_") else f"r_{key}": value for key, value in response_headers.items()}
+            {key if key.startswith("r_") else f"r_{key}": value for key, value in response_headers.items()}
         )
-    
-    # Add remove headers if provided (x_ prefix for "exclude")
-    if remove_response_headers:
-        query_params["x_headers"] = ",".join(remove_response_headers)
 
     # Construct the base URL
     if endpoint is None:
@@ -534,27 +553,6 @@ def get_original_scheme(request: Request) -> str:
 class ProxyRequestHeaders:
     request: dict
     response: dict
-    remove: list  # headers to remove from response
-
-
-def apply_header_manipulation(base_headers: dict, proxy_headers: ProxyRequestHeaders) -> dict:
-    """
-    Apply response header additions and removals.
-    
-    This function filters out headers specified in proxy_headers.remove,
-    then merges in headers from proxy_headers.response.
-    
-    Args:
-        base_headers (dict): The base headers to start with.
-        proxy_headers (ProxyRequestHeaders): The proxy headers containing response additions and removals.
-    
-    Returns:
-        dict: The manipulated headers.
-    """
-    remove_set = set(h.lower() for h in proxy_headers.remove)
-    result = {k: v for k, v in base_headers.items() if k.lower() not in remove_set}
-    result.update(proxy_headers.response)
-    return result
 
 
 def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
@@ -565,11 +563,10 @@ def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
         request (Request): The incoming HTTP request.
 
     Returns:
-        ProxyRequest: A named tuple containing the request headers, response headers, and headers to remove.
+        ProxyRequest: A named tuple containing the request headers and response headers.
     """
     request_headers = {k: v for k, v in request.headers.items() if k in SUPPORTED_REQUEST_HEADERS}
-    request_headers.update({k[2:].lower(): v for k, v in request.query_params.items() if k.lower().startswith("h_")})
-    request_headers.setdefault("user-agent", settings.user_agent)
+    request_headers.update({k[2:].lower(): v for k, v in request.query_params.items() if k.startswith("h_")})
 
     # Handle common misspelling of referer
     if "referrer" in request_headers:
@@ -586,13 +583,8 @@ def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
             if v is None or v.strip() == "":
                 request_headers.pop(h, None)
 
-    response_headers = {k[2:].lower(): v for k, v in request.query_params.items() if k.lower().startswith("r_")}
-    
-    # Parse headers to remove from response (x_headers parameter)
-    x_headers_param = request.query_params.get("x_headers", "")
-    remove_headers = [h.strip().lower() for h in x_headers_param.split(",") if h.strip()] if x_headers_param else []
-    
-    return ProxyRequestHeaders(request_headers, response_headers, remove_headers)
+    response_headers = {k[2:].lower(): v for k, v in request.query_params.items() if k.startswith("r_")}
+    return ProxyRequestHeaders(request_headers, response_headers)
 
 
 class EnhancedStreamingResponse(Response):
@@ -614,6 +606,13 @@ class EnhancedStreamingResponse(Response):
         self.media_type = self.media_type if media_type is None else media_type
         self.background = background
         self.init_headers(headers)
+        if scope := getattr(self, "scope", None):
+            path = scope.get("path", "")
+            if path.endswith(".png"):
+                self.headers["content-type"] = "video/mp2t"
+
+        if "content-length" in self.headers:
+            del self.headers["content-length"]
         self.actual_content_length = 0
 
     @staticmethod
