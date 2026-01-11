@@ -606,10 +606,6 @@ class EnhancedStreamingResponse(Response):
         self.media_type = self.media_type if media_type is None else media_type
         self.background = background
         self.init_headers(headers)
-        if scope := getattr(self, "scope", None):
-            path = scope.get("path", "")
-            if path.endswith(".png"):
-                self.headers["content-type"] = "video/mp2t"
 
         if "content-length" in self.headers:
             del self.headers["content-length"]
