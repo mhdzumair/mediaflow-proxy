@@ -5,6 +5,13 @@ from typing import Annotated, Literal, Dict, Any, Optional
 from pydantic import BaseModel, Field, IPvAnyAddress, ConfigDict, field_validator
 
 
+def validate_resolution_format(value: str) -> str:
+    """Validate and normalize resolution format (e.g., '1080p', '720p')."""
+    if not re.match(r'^\d+p$', value):
+        raise ValueError(f"Invalid resolution format '{value}'. Expected format: '1080p', '720p', etc.")
+    return value
+
+
 class GenerateUrlRequest(BaseModel):
     mediaflow_proxy_url: str = Field(..., description="The base URL for the mediaflow proxy.")
     endpoint: Optional[str] = Field(None, description="The specific endpoint to be appended to the base URL.")
@@ -90,12 +97,34 @@ class HLSManifestParams(GenericParams):
         False,
         description="If true, redirects to the highest resolution stream in the manifest.",
     )
+    resolution: Optional[str] = Field(
+        None,
+        description="Select a specific resolution stream (e.g., '1080p', '720p', '480p'). Falls back to closest lower resolution if exact match not found.",
+    )
+
+    @field_validator("resolution", mode="before")
+    @classmethod
+    def validate_resolution(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        return validate_resolution_format(str(value))
 
 
 class MPDManifestParams(GenericParams):
-    destination: str = Field(..., description="The URL of the MPD manifest.", alias="d")
+    destination: Annotated[str, Field(description="The URL of the MPD manifest.", alias="d")]
     key_id: Optional[str] = Field(None, description="The DRM key ID (optional).")
     key: Optional[str] = Field(None, description="The DRM key (optional).")
+    resolution: Optional[str] = Field(
+        None,
+        description="Select a specific resolution stream (e.g., '1080p', '720p', '480p'). Falls back to closest lower resolution if exact match not found.",
+    )
+
+    @field_validator("resolution", mode="before")
+    @classmethod
+    def validate_resolution(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        return validate_resolution_format(str(value))
 
 
 class MPDPlaylistParams(GenericParams):

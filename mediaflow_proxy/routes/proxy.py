@@ -1,14 +1,14 @@
 import asyncio
+import logging
+import re
 from typing import Annotated
 from urllib.parse import quote, unquote
-import re
-import logging
+
 import httpx
-import time
+from fastapi import Request, Depends, APIRouter, Query, HTTPException, Response
+from fastapi.datastructures import QueryParams
 
-from fastapi import Request, Depends, APIRouter, Query, HTTPException
-from fastapi.responses import Response
-
+from mediaflow_proxy.configs import settings
 from mediaflow_proxy.handlers import (
     handle_hls_stream_proxy,
     handle_stream_request,
@@ -24,21 +24,25 @@ from mediaflow_proxy.schemas import (
     HLSManifestParams,
     MPDManifestParams,
 )
+from mediaflow_proxy.utils.base64_utils import process_potential_base64_url
+from mediaflow_proxy.utils.dash_prebuffer import dash_prebuffer
+from mediaflow_proxy.utils.extractor_helpers import (
+    check_and_extract_dlhd_stream,
+    check_and_extract_sportsonline_stream,
+)
+from mediaflow_proxy.utils.hls_prebuffer import hls_prebuffer
+from mediaflow_proxy.utils.hls_utils import parse_hls_playlist, find_stream_by_resolution
 from mediaflow_proxy.utils.http_utils import (
     get_proxy_headers,
     ProxyRequestHeaders,
     create_httpx_client,
+    apply_header_manipulation,
 )
-from mediaflow_proxy.utils.base64_utils import process_potential_base64_url
+from mediaflow_proxy.utils.m3u8_processor import M3U8Processor
 
+
+logger = logging.getLogger(__name__)
 proxy_router = APIRouter()
-
-# DLHD extraction cache: {original_url: {"data": extraction_result, "timestamp": time.time()}}
-_dlhd_extraction_cache = {}
-_dlhd_cache_duration = 600  # 10 minutes in seconds
-
-_sportsonline_extraction_cache = {}
-_sportsonline_cache_duration = 600  # 10 minutes in seconds
 
 
 def sanitize_url(url: str) -> str:
@@ -51,7 +55,6 @@ def sanitize_url(url: str) -> str:
     Returns:
         str: The sanitized URL.
     """
-    logger = logging.getLogger(__name__)
     original_url = url
     
     # First, try to process potential base64 encoded URLs
@@ -109,7 +112,6 @@ def extract_drm_params_from_url(url: str) -> tuple[str, str, str]:
         tuple: (clean_url, key_id, key) where clean_url has the parameters removed,
                and key_id/key are the extracted values (or None if not found).
     """
-    logger = logging.getLogger(__name__)
     key_id = None
     key = None
     clean_url = url
@@ -136,149 +138,6 @@ def extract_drm_params_from_url(url: str) -> tuple[str, str, str]:
     return clean_url, key_id, key
 
 
-def _invalidate_dlhd_cache(destination: str):
-    """Invalidate DLHD cache for a specific destination URL."""
-    if destination in _dlhd_extraction_cache:
-        del _dlhd_extraction_cache[destination]
-        logger = logging.getLogger(__name__)
-        logger.info(f"DLHD cache invalidated for: {destination}")
-
-
-async def _check_and_extract_dlhd_stream(
-    request: Request, 
-    destination: str, 
-    proxy_headers: ProxyRequestHeaders,
-    force_refresh: bool = False
-) -> dict | None:
-    """
-    Check if destination contains DLHD/DaddyLive patterns and extract stream directly.
-    Uses caching to avoid repeated extractions (10 minute cache).
-    
-    Args:
-        request (Request): The incoming HTTP request.
-        destination (str): The destination URL to check.
-        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
-        force_refresh (bool): Force re-extraction even if cached data exists.
-        
-    Returns:
-        dict | None: Extracted stream data if DLHD link detected, None otherwise.
-    """
-    import re
-    from urllib.parse import urlparse
-    from mediaflow_proxy.extractors.factory import ExtractorFactory
-    from mediaflow_proxy.extractors.base import ExtractorError
-    from mediaflow_proxy.utils.http_utils import DownloadError
-    
-    # Check for common DLHD/DaddyLive patterns in the URL
-    # This includes stream-XXX pattern and domain names like dlhd.dad or daddylive.sx
-    is_dlhd_link = (
-        re.search(r'stream-\d+', destination) or
-        "dlhd.dad" in urlparse(destination).netloc or
-        "daddylive.sx" in urlparse(destination).netloc
-    )
-    
-    if not is_dlhd_link:
-        return None
-    
-    logger = logging.getLogger(__name__)
-    logger.info(f"DLHD link detected: {destination}")
-    
-    # Check cache first (unless force_refresh is True)
-    current_time = time.time()
-    if not force_refresh and destination in _dlhd_extraction_cache:
-        cached_entry = _dlhd_extraction_cache[destination]
-        cache_age = current_time - cached_entry["timestamp"]
-        
-        if cache_age < _dlhd_cache_duration:
-            logger.info(f"Using cached DLHD data (age: {cache_age:.1f}s)")
-            return cached_entry["data"]
-        else:
-            logger.info(f"DLHD cache expired (age: {cache_age:.1f}s), re-extracting...")
-            del _dlhd_extraction_cache[destination]
-    
-    # Extract stream data
-    try:
-        logger.info(f"Extracting DLHD stream data from: {destination}")
-        extractor = ExtractorFactory.get_extractor("DLHD", proxy_headers.request)
-        result = await extractor.extract(destination)
-        
-        logger.info(f"DLHD extraction successful. Stream URL: {result.get('destination_url')}")
-        
-        # Cache the result
-        _dlhd_extraction_cache[destination] = {
-            "data": result,
-            "timestamp": current_time
-        }
-        logger.info(f"DLHD data cached for {_dlhd_cache_duration}s")
-        
-        return result
-        
-    except (ExtractorError, DownloadError) as e:
-        logger.error(f"DLHD extraction failed: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"DLHD extraction failed: {str(e)}")
-    except Exception as e:
-        logger.exception(f"Unexpected error during DLHD extraction: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"DLHD extraction failed: {str(e)}")
-
-
-async def _check_and_extract_sportsonline_stream(
-    request: Request,
-    destination: str,
-    proxy_headers: ProxyRequestHeaders,
-    force_refresh: bool = False
-) -> dict | None:
-    """
-    Check if destination contains Sportsonline/Sportzonline patterns and extract stream directly.
-    Uses caching to avoid repeated extractions (10 minute cache).
-
-    Args:
-        request (Request): The incoming HTTP request.
-        destination (str): The destination URL to check.
-        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
-        force_refresh (bool): Force re-extraction even if cached data exists.
-
-    Returns:
-        dict | None: Extracted stream data if Sportsonline link detected, None otherwise.
-    """
-    import re
-    from urllib.parse import urlparse
-    from mediaflow_proxy.extractors.factory import ExtractorFactory
-    from mediaflow_proxy.extractors.base import ExtractorError
-    from mediaflow_proxy.utils.http_utils import DownloadError
-
-    parsed_netloc = urlparse(destination).netloc
-    is_sportsonline_link = "sportzonline." in parsed_netloc or "sportsonline." in parsed_netloc
-
-    if not is_sportsonline_link:
-        return None
-
-    logger = logging.getLogger(__name__)
-    logger.info(f"Sportsonline link detected: {destination}")
-
-    current_time = time.time()
-    if not force_refresh and destination in _sportsonline_extraction_cache:
-        cached_entry = _sportsonline_extraction_cache[destination]
-        if current_time - cached_entry["timestamp"] < _sportsonline_cache_duration:
-            logger.info(f"Using cached Sportsonline data (age: {current_time - cached_entry['timestamp']:.1f}s)")
-            return cached_entry["data"]
-        else:
-            logger.info("Sportsonline cache expired, re-extracting...")
-            del _sportsonline_extraction_cache[destination]
-
-    try:
-        logger.info(f"Extracting Sportsonline stream data from: {destination}")
-        extractor = ExtractorFactory.get_extractor("Sportsonline", proxy_headers.request)
-        result = await extractor.extract(destination)
-        logger.info(f"Sportsonline extraction successful. Stream URL: {result.get('destination_url')}")
-        _sportsonline_extraction_cache[destination] = {"data": result, "timestamp": current_time}
-        logger.info(f"Sportsonline data cached for {_sportsonline_cache_duration}s")
-        return result
-    except (ExtractorError, DownloadError, Exception) as e:
-        logger.error(f"Sportsonline extraction failed: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Sportsonline extraction failed: {str(e)}")
-
-
-@proxy_router.head("/hls/manifest.m3u8")
 @proxy_router.head("/hls/manifest.m3u8")
 @proxy_router.get("/hls/manifest.m3u8")
 async def hls_manifest_proxy(
@@ -298,14 +157,13 @@ async def hls_manifest_proxy(
         Response: The HTTP response with the processed m3u8 playlist or streamed content.
     """
     # Sanitize destination URL to fix common encoding issues
-    original_destination = hls_params.destination
     hls_params.destination = sanitize_url(hls_params.destination)
     
     # Check if this is a retry after 403 error (dlhd_retry parameter)
     force_refresh = request.query_params.get("dlhd_retry") == "1"
     
     # Check if destination contains DLHD pattern and extract stream directly
-    dlhd_result = await _check_and_extract_dlhd_stream(
+    dlhd_result = await check_and_extract_dlhd_stream(
         request, hls_params.destination, proxy_headers, force_refresh=force_refresh
     )
     dlhd_original_url = None
@@ -324,7 +182,6 @@ async def hls_manifest_proxy(
         
         # Also add headers to query params so they propagate to key/segment requests
         # This is necessary because M3U8Processor encodes headers as h_* query params
-        from fastapi.datastructures import QueryParams
         query_dict = dict(request.query_params)
         for header_name, header_value in extracted_headers.items():
             # Add header with h_ prefix to query params
@@ -338,7 +195,7 @@ async def hls_manifest_proxy(
         request._query_params = QueryParams(query_dict)
 
     # Check if destination contains Sportsonline pattern and extract stream directly
-    sportsonline_result = await _check_and_extract_sportsonline_stream(
+    sportsonline_result = await check_and_extract_sportsonline_stream(
         request, hls_params.destination, proxy_headers
     )
     if sportsonline_result:
@@ -352,7 +209,6 @@ async def hls_manifest_proxy(
             hls_params.key_only_proxy = True
 
         # Also add headers to query params so they propagate to key/segment requests
-        from fastapi.datastructures import QueryParams
         query_dict = dict(request.query_params)
         for header_name, header_value in extracted_headers.items():
             # Add header with h_ prefix to query params
@@ -369,7 +225,6 @@ async def hls_manifest_proxy(
     except HTTPException:
         raise
     except Exception as e:
-        logger = logging.getLogger(__name__)
         logger.exception(f"Unexpected error in hls_manifest_proxy: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -383,12 +238,8 @@ async def _handle_hls_with_dlhd_retry(
     """
     Handle HLS request with automatic retry on 403 errors for DLHD streams.
     """
-    logger = logging.getLogger(__name__)
-    
-    if hls_params.max_res:
-        from mediaflow_proxy.utils.hls_utils import parse_hls_playlist
-        from mediaflow_proxy.utils.m3u8_processor import M3U8Processor
-
+    # Check if resolution selection is needed (either max_res or specific resolution)
+    if hls_params.max_res or hls_params.resolution:
         async with create_httpx_client(
             headers=proxy_headers.request,
             follow_redirects=True,
@@ -416,19 +267,28 @@ async def _handle_hls_with_dlhd_retry(
                 status_code=404, detail="No streams found in the manifest."
             )
 
-        highest_res_stream = max(
-            streams,
-            key=lambda s: s.get("resolution", (0, 0))[0]
-            * s.get("resolution", (0, 0))[1],
-        )
+        # Select stream based on resolution parameter or max_res
+        if hls_params.resolution:
+            selected_stream = find_stream_by_resolution(streams, hls_params.resolution)
+            if not selected_stream:
+                raise HTTPException(
+                    status_code=404, detail=f"No suitable stream found for resolution {hls_params.resolution}."
+                )
+        else:
+            # max_res: select highest resolution
+            selected_stream = max(
+                streams,
+                key=lambda s: s.get("resolution", (0, 0))[0]
+                * s.get("resolution", (0, 0))[1],
+            )
 
-        if highest_res_stream.get("resolution", (0, 0)) == (0, 0):
-            logging.warning("Selected stream has resolution (0, 0); resolution parsing may have failed or not be available in the manifest.")
+        if selected_stream.get("resolution", (0, 0)) == (0, 0):
+            logger.warning("Selected stream has resolution (0, 0); resolution parsing may have failed or not be available in the manifest.")
 
         # Rebuild the manifest preserving master-level directives
         # but removing non-selected variant blocks
         lines = playlist_content.splitlines()
-        highest_variant_index = streams.index(highest_res_stream)
+        selected_variant_index = streams.index(selected_stream)
         
         variant_index = -1
         new_manifest_lines = []
@@ -442,7 +302,7 @@ async def _handle_hls_with_dlhd_retry(
                     next_line = lines[i + 1]
                 
                 # Only keep the selected variant
-                if variant_index == highest_variant_index:
+                if variant_index == selected_variant_index:
                     new_manifest_lines.append(line)
                     if next_line:
                         new_manifest_lines.append(next_line)
@@ -510,9 +370,6 @@ async def hls_segment_proxy(
     Returns:
         Response: The HTTP response with the segment content.
     """
-    from mediaflow_proxy.utils.hls_prebuffer import hls_prebuffer
-    from mediaflow_proxy.configs import settings
-
     # Sanitize segment URL to fix common encoding issues
     segment_url = sanitize_url(segment_url)
     
@@ -528,14 +385,17 @@ async def hls_segment_proxy(
         if cached_segment:
             # Avvia prebuffer dei successivi in background
             asyncio.create_task(hls_prebuffer.prebuffer_from_segment(segment_url, headers))
+            # Apply header manipulation to cached response
+            base_headers = {
+                "content-type": "video/mp2t",
+                "cache-control": "public, max-age=3600",
+                "access-control-allow-origin": "*"
+            }
+            response_headers = apply_header_manipulation(base_headers, proxy_headers)
             return Response(
                 content=cached_segment,
                 media_type="video/mp2t",
-                headers={
-                    "Content-Type": "video/mp2t",
-                    "Cache-Control": "public, max-age=3600",
-                    "Access-Control-Allow-Origin": "*"
-                }
+                headers=response_headers
             )
 
     # Fallback to direct streaming se non in cache:
@@ -562,9 +422,6 @@ async def dash_segment_proxy(
     Returns:
         Response: The HTTP response with the segment content.
     """
-    from mediaflow_proxy.utils.dash_prebuffer import dash_prebuffer
-    from mediaflow_proxy.configs import settings
-    
     # Sanitize segment URL to fix common encoding issues
     segment_url = sanitize_url(segment_url)
     
@@ -578,14 +435,17 @@ async def dash_segment_proxy(
     if settings.enable_dash_prebuffer:
         cached_segment = await dash_prebuffer.get_segment(segment_url, headers)
         if cached_segment:
+            # Apply header manipulation to cached response
+            base_headers = {
+                "content-type": "video/mp4",
+                "cache-control": "public, max-age=3600",
+                "access-control-allow-origin": "*"
+            }
+            response_headers = apply_header_manipulation(base_headers, proxy_headers)
             return Response(
                 content=cached_segment,
                 media_type="video/mp4",
-                headers={
-                    "Content-Type": "video/mp4",
-                    "Cache-Control": "public, max-age=3600",
-                    "Access-Control-Allow-Origin": "*"
-                }
+                headers=response_headers
             )
     
     # Fallback to direct streaming if not in cache
@@ -618,7 +478,7 @@ async def proxy_stream_endpoint(
     destination = sanitize_url(destination)
     
     # Check if destination contains DLHD pattern and extract stream directly
-    dlhd_result = await _check_and_extract_dlhd_stream(request, destination, proxy_headers)
+    dlhd_result = await check_and_extract_dlhd_stream(request, destination, proxy_headers)
     if dlhd_result:
         # Update destination and headers with extracted stream data
         destination = dlhd_result["destination_url"]
