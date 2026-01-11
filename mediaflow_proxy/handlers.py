@@ -419,12 +419,32 @@ async def get_segment(
     )
 
 
+IP_LOOKUP_SERVICES = [
+    {"url": "https://api.ipify.org?format=json", "key": "ip"},
+    {"url": "https://ipinfo.io/json", "key": "ip"},
+    {"url": "https://httpbin.org/ip", "key": "origin"},
+]
+
+
 async def get_public_ip():
     """
     Retrieves the public IP address of the MediaFlow proxy.
+    Tries multiple services for reliability.
 
     Returns:
-        Response: The HTTP response with the public IP address.
+        dict: A dictionary with the public IP address {"ip": "x.x.x.x"}.
+
+    Raises:
+        DownloadError: If all IP lookup services fail.
     """
-    ip_address_data = await request_with_retry("GET", "https://api.ipify.org?format=json", {})
-    return ip_address_data.json()
+    for service in IP_LOOKUP_SERVICES:
+        try:
+            response = await request_with_retry("GET", service["url"], {})
+            data = response.json()
+            ip = data.get(service["key"])
+            if ip:
+                return {"ip": ip.strip()}
+        except Exception:
+            continue
+
+    raise DownloadError(503, "Failed to retrieve public IP from all services")
