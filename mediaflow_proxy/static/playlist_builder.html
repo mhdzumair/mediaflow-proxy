@@ -1,82 +1,250 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="h-full">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MFP Playlist Builder</title>
+    <link rel="icon" href="/logo.png" type="image/x-icon">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        'display': ['Satoshi', 'system-ui', 'sans-serif'],
+                        'mono': ['JetBrains Mono', 'Fira Code', 'monospace'],
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.3s ease-out',
+                        'slide-up': 'slideUp 0.3s ease-out',
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
-        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1 { color: #333; text-align: center; margin-bottom: 30px; }
-        h2 { color: #2c5aa0; border-bottom: 2px solid #2c5aa0; padding-bottom: 5px; text-align: left; margin-top: 30px; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
-        .proxy-label { display: inline-block; margin-left: 5px; font-weight: normal; }
-        input[type="text"], input[type="url"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        .btn { display: inline-block; padding: 10px 20px; background: #2c5aa0; color: white; text-decoration: none; border-radius: 5px; margin: 5px; cursor: pointer; border: none; font-size: 16px; }
-        .btn:hover { background: #1e3d6f; }
-        .btn-add { background-color: #28a745; }
-        .btn-remove { background-color: #dc3545; padding: 5px 10px; font-size: 12px; }
-        .playlist-entry { background: #f8f9fa; padding: 20px; border-radius: 5px; margin-bottom: 15px; border-left: 4px solid #17a2b8; position: relative; }
-        .output-area { margin-top: 20px; }
-        #generated-url { background: #e9ecef; padding: 10px; border: 1px solid #ced4da; border-radius: 4px; font-family: 'Courier New', monospace; word-break: break-all; min-height: 50px; white-space: pre-wrap; }
+        @import url('https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap');
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(10px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .input-field {
+            transition: all 0.2s ease;
+        }
+        
+        .input-field:focus {
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3);
+        }
+        
+        .url-output {
+            background: linear-gradient(135deg, #064e3b 0%, #065f46 100%);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        .copy-btn {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            transition: all 0.2s ease;
+        }
+        
+        .copy-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+        }
+        
+        .generate-btn {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            transition: all 0.2s ease;
+        }
+        
+        .generate-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.5);
+        }
+        
+        .add-btn {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            transition: all 0.2s ease;
+        }
+        
+        .add-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+        }
+        
+        .playlist-entry {
+            animation: slideUp 0.3s ease-out;
+        }
+        
+        .checkbox-custom {
+            accent-color: #10b981;
+        }
     </style>
 </head>
-<body>
-    <div class="container">
-        <h1>🔗 MFP Playlist Builder</h1>
-        
-        <div class="form-group">
-            <label for="server-address">MFP Server Address</label>
-            <input type="text" id="server-address" placeholder="Current server address" value="" readonly style="background-color: #e9ecef;">
-        </div>
-
-        <div class="form-group">
-            <label for="api-password">MFP API Password</label>
-            <input type="text" id="api-password" placeholder="API password for MFP">
-        </div>
-
-        <h2>Playlists to Merge</h2>
-        <div id="playlist-container">
-            <!-- Playlists will be added here dynamically -->
-        </div>
-
-        <button type="button" class="btn btn-add" onclick="addPlaylistEntry()">Add Playlist</button>
-        <hr style="margin: 20px 0;">
-
-        <button type="button" class="btn" onclick="generateUrl()">Generate URL</button>
-
-        <div class="output-area">
-            <label for="generated-url">Generated URL</label>
-            <div id="generated-url">The URL will appear here...</div>
-            <button type="button" class="btn" onclick="copyUrl()">Copy URL</button>
-        </div>
+<body class="bg-gradient-to-br from-slate-50 via-gray-100 to-slate-200 dark:from-slate-900 dark:via-gray-900 dark:to-slate-800 min-h-full font-display">
+    <!-- Theme Toggle -->
+    <div class="fixed top-4 right-4 z-50">
+        <button id="themeToggle" class="p-2.5 rounded-full bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 shadow-lg">
+            <svg id="sunIcon" class="w-5 h-5 text-amber-500 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+            </svg>
+            <svg id="moonIcon" class="w-5 h-5 text-indigo-600 block dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+            </svg>
+        </button>
     </div>
+
+    <!-- Back to Home -->
+    <div class="fixed top-4 left-4 z-50">
+        <a href="/" class="flex items-center gap-2 px-4 py-2 rounded-full bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 shadow-lg text-gray-700 dark:text-gray-200 text-sm font-medium">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+            </svg>
+            Home
+        </a>
+    </div>
+
+    <main class="container mx-auto px-4 py-12 max-w-4xl">
+        <!-- Header -->
+        <div class="text-center mb-10 animate-fade-in">
+            <div class="flex items-center justify-center gap-3 mb-3">
+                <img src="/logo.png" alt="MediaFlow" class="w-12 h-12 rounded-xl shadow-lg">
+                <h1 class="text-4xl font-bold bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-500 bg-clip-text text-transparent">
+                    Playlist Builder
+                </h1>
+            </div>
+            <p class="text-gray-600 dark:text-gray-400 text-lg">
+                Combine and proxy M3U playlists with automatic link rewriting
+            </p>
+        </div>
+
+        <!-- Main Form -->
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 md:p-8 border border-gray-200 dark:border-gray-700 animate-slide-up">
+            <!-- Server Settings -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">
+                        <span class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
+                            </svg>
+                            MFP Server Address
+                        </span>
+                    </label>
+                    <input type="text" id="server-address" readonly
+                        class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none cursor-not-allowed">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">
+                        <span class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                            </svg>
+                            API Password
+                            <span class="text-gray-400 font-normal">(optional)</span>
+                        </span>
+                    </label>
+                    <input type="password" id="api-password" placeholder="Enter API password if required"
+                        class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-500">
+                </div>
+            </div>
+
+            <!-- Playlists Section -->
+            <div class="mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
+                        <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-sm">📋</span>
+                        Playlists to Merge
+                    </h2>
+                    <button type="button" onclick="addPlaylistEntry()" class="add-btn px-4 py-2 rounded-xl text-white font-semibold text-sm flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        Add Playlist
+                    </button>
+                </div>
+
+                <div id="playlist-container" class="space-y-4">
+                    <!-- Playlists will be added here dynamically -->
+                </div>
+            </div>
+
+            <!-- Generate Button -->
+            <div class="pt-6 border-t border-gray-200 dark:border-gray-700">
+                <button type="button" onclick="generateUrl()" class="generate-btn w-full py-4 rounded-xl text-white font-semibold text-base flex items-center justify-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                    Generate Playlist URL
+                </button>
+            </div>
+
+            <!-- Output Section -->
+            <div id="output-section" class="mt-6 hidden">
+                <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Generated URL</label>
+                <div class="url-output rounded-xl p-4 text-emerald-400 text-sm break-all overflow-x-auto min-h-[60px]">
+                    <code id="generated-url"></code>
+                </div>
+                <button type="button" onclick="copyUrl()" class="copy-btn mt-4 px-6 py-2.5 rounded-xl text-white font-semibold text-sm flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/>
+                    </svg>
+                    <span id="copy-btn-text">Copy to Clipboard</span>
+                </button>
+            </div>
+        </div>
+    </main>
 
     <!-- Template for a single playlist -->
     <template id="playlist-template">
-        <div class="playlist-entry">
-            <button type="button" class="btn btn-remove" style="position: absolute; top: 10px; right: 10px;" onclick="this.parentElement.remove()">Remove</button>
-            <div class="form-group">
-                <label>M3U Playlist URL</label>
-                <input type="url" class="playlist-url" placeholder="Ex: http://provider.com/playlist.m3u">
+        <div class="playlist-entry bg-gray-50 dark:bg-gray-700/50 rounded-xl p-5 border border-gray-200 dark:border-gray-600 relative">
+            <button type="button" onclick="this.parentElement.remove()" class="absolute top-3 right-3 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+            
+            <div class="mb-4">
+                <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">M3U Playlist URL</label>
+                <input type="url" class="playlist-url input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-500" placeholder="https://example.com/playlist.m3u">
             </div>
-            <div class="form-group">
-                <input type="checkbox" class="proxy-playlist" checked>
-                <label class="proxy-label">Proxy this playlist</label>
-            </div>
-            <div class="form-group">
-                <input type="checkbox" class="sort-playlist">
-                <label class="proxy-label">Sort this playlist</label>
+            
+            <div class="flex flex-wrap gap-6">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" class="proxy-playlist checkbox-custom w-4 h-4 rounded" checked>
+                    <span class="text-sm text-gray-700 dark:text-gray-300">Proxy this playlist</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" class="sort-playlist checkbox-custom w-4 h-4 rounded">
+                    <span class="text-sm text-gray-700 dark:text-gray-300">Sort this playlist</span>
+                </label>
             </div>
         </div>
     </template>
 
     <script>
+        // Theme management
+        const themeToggle = document.getElementById('themeToggle');
+        const html = document.documentElement;
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        html.classList.toggle('dark', savedTheme === 'dark');
+
+        themeToggle.addEventListener('click', () => {
+            html.classList.toggle('dark');
+            const newTheme = html.classList.contains('dark') ? 'dark' : 'light';
+            localStorage.setItem('theme', newTheme);
+        });
+
+        // Initialize
         document.addEventListener('DOMContentLoaded', function() {
-            // Set the default server address
             document.getElementById('server-address').value = window.location.origin;
-            // Add a default playlist on startup
             addPlaylistEntry();
         });
 
@@ -99,7 +267,6 @@
             const entries = document.querySelectorAll('.playlist-entry');
             const definitions = [];
 
-            // Single loop for URL collection and validation
             for (const entry of entries) {
                 const playlistUrl = entry.querySelector('.playlist-url').value.trim();
                 if (playlistUrl) {
@@ -109,7 +276,6 @@
                     let definition = (shouldSort ? 'sort:' : '') + (shouldProxy ? '' : 'no_proxy:') + playlistUrl;
 
                     if (playlistUrl.startsWith('http://') || playlistUrl.startsWith('https://')) {
-                        // Se l'URL non ha proxy, ma ha sort, il prefisso sarà 'sort:no_proxy:'
                         definitions.push(definition);
                     } else {
                         alert('Invalid URL: ' + playlistUrl + '. URLs must start with http:// or https://');
@@ -120,21 +286,29 @@
 
             if (definitions.length === 0) {
                 document.getElementById('generated-url').textContent = 'No valid playlist entered.';
+                document.getElementById('output-section').classList.remove('hidden');
                 return;
             }
-             let finalUrl = serverAddress + '/playlist/playlist?d=' + definitions.join(';');
+
+            let finalUrl = serverAddress + '/playlist/playlist?d=' + definitions.join(';');
             if (apiPassword) {
                 finalUrl += '&api_password=' + encodeURIComponent(apiPassword);
             }
             
             document.getElementById('generated-url').textContent = finalUrl;
+            document.getElementById('output-section').classList.remove('hidden');
         }
 
         function copyUrl() {
             const urlText = document.getElementById('generated-url').textContent;
-            if (urlText && !urlText.startsWith('The URL') && !urlText.startsWith('No valid')) {
+            if (urlText && !urlText.startsWith('No valid')) {
                 navigator.clipboard.writeText(urlText).then(() => {
-                    alert('URL copied to clipboard!');
+                    const btnText = document.getElementById('copy-btn-text');
+                    const originalText = btnText.textContent;
+                    btnText.textContent = '✓ Copied!';
+                    setTimeout(() => {
+                        btnText.textContent = originalText;
+                    }, 2000);
                 }).catch(err => {
                     alert('Error copying: ' + err);
                 });
