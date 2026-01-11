@@ -18,15 +18,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Add Rust to PATH
 ENV PATH="/root/.cargo/bin:$PATH"
 
-# Install Poetry
-RUN pip install --no-cache-dir poetry
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Copy only requirements to cache them in docker layer
-COPY pyproject.toml poetry.lock* /build/
+COPY pyproject.toml uv.lock* /build/
 
 # Install dependencies into a virtual environment
-RUN poetry config virtualenvs.in-project true \
-    && poetry install --no-interaction --no-ansi --no-root --only main
+RUN uv sync --frozen --no-install-project --no-dev
 
 # Stage 2: Runtime stage (minimal image)
 FROM python:3.14-slim

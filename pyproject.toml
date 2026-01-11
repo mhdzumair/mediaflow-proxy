@@ -1,14 +1,11 @@
-[tool.poetry]
+[project]
 name = "mediaflow-proxy"
 version = "2.1.9"
 description = "A high-performance proxy server for streaming media, supporting HTTP(S), HLS, and MPEG-DASH with real-time DRM decryption."
-authors = ["mhdzumair <mhdzumair@gmail.com>"]
+authors = [{ name = "mhdzumair", email = "mhdzumair@gmail.com" }]
 readme = "README.md"
-homepage = "https://github.com/mhdzumair/mediaflow-proxy"
-repository = "https://github.com/mhdzumair/mediaflow-proxy"
-documentation = "https://github.com/mhdzumair/mediaflow-proxy#readme"
+license = { text = "MIT" }
 keywords = ["proxy", "media", "streaming", "hls", "dash", "drm"]
-license = "MIT"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -20,34 +17,45 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
-include = ["LICENSE", "README.md", "mediaflow_proxy/static/*"]
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi",
+    "httpx[socks,zstd]",
+    "tenacity",
+    "xmltodict",
+    "pydantic-settings",
+    "gunicorn",
+    "pycryptodome",
+    "uvicorn",
+    "tqdm",
+    "aiofiles",
+    "beautifulsoup4",
+    "lxml",
+    "psutil",
+]
 
+[project.urls]
+Homepage = "https://github.com/mhdzumair/mediaflow-proxy"
+Repository = "https://github.com/mhdzumair/mediaflow-proxy"
+Documentation = "https://github.com/mhdzumair/mediaflow-proxy#readme"
 
-[tool.poetry.dependencies]
-python = ">=3.9"
-fastapi = "0.115.12"
-httpx = {extras = ["socks", "zstd"], version = "^0.28.1"}
-tenacity = "^9.1.2"
-xmltodict = "^0.14.2"
-pydantic-settings = "^2.9.1"
-gunicorn = "^23.0.0"
-pycryptodome = "^3.22.0"
-uvicorn = "^0.34.2"
-tqdm = "^4.67.1"
-aiofiles = "^24.1.0"
-beautifulsoup4 = ">=4.13.4"
-lxml = "^5.4.0"
-psutil = "^6.1.0"
+[project.scripts]
+mediaflow-proxy = "mediaflow_proxy.main:run"
 
-[tool.poetry.group.dev.dependencies]
-black = "^25.1.0"
+[dependency-groups]
+dev = [
+    "black",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.poetry.scripts]
-mediaflow-proxy = "mediaflow_proxy.main:run"
+[tool.hatch.build.targets.sdist]
+include = ["mediaflow_proxy/**", "LICENSE", "README.md"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["mediaflow_proxy"]
 
 [tool.black]
 line-length = 120
