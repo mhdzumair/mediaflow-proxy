@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import logging
 from urllib.parse import urlparse, parse_qs
@@ -8,9 +9,10 @@ from fastapi import Request, Response, HTTPException
 from starlette.background import BackgroundTask
 
 from .const import SUPPORTED_RESPONSE_HEADERS
-from .mpd_processor import process_manifest, process_playlist, process_segment
-from .schemas import HLSManifestParams, MPDManifestParams, MPDPlaylistParams, MPDSegmentParams
-from .utils.cache_utils import get_cached_mpd, get_cached_init_segment
+from .mpd_processor import process_manifest, process_playlist, process_segment, process_init_segment
+from .schemas import HLSManifestParams, MPDManifestParams, MPDPlaylistParams, MPDSegmentParams, MPDInitParams
+from .utils.cache_utils import get_cached_mpd, get_cached_init_segment, get_cached_segment, set_cached_segment
+from .utils.dash_prebuffer import dash_prebuffer
 from .utils.http_utils import (
     Streamer,
     DownloadError,
@@ -399,14 +401,53 @@ async def get_segment(
     """
     try:
         live_cache_ttl = settings.mpd_live_init_cache_ttl if segment_params.is_live else None
-        init_content = await get_cached_init_segment(
+        segment_cache_ttl = settings.dash_segment_cache_ttl
+        
+        # Check segment cache first (from prebuffer)
+        segment_content = await get_cached_segment(segment_params.segment_url)
+        cache_hit = segment_content is not None
+        
+        # Track cache statistics
+        if cache_hit:
+            dash_prebuffer.record_cache_hit()
+            logger.info(f"Segment cache HIT: {segment_params.segment_url.split('/')[-1]}")
+        else:
+            dash_prebuffer.record_cache_miss()
+        
+        # Fetch init segment and media segment in parallel for better performance
+        init_task = get_cached_init_segment(
             segment_params.init_url,
             proxy_headers.request,
             cache_token=segment_params.key_id,
             ttl=live_cache_ttl,
             byte_range=segment_params.init_range,
         )
-        segment_content = await download_file_with_retry(segment_params.segment_url, proxy_headers.request)
+        
+        if cache_hit:
+            # Only fetch init if segment was cached
+            init_content = await init_task
+        else:
+            # Fetch both in parallel
+            segment_task = download_file_with_retry(segment_params.segment_url, proxy_headers.request)
+            init_content, segment_content = await asyncio.gather(init_task, segment_task)
+            
+            # Cache the segment for future requests (configurable TTL)
+            if segment_content and segment_params.is_live:
+                asyncio.create_task(set_cached_segment(segment_params.segment_url, segment_content, ttl=segment_cache_ttl))
+        
+        # Trigger continuous prefetch for live streams
+        if settings.enable_dash_prebuffer and segment_params.is_live:
+            # Extract MPD base URL from init_url for prefetching
+            # The MPD URL is stored in active_streams when manifest was first requested
+            for mpd_url, stream_info in dash_prebuffer.active_streams.items():
+                asyncio.create_task(
+                    dash_prebuffer.prefetch_upcoming_segments(
+                        mpd_url,
+                        segment_params.segment_url,
+                        proxy_headers.request,
+                    )
+                )
+                break  # Only need to trigger once
     except Exception as e:
         return handle_exceptions(e)
 
@@ -417,6 +458,43 @@ async def get_segment(
         proxy_headers,
         segment_params.key_id,
         segment_params.key,
+        use_map=segment_params.use_map,
+    )
+
+
+async def get_init_segment(
+    init_params: MPDInitParams,
+    proxy_headers: ProxyRequestHeaders,
+):
+    """
+    Retrieves and processes an initialization segment for EXT-X-MAP.
+
+    Args:
+        init_params (MPDInitParams): The parameters for the init segment request.
+        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
+
+    Returns:
+        Response: The HTTP response with the processed init segment.
+    """
+    try:
+        live_cache_ttl = settings.mpd_live_init_cache_ttl if init_params.is_live else None
+        init_content = await get_cached_init_segment(
+            init_params.init_url,
+            proxy_headers.request,
+            cache_token=init_params.key_id,
+            ttl=live_cache_ttl,
+            byte_range=init_params.init_range,
+        )
+    except Exception as e:
+        return handle_exceptions(e)
+
+    return await process_init_segment(
+        init_content,
+        init_params.mime_type,
+        proxy_headers,
+        init_params.key_id,
+        init_params.key,
+        init_params.init_url,
     )
 
 

@@ -10,9 +10,11 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 
 ### Stream Processing
 - Convert MPEG-DASH streams (DRM-protected and non-protected) to HLS
-- Support for Clear Key DRM-protected MPD DASH streams
+- **ClearKey DRM decryption** with support for all CENC encryption modes (see [DASH/MPD Support Status](#dashmpd-support-status))
+- Support for **multi-key DRM** streams (different keys for video/audio tracks)
 - Support for non-DRM protected DASH live and VOD streams
 - Proxy and modify HLS (M3U8) streams in real-time
+- **Smart pre-buffering** for both HLS and DASH streams (enabled by default)
 - Proxy HTTP/HTTPS links with custom headers
 
 ### Proxy & Routing
@@ -41,6 +43,86 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 - HLS Key URL modifications for bypassing stream restrictions
 - **Base64 URL Support** - Automatic detection and processing of base64 encoded URLs
 
+### DASH/MPD Support Status
+
+#### MPD Segment Addressing Types
+
+| Type | Status | Notes |
+|------|--------|-------|
+| SegmentTemplate (fixed duration) | ✅ Supported | Most common for VOD content |
+| SegmentTemplate (SegmentTimeline) | ✅ Supported | Variable duration segments |
+| SegmentBase | ✅ Supported | Single file with byte ranges |
+| SegmentList | ✅ Supported | Explicit segment URLs in MPD |
+
+#### MPD Presentation Types
+
+| Type | Status | Notes |
+|------|--------|-------|
+| Static (VOD) | ✅ Supported | Fixed duration content |
+| Dynamic (Live) | ✅ Supported | Live streaming with availabilityStartTime |
+
+#### DRM/Encryption Support
+
+**Supported (ClearKey):**
+
+| Mode | Scheme | Status | Notes |
+|------|--------|--------|-------|
+| AES-CTR (cenc) | Full sample CTR | ✅ Supported | Standard CENC encryption |
+| AES-CTR Pattern (cens) | Subsample CTR | ✅ Supported | Pattern encryption with CTR |
+| AES-CBC (cbc1) | Full sample CBC | ✅ Supported | Full sample CBC mode |
+| AES-CBC Pattern (cbcs) | Subsample CBC | ✅ Supported | Used by Apple FairPlay |
+
+**Not Supported (Commercial DRM):**
+
+| DRM System | Status | Notes |
+|------------|--------|-------|
+| Widevine | ❌ Not Supported | Requires license server communication |
+| PlayReady | ❌ Not Supported | Microsoft's DRM system |
+| FairPlay | ❌ Not Supported | Apple's DRM system (keys not extractable) |
+| PrimeTime | ❌ Not Supported | Adobe's DRM system |
+
+> **Note**: MediaFlow Proxy only supports **ClearKey** DRM where the decryption keys are provided directly. Commercial DRM systems (Widevine, PlayReady, FairPlay) require license server communication and hardware-backed security that cannot be bypassed by this proxy.
+
+#### IV Size Support
+
+| Size | Status | Notes |
+|------|--------|-------|
+| 8-byte IV | ✅ Supported | GPAC default |
+| 16-byte IV | ✅ Supported | Bento4 default |
+| Constant IV | ✅ Supported | Used by CBCS streams |
+
+#### Multi-Key Support
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Single Key (all tracks) | ✅ Supported | Same key for video and audio |
+| Multi-Key (per track) | ✅ Supported | Different keys for video/audio tracks |
+| Key rotation | ❌ Not Supported | Keys changing mid-stream |
+
+### Pre-buffering (HLS & DASH)
+
+MediaFlow Proxy includes intelligent pre-buffering for both HLS and DASH streams, **enabled by default** to improve playback smoothness and reduce buffering.
+
+#### How Pre-buffering Works
+
+| Feature | HLS | DASH |
+|---------|-----|------|
+| Enabled by default | ✅ Yes | ✅ Yes |
+| Smart variant selection | ✅ Only buffers the variant being played | ✅ Only buffers requested profiles |
+| Live stream support | ✅ Buffers from end of playlist | ✅ Buffers from end of playlist |
+| VOD support | ✅ Buffers from start | ✅ Buffers from start |
+| Inactivity cleanup | ✅ Stops after 60s idle | ✅ Stops after 60s idle |
+| Memory management | ✅ Configurable limits | ✅ Configurable limits |
+
+#### Key Behaviors
+
+1. **Smart Variant Selection (HLS)**: When a master playlist is requested, pre-buffering does NOT automatically buffer all quality variants. It only starts buffering when the player actually requests segments from a specific variant, saving bandwidth and memory.
+
+2. **Inactivity Cleanup**: Both HLS and DASH pre-buffers automatically stop refreshing playlists and clean up resources after 60 seconds of inactivity (no segment requests). This prevents memory leaks when streams are stopped.
+
+3. **Live Stream Optimization**: For live streams, segments are buffered from the END of the playlist (most recent) rather than the beginning, ensuring the player has the freshest content available.
+
+4. **Memory Protection**: Pre-buffering respects configurable memory limits and will stop buffering if system memory usage exceeds thresholds.
 
 ## Configuration
 
@@ -54,16 +136,19 @@ Set the following environment variables:
 - `DISABLE_SPEEDTEST`: Optional. Disables the speedtest UI. Returns 403 for the /speedtest path and direct access to speedtest.html. Default is `false`.
 - `STREMIO_PROXY_URL`: Optional. Stremio server URL for alternative content proxying. Example: `http://127.0.0.1:11470`.
 - `M3U8_CONTENT_ROUTING`: Optional. Routing strategy for M3U8 content URLs: `mediaflow` (default), `stremio`, or `direct`.
-- `ENABLE_HLS_PREBUFFER`: Optional. Enables HLS pre-buffering for improved streaming performance. Default: `false`. Enable this when you experience frequent buffering or want to improve playback smoothness for high-bitrate streams. Note that enabling pre-buffering increases memory usage and may not be suitable for low-memory environments.
+- `ENABLE_HLS_PREBUFFER`: Optional. Enables HLS pre-buffering for improved streaming performance. Default: `true`. Pre-buffering downloads upcoming segments ahead of playback to reduce buffering. Set to `false` to disable for low-memory environments.
 - `HLS_PREBUFFER_SEGMENTS`: Optional. Number of HLS segments to pre-buffer ahead. Default: `5`. Only effective when `ENABLE_HLS_PREBUFFER` is `true`.
 - `HLS_PREBUFFER_CACHE_SIZE`: Optional. Maximum number of HLS segments to keep in memory cache. Default: `50`. Only effective when `ENABLE_HLS_PREBUFFER` is `true`.
 - `HLS_PREBUFFER_MAX_MEMORY_PERCENT`: Optional. Maximum percentage of system memory to use for HLS pre-buffer cache. Default: `80`. Only effective when `ENABLE_HLS_PREBUFFER` is `true`.
 - `HLS_PREBUFFER_EMERGENCY_THRESHOLD`: Optional. Emergency threshold (%) to trigger aggressive HLS cache cleanup. Default: `90`. Only effective when `ENABLE_HLS_PREBUFFER` is `true`.
-- `ENABLE_DASH_PREBUFFER`: Optional. Enables DASH pre-buffering for improved streaming performance. Default: `false`. Enable this when you experience frequent buffering or want to improve playback smoothness for high-bitrate streams. Note that enabling pre-buffering increases memory usage and may not be suitable for low-memory environments.
+- `HLS_PREBUFFER_INACTIVITY_TIMEOUT`: Optional. Seconds of inactivity before stopping HLS playlist refresh. Default: `60`. Helps clean up resources when streams are stopped.
+- `ENABLE_DASH_PREBUFFER`: Optional. Enables DASH pre-buffering for improved streaming performance. Default: `true`. Pre-buffering downloads upcoming segments ahead of playback to reduce buffering. Set to `false` to disable for low-memory environments.
 - `DASH_PREBUFFER_SEGMENTS`: Optional. Number of DASH segments to pre-buffer ahead. Default: `5`. Only effective when `ENABLE_DASH_PREBUFFER` is `true`.
 - `DASH_PREBUFFER_CACHE_SIZE`: Optional. Maximum number of DASH segments to keep in memory cache. Default: `50`. Only effective when `ENABLE_DASH_PREBUFFER` is `true`.
 - `DASH_PREBUFFER_MAX_MEMORY_PERCENT`: Optional. Maximum percentage of system memory to use for DASH pre-buffer cache. Default: `80`. Only effective when `ENABLE_DASH_PREBUFFER` is `true`.
 - `DASH_PREBUFFER_EMERGENCY_THRESHOLD`: Optional. Emergency threshold (%) to trigger aggressive DASH cache cleanup. Default: `90`. Only effective when `ENABLE_DASH_PREBUFFER` is `true`.
+- `DASH_PREBUFFER_INACTIVITY_TIMEOUT`: Optional. Seconds of inactivity before cleaning up DASH stream state. Default: `60`. Helps clean up resources when streams are stopped.
+- `DASH_SEGMENT_CACHE_TTL`: Optional. TTL in seconds for cached DASH segments. Default: `60`. Longer values help with slow network playback.
 - `FORWARDED_ALLOW_IPS`: Optional. Controls which IP addresses are trusted to provide forwarded headers (X-Forwarded-For, X-Forwarded-Proto, etc.) when MediaFlow Proxy is deployed behind reverse proxies or load balancers. Default: `127.0.0.1`. See [Forwarded Headers Configuration](#forwarded-headers-configuration) for detailed usage.
 
 ### Transport Configuration
@@ -849,13 +934,21 @@ mpv "http://localhost:8888/proxy/stream?d=https://example.com/video.mp4&x_header
 mpv -v "http://localhost:8888/proxy/mpd/manifest.m3u8?d=https://livesim.dashif.org/livesim/chunkdur_1/ato_7/testpic4_8s/Manifest.mpd&api_password=your_password"
 ```
 
-#### VOD DASH Stream (DRM Protected)
+#### VOD DASH Stream (DRM Protected - Single Key)
 
 ```bash
 mpv -v "http://localhost:8888/proxy/mpd/manifest.m3u8?d=https://media.axprod.net/TestVectors/v7-MultiDRM-SingleKey/Manifest_1080p_ClearKey.mpd&key_id=nrQFDeRLSAKTLifXUIPiZg&key=FmY0xnWCPCNaSpRG-tUuTQ&api_password=your_password"
 ```
 
-Note: The `key` and `key_id` parameters are automatically processed if they're not in the correct format.
+#### VOD DASH Stream (DRM Protected - Multi-Key)
+
+For streams with different keys for video and audio tracks, provide multiple key_id:key pairs separated by commas:
+
+```bash
+mpv -v "http://localhost:8888/proxy/mpd/manifest.m3u8?d=https://example.com/multikey.mpd&key_id=video_key_id,audio_key_id&key=video_key,audio_key&api_password=your_password"
+```
+
+Note: The `key` and `key_id` parameters are automatically processed if they're not in the correct format. Multi-key support allows decryption of streams where video and audio tracks use different encryption keys.
 
 ### URL Encoding
 
@@ -1190,9 +1283,11 @@ This feature is fully backward compatible:
 - No configuration changes required
 - All existing API endpoints remain unchanged
 
-## Future Development
+## Limitations
 
-- Add support for Widevine and PlayReady decryption
+- **Commercial DRM not supported**: Widevine, PlayReady, and FairPlay DRM systems require license server communication and hardware security modules. These cannot be decrypted by MediaFlow Proxy as they are designed to prevent unauthorized access.
+- **Key rotation not supported**: Streams where encryption keys change mid-playback are not supported.
+- **Only ClearKey DRM**: The proxy can only decrypt content where you already have the decryption keys (ClearKey/AES-128).
 
 ## Acknowledgements and Inspirations
 
@@ -1200,7 +1295,7 @@ MediaFlow Proxy was developed with inspiration from various projects and resourc
 
 - [Stremio Server](https://github.com/Stremio/stremio-server) for HLS Proxify implementation, which inspired our HLS M3u8 Manifest parsing and redirection proxify support.
 - [Comet Debrid proxy](https://github.com/g0ldyy/comet) for the idea of proxifying HTTPS video streams.
-- [mp4decrypt](https://www.bento4.com/developers/dash/encryption_and_drm/), [mp4box](https://wiki.gpac.io/xmlformats/Common-Encryption/), and [devine](https://github.com/devine-dl/devine) for insights on parsing MPD and decrypting Clear Key DRM protected content.
+- [Bento4 mp4decrypt](https://www.bento4.com/developers/dash/encryption_and_drm/), [GPAC mp4box](https://wiki.gpac.io/xmlformats/Common-Encryption/), [Shaka Packager](https://github.com/shaka-project/shaka-packager), and [devine](https://github.com/devine-dl/devine) for insights on parsing MPD and decrypting CENC/ClearKey DRM protected content across all encryption modes (cenc, cens, cbc1, cbcs).
 - Test URLs were sourced from:
   - [OTTVerse MPEG-DASH MPD Examples](https://ottverse.com/free-mpeg-dash-mpd-manifest-example-test-urls/)
   - [OTTVerse HLS M3U8 Examples](https://ottverse.com/free-hls-m3u8-test-urls/)
