@@ -286,6 +286,8 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
                 hls.append("#EXT-X-PLAYLIST-TYPE:VOD")
 
         init_url = profile["initUrl"]
+        # For SegmentBase profiles, we may have byte range for initialization segment
+        init_range = profile.get("initRange")
 
         query_params = dict(request.query_params)
         query_params.pop("profile_id", None)
@@ -297,14 +299,22 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
             if program_date_time:
                 hls.append(f"#EXT-X-PROGRAM-DATE-TIME:{program_date_time}")
             hls.append(f'#EXTINF:{segment["extinf"]:.3f},')
-            query_params.update(
-                {
-                    "init_url": init_url,
-                    "segment_url": segment["media"],
-                    "mime_type": profile["mimeType"],
-                    "is_live": "true" if mpd_dict.get("isLive") else "false",
-                }
-            )
+            
+            segment_query_params = {
+                "init_url": init_url,
+                "segment_url": segment["media"],
+                "mime_type": profile["mimeType"],
+                "is_live": "true" if mpd_dict.get("isLive") else "false",
+            }
+            
+            # Add byte range parameters for SegmentBase
+            if init_range:
+                segment_query_params["init_range"] = init_range
+            # Segment may also have its own range (for SegmentBase)
+            if "initRange" in segment:
+                segment_query_params["init_range"] = segment["initRange"]
+            
+            query_params.update(segment_query_params)
             hls.append(
                 encode_mediaflow_proxy_url(
                     proxy_url,

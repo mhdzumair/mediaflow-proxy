@@ -66,7 +66,10 @@ def parse_mpd_dict(
 
     for period in periods:
         parsed_dict["PeriodStart"] = parse_duration(period.get("@start", "PT0S"))
-        for adaptation in period["AdaptationSet"]:
+        adaptation_sets = period["AdaptationSet"]
+        adaptation_sets = adaptation_sets if isinstance(adaptation_sets, list) else [adaptation_sets]
+        
+        for adaptation in adaptation_sets:
             representations = adaptation["Representation"]
             representations = representations if isinstance(representations, list) else [representations]
 
@@ -262,6 +265,22 @@ def parse_representation(
             profile["segment_template_start_number"] = 1
     else:
         profile["segment_template_start_number"] = 1
+
+    # For SegmentBase profiles, we need to set initUrl even when not parsing segments
+    # This is needed for the HLS playlist builder to reference the init URL
+    segment_base_data = representation.get("SegmentBase")
+    if segment_base_data and "initUrl" not in profile:
+        base_url = representation.get("BaseURL", "")
+        if base_url.startswith("http"):
+            profile["initUrl"] = base_url
+        else:
+            profile["initUrl"] = f"{source}/{base_url}"
+        
+        # Store initialization range if available
+        if "Initialization" in segment_base_data:
+            init_range = segment_base_data["Initialization"].get("@range")
+            if init_range:
+                profile["initRange"] = init_range
 
     if parse_segment_profile_id is None or profile["id"] != parse_segment_profile_id:
         return profile
@@ -549,31 +568,62 @@ def create_segment_data(segment: Dict, item: dict, profile: dict, source: str, t
 
 def parse_segment_base(representation: dict, profile: dict, source: str) -> List[Dict]:
     """
-    Parses segment base information and extracts segment data. This is used for single-segment representations.
+    Parses segment base information and extracts segment data. This is used for single-segment representations
+    (SegmentBase MPDs, typically GPAC-generated on-demand profiles).
+
+    For SegmentBase, the entire media file is treated as a single segment. The initialization data
+    is specified by the Initialization element's range, and the segment index (SIDX) is at indexRange.
 
     Args:
         representation (dict): The representation data.
+        profile (dict): The profile information.
         source (str): The source URL.
 
     Returns:
         List[Dict]: The list of parsed segments.
     """
-    segment = representation["SegmentBase"]
-    start, end = map(int, segment["@indexRange"].split("-"))
-    if "Initialization" in segment:
-        start, _ = map(int, segment["Initialization"]["@range"].split("-"))
+    segment = representation.get("SegmentBase", {})
+    base_url = representation.get("BaseURL", "")
     
-    # Set initUrl for SegmentBase
-    if not representation['BaseURL'].startswith("http"):
-        profile["initUrl"] = f"{source}/{representation['BaseURL']}"
+    # Build the full media URL
+    if base_url.startswith("http"):
+        media_url = base_url
     else:
-        profile["initUrl"] = representation['BaseURL']
-
+        media_url = f"{source}/{base_url}"
+    
+    # Set initUrl for SegmentBase - this is the URL with the initialization range
+    # The initialization segment contains codec/track info needed before playing media
+    profile["initUrl"] = media_url
+    
+    # For SegmentBase, we need to specify byte ranges for init and media segments
+    init_range = None
+    if "Initialization" in segment:
+        init_range = segment["Initialization"].get("@range")
+    
+    # Store initialization range in profile for segment endpoint to use
+    if init_range:
+        profile["initRange"] = init_range
+    
+    # Get the index range which points to SIDX box
+    index_range = segment.get("@indexRange", "")
+    
+    # Calculate total duration from profile's mediaPresentationDuration
+    total_duration = profile.get("mediaPresentationDuration")
+    if isinstance(total_duration, str):
+        total_duration = parse_duration(total_duration)
+    elif total_duration is None:
+        total_duration = 0
+    
+    # For SegmentBase, we return a single segment representing the entire media
+    # The media URL is the same as initUrl but will be accessed with different byte ranges
     return [
         {
             "type": "segment",
-            "range": f"{start}-{end}",
-            "media": f"{source}/{representation['BaseURL']}",
+            "media": media_url,
+            "number": 1,
+            "extinf": total_duration if total_duration > 0 else 1.0,
+            "indexRange": index_range,
+            "initRange": init_range,
         }
     ]
 
