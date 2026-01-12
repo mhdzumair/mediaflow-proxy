@@ -516,25 +516,6 @@ def encode_stremio_proxy_url(
 
     return f"{base_url}{url_path}"
 
-def apply_header_manipulation(base_headers: dict, proxy_headers: ProxyRequestHeaders) -> dict:
-    """
-    Apply response header additions and removals.
-    
-    This function filters out headers specified in proxy_headers.remove,
-    then merges in headers from proxy_headers.response.
-    
-    Args:
-        base_headers (dict): The base headers to start with.
-        proxy_headers (ProxyRequestHeaders): The proxy headers containing response additions and removals.
-    
-    Returns:
-        dict: The manipulated headers.
-    """
-    remove_set = set(h.lower() for h in proxy_headers.remove)
-    result = {k: v for k, v in base_headers.items() if k.lower() not in remove_set}
-    result.update(proxy_headers.response)
-    return result
-
 def get_original_scheme(request: Request) -> str:
     """
     Determines the original scheme (http or https) of the request.
@@ -571,6 +552,25 @@ class ProxyRequestHeaders:
     request: dict
     response: dict
     remove: list
+
+def apply_header_manipulation(base_headers: dict, proxy_headers: ProxyRequestHeaders) -> dict:
+    """
+    Apply response header additions and removals.
+    
+    This function filters out headers specified in proxy_headers.remove,
+    then merges in headers from proxy_headers.response.
+    
+    Args:
+        base_headers (dict): The base headers to start with.
+        proxy_headers (ProxyRequestHeaders): The proxy headers containing response additions and removals.
+    
+    Returns:
+        dict: The manipulated headers.
+    """
+    remove_set = set(h.lower() for h in proxy_headers.remove)
+    result = {k: v for k, v in base_headers.items() if k.lower() not in remove_set}
+    result.update(proxy_headers.response)
+    return result
 
 
 def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
