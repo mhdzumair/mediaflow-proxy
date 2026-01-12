@@ -122,7 +122,9 @@ async def handle_hls_stream_proxy(
 
         # Create initial streaming response to check content type
         await streamer.create_streaming_response(hls_params.destination, proxy_headers.request)
-        response_headers = prepare_response_headers(streamer.response.headers, proxy_headers.response, proxy_headers.remove)
+        response_headers = prepare_response_headers(
+            streamer.response.headers, proxy_headers.response, proxy_headers.remove, proxy_headers.propagate
+        )
 
         if "mpegurl" in response_headers.get("content-type", "").lower():
             return await fetch_and_process_m3u8(
@@ -130,9 +132,15 @@ async def handle_hls_stream_proxy(
                 hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy, hls_params.no_proxy
             )
 
+        # If we're removing content-range but upstream returned 206, change to 200
+        # (206 Partial Content requires Content-Range header per HTTP spec)
+        status_code = streamer.response.status_code
+        if status_code == 206 and "content-range" in [h.lower() for h in proxy_headers.remove]:
+            status_code = 200
+
         return EnhancedStreamingResponse(
             streamer.stream_content(),
-            status_code=streamer.response.status_code,
+            status_code=status_code,
             headers=response_headers,
             background=BackgroundTask(streamer.close),
         )
@@ -177,18 +185,26 @@ async def handle_stream_request(
                 # Continue with original URL if resolution fails
 
         await streamer.create_streaming_response(video_url, proxy_headers.request)
-        response_headers = prepare_response_headers(streamer.response.headers, proxy_headers.response, proxy_headers.remove)
+        response_headers = prepare_response_headers(
+            streamer.response.headers, proxy_headers.response, proxy_headers.remove, proxy_headers.propagate
+        )
+
+        # If we're removing content-range but upstream returned 206, change to 200
+        # (206 Partial Content requires Content-Range header per HTTP spec)
+        status_code = streamer.response.status_code
+        if status_code == 206 and "content-range" in [h.lower() for h in proxy_headers.remove]:
+            status_code = 200
 
         if method == "HEAD":
             # For HEAD requests, just return the headers without streaming content
             await streamer.close()
-            return Response(headers=response_headers, status_code=streamer.response.status_code)
+            return Response(headers=response_headers, status_code=status_code)
         else:
             # For GET requests, return the streaming response
             return EnhancedStreamingResponse(
                 streamer.stream_content(),
                 headers=response_headers,
-                status_code=streamer.response.status_code,
+                status_code=status_code,
                 background=BackgroundTask(streamer.close),
             )
     except Exception as e:
@@ -196,7 +212,7 @@ async def handle_stream_request(
         return handle_exceptions(e)
 
 
-def prepare_response_headers(original_headers, proxy_response_headers, remove_headers=None) -> dict:
+def prepare_response_headers(original_headers, proxy_response_headers, remove_headers=None, propagate_headers=None) -> dict:
     """
     Prepare response headers for the proxy response.
 
@@ -207,6 +223,7 @@ def prepare_response_headers(original_headers, proxy_response_headers, remove_he
         original_headers (httpx.Headers): The original headers from the upstream response.
         proxy_response_headers (dict): Additional headers to be included in the proxy response.
         remove_headers (list, optional): List of header names to remove from the response. Defaults to None.
+        propagate_headers (dict, optional): Headers that propagate to segments (rp_ prefix). Defaults to None.
 
     Returns:
         dict: The prepared headers for the proxy response.
@@ -217,6 +234,9 @@ def prepare_response_headers(original_headers, proxy_response_headers, remove_he
         k: v for k, v in original_headers.multi_items() 
         if k in SUPPORTED_RESPONSE_HEADERS and k not in remove_set
     }
+    # Apply propagate headers first (for segments), then response headers (response takes precedence)
+    if propagate_headers:
+        response_headers.update(propagate_headers)
     response_headers.update(proxy_response_headers)
     return response_headers
 
@@ -274,7 +294,8 @@ async def fetch_and_process_m3u8(
             "accept-ranges": "none",
             "content-type": "application/vnd.apple.mpegurl",
         }
-        response_headers = apply_header_manipulation(base_headers, proxy_headers)
+        # Don't include propagate headers for manifests - they should only apply to segments
+        response_headers = apply_header_manipulation(base_headers, proxy_headers, include_propagate=False)
 
         # Create streaming response with on-the-fly processing
         return EnhancedStreamingResponse(

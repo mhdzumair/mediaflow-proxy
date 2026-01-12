@@ -23,7 +23,10 @@ class GenerateUrlRequest(BaseModel):
     )
     request_headers: Optional[dict] = Field(default_factory=dict, description="Headers to be included in the request.")
     response_headers: Optional[dict] = Field(
-        default_factory=dict, description="Headers to be included in the response."
+        default_factory=dict, description="Headers to be included in the response (r_ prefix, manifest only)."
+    )
+    propagate_response_headers: Optional[dict] = Field(
+        default_factory=dict, description="Response headers that propagate to segments (rp_ prefix). Useful for overriding content-type on segment requests."
     )
     remove_response_headers: Optional[list[str]] = Field(
         default_factory=list, description="List of response header names to remove from the proxied response."
@@ -51,7 +54,10 @@ class MultiUrlRequestItem(BaseModel):
     )
     request_headers: Optional[dict] = Field(default_factory=dict, description="Headers to be included in the request.")
     response_headers: Optional[dict] = Field(
-        default_factory=dict, description="Headers to be included in the response."
+        default_factory=dict, description="Headers to be included in the response (r_ prefix, manifest only)."
+    )
+    propagate_response_headers: Optional[dict] = Field(
+        default_factory=dict, description="Response headers that propagate to segments (rp_ prefix). Useful for overriding content-type on segment requests."
     )
     remove_response_headers: Optional[list[str]] = Field(
         default_factory=list, description="List of response header names to remove from the proxied response."

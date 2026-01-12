@@ -137,6 +137,21 @@ class Streamer:
             raise RuntimeError(f"Error creating streaming response: {e}")
 
     @staticmethod
+    def _find_ts_start(buffer: bytes) -> typing.Optional[int]:
+        """
+        Find MPEG-TS sync byte (0x47) aligned on 188 bytes.
+        Returns offset where TS starts or None.
+        """
+        TS_SYNC = 0x47
+        TS_PACKET = 188
+
+        max_i = len(buffer) - TS_PACKET
+        for i in range(max(0, max_i)):
+            if buffer[i] == TS_SYNC and buffer[i + TS_PACKET] == TS_SYNC:
+                return i
+        return None
+
+    @staticmethod
     def _strip_fake_png_wrapper(chunk: bytes) -> bytes:
         """
         Strip fake PNG wrapper from chunk data.
@@ -176,7 +191,9 @@ class Streamer:
         if not self.response:
             raise RuntimeError("No response available for streaming")
 
-        is_first_chunk = True
+        buffer = bytearray()
+        ts_started = False
+        MAX_PREFETCH = 512 * 1024  # 512 KB safety limit
 
         try:
             self.parse_content_range()
@@ -193,20 +210,102 @@ class Streamer:
                     mininterval=1,
                 ) as self.progress_bar:
                     async for chunk in self.response.aiter_bytes():
-                        if is_first_chunk:
-                            is_first_chunk = False
-                            chunk = self._strip_fake_png_wrapper(chunk)
+                        if ts_started:
+                            # Normal streaming once TS has started
+                            yield chunk
+                            self.bytes_transferred += len(chunk)
+                            self.progress_bar.update(len(chunk))
+                            continue
 
-                        yield chunk
-                        self.bytes_transferred += len(chunk)
-                        self.progress_bar.update(len(chunk))
+                        # Prebuffer phase (until we find TS or pass through)
+                        buffer += chunk
+
+                        # Fast-path: if it's an m3u8 playlist, don't do TS detection
+                        if len(buffer) >= 7 and buffer[:7] in (b"#EXTM3U", b"#EXT-X-"):
+                            yield bytes(buffer)
+                            self.bytes_transferred += len(buffer)
+                            self.progress_bar.update(len(buffer))
+                            buffer.clear()
+                            ts_started = True
+                            continue
+
+                        # Strip fake PNG wrapper if present
+                        if buffer.startswith(self._PNG_SIGNATURE):
+                            if self._PNG_IEND_MARKER in buffer:
+                                buffer = bytearray(self._strip_fake_png_wrapper(bytes(buffer)))
+
+                        # Skip pure 0xFF padding bytes (TurboVid style)
+                        while buffer and buffer[0] == 0xFF:
+                            buffer.pop(0)
+
+                        ts_offset = self._find_ts_start(bytes(buffer))
+                        if ts_offset is None:
+                            # Keep buffering until we find TS or hit limit
+                            if len(buffer) > MAX_PREFETCH:
+                                logger.warning("TS sync not found after large prebuffer, forcing passthrough")
+                                yield bytes(buffer)
+                                self.bytes_transferred += len(buffer)
+                                self.progress_bar.update(len(buffer))
+                                buffer.clear()
+                                ts_started = True
+                            continue
+
+                        # TS found: emit from ts_offset and switch to pass-through
+                        ts_started = True
+                        out = bytes(buffer[ts_offset:])
+                        buffer.clear()
+
+                        if out:
+                            yield out
+                            self.bytes_transferred += len(out)
+                            self.progress_bar.update(len(out))
             else:
                 async for chunk in self.response.aiter_bytes():
-                    if is_first_chunk:
-                        is_first_chunk = False
-                        chunk = self._strip_fake_png_wrapper(chunk)
+                    if ts_started:
+                        # Normal streaming once TS has started
+                        yield chunk
+                        self.bytes_transferred += len(chunk)
+                        continue
 
-                    yield chunk
+                    # Prebuffer phase (until we find TS or pass through)
+                    buffer += chunk
+
+                    # Fast-path: if it's an m3u8 playlist, don't do TS detection
+                    if len(buffer) >= 7 and buffer[:7] in (b"#EXTM3U", b"#EXT-X-"):
+                        yield bytes(buffer)
+                        self.bytes_transferred += len(buffer)
+                        buffer.clear()
+                        ts_started = True
+                        continue
+
+                    # Strip fake PNG wrapper if present
+                    if buffer.startswith(self._PNG_SIGNATURE):
+                        if self._PNG_IEND_MARKER in buffer:
+                            buffer = bytearray(self._strip_fake_png_wrapper(bytes(buffer)))
+
+                    # Skip pure 0xFF padding bytes (TurboVid style)
+                    while buffer and buffer[0] == 0xFF:
+                        buffer.pop(0)
+
+                    ts_offset = self._find_ts_start(bytes(buffer))
+                    if ts_offset is None:
+                        # Keep buffering until we find TS or hit limit
+                        if len(buffer) > MAX_PREFETCH:
+                            logger.warning("TS sync not found after large prebuffer, forcing passthrough")
+                            yield bytes(buffer)
+                            self.bytes_transferred += len(buffer)
+                            buffer.clear()
+                            ts_started = True
+                        continue
+
+                    # TS found: emit from ts_offset and switch to pass-through
+                    ts_started = True
+                    out = bytes(buffer[ts_offset:])
+                    buffer.clear()
+
+                    if out:
+                        yield out
+                        self.bytes_transferred += len(out)
                     self.bytes_transferred += len(chunk)
 
         except httpx.TimeoutException:
@@ -348,6 +447,7 @@ def encode_mediaflow_proxy_url(
     query_params: typing.Optional[dict] = None,
     request_headers: typing.Optional[dict] = None,
     response_headers: typing.Optional[dict] = None,
+    propagate_response_headers: typing.Optional[dict] = None,
     remove_response_headers: typing.Optional[list[str]] = None,
     encryption_handler: EncryptionHandler = None,
     expiration: int = None,
@@ -363,7 +463,8 @@ def encode_mediaflow_proxy_url(
         destination_url (str, optional): The destination URL to include in the query parameters. Defaults to None.
         query_params (dict, optional): Additional query parameters to include. Defaults to None.
         request_headers (dict, optional): Headers to include as query parameters. Defaults to None.
-        response_headers (dict, optional): Headers to include as query parameters. Defaults to None.
+        response_headers (dict, optional): Headers to include as query parameters (r_ prefix). Defaults to None.
+        propagate_response_headers (dict, optional): Response headers that propagate to segments (rp_ prefix). Defaults to None.
         remove_response_headers (list[str], optional): List of response header names to remove. Defaults to None.
         encryption_handler (EncryptionHandler, optional): The encryption handler to use. Defaults to None.
         expiration (int, optional): The expiration time for the encrypted token. Defaults to None.
@@ -386,6 +487,11 @@ def encode_mediaflow_proxy_url(
     if response_headers:
         query_params.update(
             {key if key.lower().startswith("r_") else f"r_{key}": value for key, value in response_headers.items()}
+        )
+    # Add propagate response headers (rp_ prefix - these propagate to segments)
+    if propagate_response_headers:
+        query_params.update(
+            {key if key.lower().startswith("rp_") else f"rp_{key}": value for key, value in propagate_response_headers.items()}
         )
     
     # Add remove headers if provided (x_ prefix for "exclude")
@@ -535,24 +641,30 @@ class ProxyRequestHeaders:
     request: dict
     response: dict
     remove: list  # headers to remove from response
+    propagate: dict  # response headers to propagate to segments (rp_ prefix)
 
 
-def apply_header_manipulation(base_headers: dict, proxy_headers: ProxyRequestHeaders) -> dict:
+def apply_header_manipulation(base_headers: dict, proxy_headers: ProxyRequestHeaders, include_propagate: bool = True) -> dict:
     """
     Apply response header additions and removals.
     
     This function filters out headers specified in proxy_headers.remove,
-    then merges in headers from proxy_headers.response.
+    then merges in headers from proxy_headers.response and optionally proxy_headers.propagate.
     
     Args:
         base_headers (dict): The base headers to start with.
         proxy_headers (ProxyRequestHeaders): The proxy headers containing response additions and removals.
+        include_propagate (bool): Whether to include propagate headers (rp_). 
+                                  Set to False for manifests, True for segments. Defaults to True.
     
     Returns:
         dict: The manipulated headers.
     """
     remove_set = set(h.lower() for h in proxy_headers.remove)
     result = {k: v for k, v in base_headers.items() if k.lower() not in remove_set}
+    # Apply propagate headers first (for segments), then response headers (response takes precedence)
+    if include_propagate:
+        result.update(proxy_headers.propagate)
     result.update(proxy_headers.response)
     return result
 
@@ -586,13 +698,19 @@ def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
             if v is None or v.strip() == "":
                 request_headers.pop(h, None)
 
-    response_headers = {k[2:].lower(): v for k, v in request.query_params.items() if k.lower().startswith("r_")}
+    # r_ prefix: response headers (manifest only, not propagated to segments)
+    response_headers = {k[2:].lower(): v for k, v in request.query_params.items() 
+                        if k.lower().startswith("r_") and not k.lower().startswith("rp_")}
+    
+    # rp_ prefix: response headers that propagate to segments
+    propagate_headers = {k[3:].lower(): v for k, v in request.query_params.items() 
+                         if k.lower().startswith("rp_")}
     
     # Parse headers to remove from response (x_headers parameter)
     x_headers_param = request.query_params.get("x_headers", "")
     remove_headers = [h.strip().lower() for h in x_headers_param.split(",") if h.strip()] if x_headers_param else []
     
-    return ProxyRequestHeaders(request_headers, response_headers, remove_headers)
+    return ProxyRequestHeaders(request_headers, response_headers, remove_headers, propagate_headers)
 
 
 class EnhancedStreamingResponse(Response):

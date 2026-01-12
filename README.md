@@ -134,6 +134,7 @@ Set the following environment variables:
 - `DISABLE_HOME_PAGE`: Optional. Disables the home page UI. Returns 403 for the root path and direct access to index.html. Default is `false`.
 - `DISABLE_DOCS`: Optional. Disables the API documentation (Swagger UI). Returns 403 for the /docs path. Default is `false`.
 - `DISABLE_SPEEDTEST`: Optional. Disables the speedtest UI. Returns 403 for the /speedtest path and direct access to speedtest.html. Default is `false`.
+- `CLEAR_CACHE_ON_STARTUP`: Optional. Clears all caches (extractor cache, etc.) when the server starts. Useful for development and testing. Default is `false`.
 - `STREMIO_PROXY_URL`: Optional. Stremio server URL for alternative content proxying. Example: `http://127.0.0.1:11470`.
 - `M3U8_CONTENT_ROUTING`: Optional. Routing strategy for M3U8 content URLs: `mediaflow` (default), `stremio`, or `direct`.
 - `ENABLE_HLS_PREBUFFER`: Optional. Enables HLS pre-buffering for improved streaming performance. Default: `true`. Pre-buffering downloads upcoming segments ahead of playback to reduce buffering. Set to `false` to disable for low-memory environments.
@@ -867,6 +868,14 @@ Remove specific headers from the proxied response.
 - **Use Case:** Useful when upstream servers send incorrect headers (e.g., wrong `Content-Length`) that cause playback issues.  
 - **Example:** `&x_headers=content-length` removes the Content-Length header, allowing chunked transfer encoding.
 
+**`&rp_content-type=video/mp2t`**  
+Set response headers that propagate to HLS/DASH segments.  
+- **Usage:** Add `&rp_header-name=value` to the proxy URL (rp_ prefix)  
+- **Effect:** These headers are applied to segment responses AND propagated to segment URLs in the manifest.  
+- **Use Case:** Override content-type for segments disguised as other file types (e.g., PNG files containing video data).  
+- **Difference from `r_` prefix:** `r_` headers only apply to the manifest response, while `rp_` headers propagate to all segment requests.  
+- **Example:** `&rp_content-type=video/mp2t` sets the content-type to video/mp2t for all segments.
+
 ### Examples
 
 #### Proxy HTTPS Stream
@@ -1012,9 +1021,12 @@ data = {
         "origin": "https://example.com",
     },
     "response_headers": {
-        "cache-control": "no-cache",  # Optional: Add custom response headers
+        "cache-control": "no-cache",  # Optional: Add custom response headers (r_ prefix, manifest only)
     },
-    "remove_response_headers": ["content-length"],  # Optional: Remove specific response headers
+    "propagate_response_headers": {
+        "content-type": "video/mp2t",  # Optional: Headers that propagate to segments (rp_ prefix)
+    },
+    "remove_response_headers": ["content-length", "content-range"],  # Optional: Remove specific response headers
     "expiration": 3600,  # URL will expire in 1 hour (only for encrypted URLs)
     "ip": "123.123.123.123",  # Optional: Restrict access to this IP (only for encrypted URLs)
     "api_password": "your_password",  # Add here for encrypted URLs
@@ -1031,6 +1043,8 @@ print(encoded_url)
 > - If you add `api_password` inside the `query_params` object, the URL will only be **encoded** (not encrypted).
 > - The `filename` parameter is optional and should only be used with the `/proxy/stream` endpoint, not with MPD or HLS proxy endpoints.
 > - The `remove_response_headers` parameter is useful when upstream servers send incorrect headers (e.g., wrong `Content-Length`) that cause playback issues.
+> - The `response_headers` parameter adds headers to the manifest response only (`r_` prefix in URL).
+> - The `propagate_response_headers` parameter adds headers that propagate to segment URLs (`rp_` prefix in URL). Useful for overriding content-type on segments disguised as other file types.
 > - The legacy endpoint `/generate_encrypted_or_encoded_url` is still available but deprecated. It's recommended to use `/generate_url` instead.
 
 #### Multiple URLs Generation
