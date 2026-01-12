@@ -137,6 +137,21 @@ class Streamer:
             raise RuntimeError(f"Error creating streaming response: {e}")
 
     @staticmethod
+    def _find_ts_start(buffer: bytes) -> typing.Optional[int]:
+        """
+        Find MPEG-TS sync byte (0x47) aligned on 188 bytes.
+        Returns offset where TS starts or None.
+        """
+        TS_SYNC = 0x47
+        TS_PACKET = 188
+
+        max_i = len(buffer) - TS_PACKET
+        for i in range(max_i):
+            if buffer[i] == TS_SYNC and buffer[i + TS_PACKET] == TS_SYNC:
+                return i
+        return None
+
+    @staticmethod
     def _strip_fake_png_wrapper(chunk: bytes) -> bytes:
         """
         Strip fake PNG wrapper from chunk data.
@@ -176,38 +191,63 @@ class Streamer:
         if not self.response:
             raise RuntimeError("No response available for streaming")
 
-        is_first_chunk = True
+        buffer = bytearray()
+        ts_started = False
+
+        MAX_PREFETCH = 512 * 1024  # 512 KB safety limit
 
         try:
             self.parse_content_range()
 
-            if settings.enable_streaming_progress:
-                with tqdm_asyncio(
-                    total=self.total_size,
-                    initial=self.start_byte,
-                    unit="B",
-                    unit_scale=True,
-                    unit_divisor=1024,
-                    desc="Streaming",
-                    ncols=100,
-                    mininterval=1,
-                ) as self.progress_bar:
-                    async for chunk in self.response.aiter_bytes():
-                        if is_first_chunk:
-                            is_first_chunk = False
-                            chunk = self._strip_fake_png_wrapper(chunk)
-
-                        yield chunk
-                        self.bytes_transferred += len(chunk)
-                        self.progress_bar.update(len(chunk))
-            else:
-                async for chunk in self.response.aiter_bytes():
-                    if is_first_chunk:
-                        is_first_chunk = False
-                        chunk = self._strip_fake_png_wrapper(chunk)
-
+            async for chunk in self.response.aiter_bytes():
+                # Once TS is confirmed, passthrough
+                if ts_started:
                     yield chunk
                     self.bytes_transferred += len(chunk)
+                    continue
+
+                buffer += chunk
+
+                # Fast-path: M3U8 detection
+                if len(buffer) >= 6 and buffer[:6] == b"#EXTM3":
+                    yield bytes(buffer)
+                    self.bytes_transferred += len(buffer)
+                    buffer.clear()
+                    ts_started = True
+                    continue
+
+                # Strip fake PNG wrapper when fully available
+                if buffer.startswith(self._PNG_SIGNATURE):
+                    if self._PNG_IEND_MARKER in buffer:
+                        buffer = bytearray(self._strip_fake_png_wrapper(bytes(buffer)))
+
+                # Drop leading FF padding (TurboVid-style)
+                while buffer and buffer[0] == 0xFF:
+                    buffer.pop(0)
+
+                ts_offset = self._find_ts_start(bytes(buffer))
+                if ts_offset is None:
+                    if len(buffer) > MAX_PREFETCH:
+                        logger.warning("TS sync not found after large prebuffer, forcing passthrough")
+                        yield bytes(buffer)
+                        self.bytes_transferred += len(buffer)
+                        buffer.clear()
+                        ts_started = True
+                    continue
+
+                # TS found
+                ts_started = True
+                out = bytes(buffer[ts_offset:])
+                buffer.clear()
+
+                if out:
+                    if out[0] != 0x47:
+                        idx = out.find(b"\x47")
+                        if idx != -1:
+                            out = out[idx:]
+
+                    yield out
+                    self.bytes_transferred += len(out)
 
         except httpx.TimeoutException:
             logger.warning("Timeout while streaming")
