@@ -404,6 +404,7 @@ async def get_segment(
             proxy_headers.request,
             cache_token=segment_params.key_id,
             ttl=live_cache_ttl,
+            byte_range=segment_params.init_range,
         )
         segment_content = await download_file_with_retry(segment_params.segment_url, proxy_headers.request)
     except Exception as e:

@@ -141,6 +141,7 @@ class MPDSegmentParams(GenericParams):
     key_id: Optional[str] = Field(None, description="The DRM key ID (optional).")
     key: Optional[str] = Field(None, description="The DRM key (optional).")
     is_live: Annotated[Optional[bool], Field(default=None, alias="is_live", description="Whether the parent MPD is live.")]
+    init_range: Optional[str] = Field(None, description="Byte range for the initialization segment (e.g., '0-11568'). Used for SegmentBase MPDs.")
 
 
 class ExtractorURLParams(GenericParams):

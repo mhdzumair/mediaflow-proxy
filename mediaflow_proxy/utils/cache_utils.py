@@ -303,6 +303,7 @@ async def get_cached_init_segment(
     headers: dict,
     cache_token: str | None = None,
     ttl: Optional[int] = None,
+    byte_range: str | None = None,
 ) -> Optional[bytes]:
     """Get initialization segment from cache or download it.
 
@@ -310,10 +311,13 @@ async def get_cached_init_segment(
     rely on different DRM keys or initialization payloads (e.g. key rotation).
 
     ttl overrides the default cache TTL; pass a value <= 0 to skip caching entirely.
+    
+    byte_range specifies a byte range for SegmentBase MPDs (e.g., '0-11568').
     """
 
     use_cache = ttl is None or ttl > 0
-    cache_key = f"{init_url}|{cache_token}" if cache_token else init_url
+    # Include byte_range in cache key for SegmentBase
+    cache_key = f"{init_url}|{cache_token}|{byte_range}" if cache_token or byte_range else init_url
 
     if use_cache:
         cached_data = await INIT_SEGMENT_CACHE.get(cache_key)
@@ -324,7 +328,12 @@ async def get_cached_init_segment(
         await INIT_SEGMENT_CACHE.delete(cache_key)
 
     try:
-        init_content = await download_file_with_retry(init_url, headers)
+        # Add Range header if byte_range is specified (for SegmentBase MPDs)
+        request_headers = dict(headers)
+        if byte_range:
+            request_headers["Range"] = f"bytes={byte_range}"
+        
+        init_content = await download_file_with_retry(init_url, request_headers)
         if init_content and use_cache:
             await INIT_SEGMENT_CACHE.set(cache_key, init_content, ttl=ttl)
         return init_content
