@@ -23,6 +23,7 @@ from mediaflow_proxy.schemas import (
     MPDPlaylistParams,
     HLSManifestParams,
     MPDManifestParams,
+    MPDInitParams,
 )
 from mediaflow_proxy.utils.base64_utils import process_potential_base64_url
 from mediaflow_proxy.utils.dash_prebuffer import dash_prebuffer
@@ -594,6 +595,25 @@ async def segment_endpoint(
         Response: The HTTP response with the processed segment.
     """
     return await get_segment(segment_params, proxy_headers)
+
+
+@proxy_router.get("/mpd/init.mp4")
+async def init_endpoint(
+    init_params: Annotated[MPDInitParams, Query()],
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+):
+    """
+    Retrieves and processes an initialization segment for use with EXT-X-MAP.
+
+    Args:
+        init_params (MPDInitParams): The parameters for the init segment request.
+        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
+
+    Returns:
+        Response: The HTTP response with the processed init segment.
+    """
+    from mediaflow_proxy.handlers import get_init_segment
+    return await get_init_segment(init_params, proxy_headers)
 
 
 @proxy_router.get("/ip")

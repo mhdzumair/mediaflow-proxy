@@ -213,12 +213,14 @@ class MP4Decrypter:
         # Current track ID being processed
         self.current_track_id: int = 0
 
-    def decrypt_segment(self, combined_segment: bytes) -> bytes:
+    def decrypt_segment(self, combined_segment: bytes, include_init: bool = True) -> bytes:
         """
         Decrypts a combined MP4 segment.
 
         Args:
             combined_segment (bytes): Combined initialization and media segment.
+            include_init (bool): If True, include processed init atoms (ftyp, moov) in output.
+                If False, only return media atoms (moof, sidx, mdat) for use with EXT-X-MAP.
 
         Returns:
             bytes: Decrypted segment content.
@@ -233,6 +235,44 @@ class MP4Decrypter:
         for atom_type in atom_process_order:
             if atom := next((a for a in atoms if a.atom_type == atom_type), None):
                 processed_atoms[atom_type] = self._process_atom(atom_type, atom)
+
+        result = bytearray()
+        # Init atoms to skip when include_init is False
+        # Note: styp is a segment type atom that should be kept in segments
+        init_atoms = {b"ftyp", b"moov"}
+        
+        for atom in atoms:
+            # Skip init atoms if not including init
+            if not include_init and atom.atom_type in init_atoms:
+                continue
+                
+            if atom.atom_type in processed_atoms:
+                processed_atom = processed_atoms[atom.atom_type]
+                result.extend(processed_atom.pack())
+            else:
+                result.extend(atom.pack())
+
+        return bytes(result)
+
+    def process_init_only(self, init_segment: bytes) -> bytes:
+        """
+        Processes only the initialization segment, removing encryption-related boxes.
+        Used for EXT-X-MAP where init is served separately.
+
+        Args:
+            init_segment (bytes): Initialization segment data.
+
+        Returns:
+            bytes: Processed init segment with encryption boxes removed.
+        """
+        data = memoryview(init_segment)
+        parser = MP4Parser(data)
+        atoms = parser.list_atoms()
+
+        processed_atoms = {}
+        # Only process moov for init segments
+        if moov_atom := next((a for a in atoms if a.atom_type == b"moov"), None):
+            processed_atoms[b"moov"] = self._process_moov(moov_atom)
 
         result = bytearray()
         for atom in atoms:
@@ -1415,7 +1455,7 @@ class MP4Decrypter:
                 self.track_encryption_settings[self.current_track_id] = track_settings
 
 
-def decrypt_segment(init_segment: bytes, segment_content: bytes, key_id: str, key: str) -> bytes:
+def decrypt_segment(init_segment: bytes, segment_content: bytes, key_id: str, key: str, include_init: bool = True) -> bytes:
     """
     Decrypts a CENC encrypted MP4 segment.
 
@@ -1424,14 +1464,36 @@ def decrypt_segment(init_segment: bytes, segment_content: bytes, key_id: str, ke
         segment_content (bytes): Encrypted segment content.
         key_id (str): Key ID in hexadecimal format.
         key (str): Key in hexadecimal format.
+        include_init (bool): If True, include processed init segment in output.
+            If False, only return decrypted media segment (for use with EXT-X-MAP).
     
     Returns:
-        bytes: Decrypted segment with processed init (moov/ftyp) + decrypted media (moof/mdat).
+        bytes: Decrypted segment with processed init (moov/ftyp) + decrypted media (moof/mdat),
+            or just decrypted media if include_init is False.
     """
     key_map = {bytes.fromhex(key_id): bytes.fromhex(key)}
     decrypter = MP4Decrypter(key_map)
-    decrypted_content = decrypter.decrypt_segment(init_segment + segment_content)
+    decrypted_content = decrypter.decrypt_segment(init_segment + segment_content, include_init=include_init)
     return decrypted_content
+
+
+def process_drm_init_segment(init_segment: bytes, key_id: str, key: str) -> bytes:
+    """
+    Processes a DRM-protected init segment for use with EXT-X-MAP.
+    Removes encryption-related boxes but keeps the moov structure.
+
+    Args:
+        init_segment (bytes): Initialization segment data.
+        key_id (str): Key ID in hexadecimal format.
+        key (str): Key in hexadecimal format.
+    
+    Returns:
+        bytes: Processed init segment with encryption boxes removed.
+    """
+    key_map = {bytes.fromhex(key_id): bytes.fromhex(key)}
+    decrypter = MP4Decrypter(key_map)
+    processed_init = decrypter.process_init_only(init_segment)
+    return processed_init
 
 
 def cli():

@@ -286,6 +286,11 @@ INIT_SEGMENT_CACHE = HybridCache(
     max_memory_size=500 * 1024 * 1024,  # 500MB for init segments
 )
 
+# Cache for processed (DRM-stripped) init segments - memory only for speed
+PROCESSED_INIT_CACHE = AsyncMemoryCache(
+    max_memory_size=100 * 1024 * 1024,  # 100MB for processed init segments
+)
+
 MPD_CACHE = AsyncMemoryCache(
     max_memory_size=100 * 1024 * 1024,  # 100MB for MPD files
 )
@@ -294,6 +299,11 @@ EXTRACTOR_CACHE = HybridCache(
     cache_dir_name="extractor_cache",
     ttl=5 * 60,  # 5 minutes
     max_memory_size=50 * 1024 * 1024,
+)
+
+# Cache for media segments (prebuffer) - memory only with short TTL for live streams
+SEGMENT_CACHE = AsyncMemoryCache(
+    max_memory_size=200 * 1024 * 1024,  # 200MB for media segments
 )
 
 
@@ -392,4 +402,76 @@ async def set_cache_extractor_result(key: str, result: dict) -> bool:
         return await EXTRACTOR_CACHE.set(key, json.dumps(result).encode())
     except Exception as e:
         logger.error(f"Error caching extractor result: {e}")
+        return False
+
+
+async def get_cached_processed_init(
+    init_url: str,
+    key_id: str,
+) -> Optional[bytes]:
+    """Get processed (DRM-stripped) init segment from cache.
+    
+    Args:
+        init_url: URL of the init segment
+        key_id: DRM key ID used for processing
+        
+    Returns:
+        Processed init segment bytes if cached, None otherwise
+    """
+    cache_key = f"processed|{init_url}|{key_id}"
+    return await PROCESSED_INIT_CACHE.get(cache_key)
+
+
+async def set_cached_processed_init(
+    init_url: str,
+    key_id: str,
+    processed_content: bytes,
+    ttl: Optional[int] = None,
+) -> bool:
+    """Cache processed (DRM-stripped) init segment.
+    
+    Args:
+        init_url: URL of the init segment
+        key_id: DRM key ID used for processing
+        processed_content: The processed init segment bytes
+        ttl: Optional TTL override
+        
+    Returns:
+        True if cached successfully
+    """
+    cache_key = f"processed|{init_url}|{key_id}"
+    try:
+        return await PROCESSED_INIT_CACHE.set(cache_key, processed_content, ttl=ttl)
+    except Exception as e:
+        logger.error(f"Error caching processed init segment: {e}")
+        return False
+
+
+async def get_cached_segment(segment_url: str) -> Optional[bytes]:
+    """Get media segment from prebuffer cache.
+    
+    Args:
+        segment_url: URL of the segment
+        
+    Returns:
+        Segment bytes if cached, None otherwise
+    """
+    return await SEGMENT_CACHE.get(segment_url)
+
+
+async def set_cached_segment(segment_url: str, content: bytes, ttl: int = 60) -> bool:
+    """Cache media segment with configurable TTL.
+    
+    Args:
+        segment_url: URL of the segment
+        content: Segment bytes
+        ttl: Time to live in seconds (default 60s, configurable via dash_segment_cache_ttl)
+        
+    Returns:
+        True if cached successfully
+    """
+    try:
+        return await SEGMENT_CACHE.set(segment_url, content, ttl=ttl)
+    except Exception as e:
+        logger.error(f"Error caching segment: {e}")
         return False

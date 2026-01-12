@@ -5,10 +5,11 @@ import time
 
 from fastapi import Request, Response, HTTPException
 
-from mediaflow_proxy.drm.decrypter import decrypt_segment
+from mediaflow_proxy.drm.decrypter import decrypt_segment, process_drm_init_segment
 from mediaflow_proxy.utils.crypto_utils import encryption_handler
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url, get_original_scheme, ProxyRequestHeaders, apply_header_manipulation
 from mediaflow_proxy.utils.dash_prebuffer import dash_prebuffer
+from mediaflow_proxy.utils.cache_utils import get_cached_processed_init, set_cached_processed_init
 from mediaflow_proxy.configs import settings
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,20 @@ async def process_playlist(
         raise HTTPException(status_code=404, detail="Profile not found")
 
     hls_content = build_hls_playlist(mpd_dict, matching_profiles, request)
+    
+    # Trigger prebuffering of upcoming segments for live streams
+    if settings.enable_dash_prebuffer and mpd_dict.get("isLive", False):
+        # Extract headers for pre-buffering
+        headers = {}
+        for key, value in request.query_params.items():
+            if key.startswith("h_"):
+                headers[key[2:]] = value
+        
+        # Use the new prefetch method for live playlists
+        asyncio.create_task(
+            dash_prebuffer.prefetch_for_live_playlist(matching_profiles, headers)
+        )
+    
     response_headers = apply_header_manipulation({}, proxy_headers)
     return Response(content=hls_content, media_type="application/vnd.apple.mpegurl", headers=response_headers)
 
@@ -86,6 +101,7 @@ async def process_segment(
     proxy_headers: ProxyRequestHeaders,
     key_id: str = None,
     key: str = None,
+    use_map: bool = False,
 ) -> Response:
     """
     Processes and decrypts a media segment.
@@ -97,6 +113,8 @@ async def process_segment(
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
         key_id (str, optional): The DRM key ID. Defaults to None.
         key (str, optional): The DRM key. Defaults to None.
+        use_map (bool, optional): If True, init segment is served separately via EXT-X-MAP,
+            so don't concatenate init with segment. Defaults to False.
 
     Returns:
         Response: The decrypted segment as an HTTP response.
@@ -104,14 +122,67 @@ async def process_segment(
     if key_id and key:
         # For DRM protected content
         now = time.time()
-        decrypted_content = decrypt_segment(init_content, segment_content, key_id, key)
+        decrypted_content = decrypt_segment(init_content, segment_content, key_id, key, include_init=not use_map)
         logger.info(f"Decryption of {mimetype} segment took {time.time() - now:.4f} seconds")
     else:
-        # For non-DRM protected content, we just concatenate init and segment content
-        decrypted_content = init_content + segment_content
+        # For non-DRM protected content
+        if use_map:
+            # Init is served separately via EXT-X-MAP
+            decrypted_content = segment_content
+        else:
+            # Concatenate init and segment content
+            decrypted_content = init_content + segment_content
 
     response_headers = apply_header_manipulation({}, proxy_headers)
     return Response(content=decrypted_content, media_type=mimetype, headers=response_headers)
+
+
+async def process_init_segment(
+    init_content: bytes,
+    mimetype: str,
+    proxy_headers: ProxyRequestHeaders,
+    key_id: str = None,
+    key: str = None,
+    init_url: str = None,
+) -> Response:
+    """
+    Processes an initialization segment for EXT-X-MAP.
+
+    Args:
+        init_content (bytes): The initialization segment content.
+        mimetype (str): The MIME type of the segment.
+        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
+        key_id (str, optional): The DRM key ID. Defaults to None.
+        key (str, optional): The DRM key. Defaults to None.
+        init_url (str, optional): The init URL for caching. Defaults to None.
+
+    Returns:
+        Response: The processed init segment as an HTTP response.
+    """
+    if key_id and key:
+        # Check if we have a cached processed version
+        if init_url:
+            cached_processed = await get_cached_processed_init(init_url, key_id)
+            if cached_processed:
+                logger.debug(f"Using cached processed init segment for {init_url}")
+                response_headers = apply_header_manipulation({}, proxy_headers)
+                return Response(content=cached_processed, media_type=mimetype, headers=response_headers)
+        
+        # For DRM protected content, we need to process the init segment
+        # to remove encryption-related boxes but keep the moov structure
+        now = time.time()
+        processed_content = process_drm_init_segment(init_content, key_id, key)
+        logger.info(f"Processing of {mimetype} init segment took {time.time() - now:.4f} seconds")
+        
+        # Cache the processed init segment
+        if init_url:
+            await set_cached_processed_init(init_url, key_id, processed_content, ttl=3600)
+    else:
+        # For non-DRM protected content, just return the init segment as-is
+        processed_content = init_content
+
+    response_headers = apply_header_manipulation({}, proxy_headers)
+    return Response(content=processed_content, media_type=mimetype, headers=response_headers)
 
 
 def build_hls(mpd_dict: dict, request: Request, key_id: str = None, key: str = None, resolution: str = None) -> str:
@@ -235,9 +306,17 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
     hls = ["#EXTM3U", "#EXT-X-VERSION:6"]
 
     added_segments = 0
+    is_live = mpd_dict.get("isLive", False)
+    
+    # Use EXT-X-MAP for live streams to avoid duplicate moov atoms
+    use_map = is_live
 
     proxy_url = request.url_for("segment_endpoint")
     proxy_url = str(proxy_url.replace(scheme=get_original_scheme(request)))
+    
+    # Get init endpoint URL for EXT-X-MAP
+    init_proxy_url = request.url_for("init_endpoint")
+    init_proxy_url = str(init_proxy_url.replace(scheme=get_original_scheme(request)))
 
     for index, profile in enumerate(profiles):
         segments = profile["segments"]
@@ -245,7 +324,7 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
             logger.warning(f"No segments found for profile {profile['id']}")
             continue
 
-        if mpd_dict["isLive"]:
+        if is_live:
             depth = max(settings.mpd_live_playlist_depth, 1)
             trimmed_segments = segments[-depth:]
         else:
@@ -280,9 +359,8 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
                     f"#EXT-X-MEDIA-SEQUENCE:{sequence}",
                 ]
             )
-            if mpd_dict["isLive"]:
-                hls.append("#EXT-X-PLAYLIST-TYPE:EVENT")
-            else:
+            # For live streams, don't set PLAYLIST-TYPE to allow sliding window
+            if not is_live:
                 hls.append("#EXT-X-PLAYLIST-TYPE:VOD")
 
         init_url = profile["initUrl"]
@@ -294,6 +372,31 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
         query_params.pop("d", None)
         has_encrypted = query_params.pop("has_encrypted", False)
 
+        # Add EXT-X-MAP for init segment (for live streams or when beneficial)
+        if use_map:
+            init_query_params = {
+                "init_url": init_url,
+                "mime_type": profile["mimeType"],
+                "is_live": "true" if is_live else "false",
+            }
+            if init_range:
+                init_query_params["init_range"] = init_range
+            # Add key parameters
+            if query_params.get("key_id"):
+                init_query_params["key_id"] = query_params["key_id"]
+            if query_params.get("key"):
+                init_query_params["key"] = query_params["key"]
+            # Add api_password for authentication
+            if query_params.get("api_password"):
+                init_query_params["api_password"] = query_params["api_password"]
+            
+            init_map_url = encode_mediaflow_proxy_url(
+                init_proxy_url,
+                query_params=init_query_params,
+                encryption_handler=encryption_handler if has_encrypted else None,
+            )
+            hls.append(f'#EXT-X-MAP:URI="{init_map_url}"')
+
         for segment in trimmed_segments:
             program_date_time = segment.get("program_date_time")
             if program_date_time:
@@ -304,8 +407,12 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
                 "init_url": init_url,
                 "segment_url": segment["media"],
                 "mime_type": profile["mimeType"],
-                "is_live": "true" if mpd_dict.get("isLive") else "false",
+                "is_live": "true" if is_live else "false",
             }
+            
+            # Add use_map flag so segment endpoint knows not to include init
+            if use_map:
+                segment_query_params["use_map"] = "true"
             
             # Add byte range parameters for SegmentBase
             if init_range:
