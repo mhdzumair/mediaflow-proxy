@@ -238,6 +238,42 @@ class HybridCache:
             logger.error(f"Error deleting from cache: {e}")
             return False
 
+    def clear(self) -> bool:
+        """Clear all items from both memory and file caches (synchronous).
+        
+        This method is safe to call from multiple processes - if the directory
+        was already deleted by another process, it will simply recreate it.
+        """
+        import shutil
+        
+        # Clear memory cache
+        with self.memory_cache._lock:
+            self.memory_cache._cache.clear()
+            self.memory_cache._current_size = 0
+        
+        # Clear file cache directory
+        try:
+            if self.cache_dir.exists():
+                shutil.rmtree(self.cache_dir)
+                logger.info(f"Cleared cache directory: {self.cache_dir}")
+            else:
+                logger.debug(f"Cache directory already cleared: {self.cache_dir}")
+        except FileNotFoundError:
+            # Directory was already deleted by another process (race condition with multiple workers)
+            logger.debug(f"Cache directory already cleared by another process: {self.cache_dir}")
+        except Exception as e:
+            logger.error(f"Error clearing cache directory: {e}")
+            return False
+        
+        # Recreate the directory
+        try:
+            self._init_cache_dirs()
+        except Exception as e:
+            logger.error(f"Error recreating cache directory: {e}")
+            return False
+        
+        return True
+
 
 class AsyncMemoryCache:
     """Async wrapper around LRUMemoryCache."""

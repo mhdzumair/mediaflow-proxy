@@ -90,7 +90,8 @@ async def process_playlist(
             dash_prebuffer.prefetch_for_live_playlist(matching_profiles, headers)
         )
     
-    response_headers = apply_header_manipulation({}, proxy_headers)
+    # Don't include propagate headers for playlists - they should only apply to segments
+    response_headers = apply_header_manipulation({}, proxy_headers, include_propagate=False)
     return Response(content=hls_content, media_type="application/vnd.apple.mpegurl", headers=response_headers)
 
 

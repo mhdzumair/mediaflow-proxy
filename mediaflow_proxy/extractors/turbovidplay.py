@@ -1,5 +1,4 @@
 import re
-from typing import Dict, Any
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
@@ -64,6 +63,7 @@ class TurboVidPlayExtractor(BaseExtractor):
         return {
             "destination_url": real_m3u8,
             "request_headers": self.base_headers,
-            "remove_response_headers": ["content-length"],
+            "propagate_response_headers": {"content-type": "video/mp2t"},
+            "remove_response_headers": ["content-length", "content-range"],
             "mediaflow_endpoint": "hls_manifest_proxy",
         }

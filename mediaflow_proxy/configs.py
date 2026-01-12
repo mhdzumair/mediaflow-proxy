@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     disable_home_page: bool = False  # Whether to disable the home page UI.
     disable_docs: bool = False  # Whether to disable the API documentation (Swagger UI).
     disable_speedtest: bool = False  # Whether to disable the speedtest UI.
+    clear_cache_on_startup: bool = False  # Whether to clear all caches (extractor, MPD, etc.) on startup. Useful for development.
     stremio_proxy_url: str | None = None  # The Stremio server URL for alternative content proxying.
     m3u8_content_routing: Literal["mediaflow", "stremio", "direct"] = (
         "mediaflow"  # Routing strategy for M3U8 content URLs: "mediaflow", "stremio", or "direct"

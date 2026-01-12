@@ -271,8 +271,10 @@ class M3U8Processor:
 
         query_params = dict(self.request.query_params)
         has_encrypted = query_params.pop("has_encrypted", False)
-        # Remove the response headers from the query params to avoid it being added to the consecutive requests
-        [query_params.pop(key, None) for key in list(query_params.keys()) if key.startswith("r_")]
+        # Remove the response headers (r_) from the query params to avoid it being added to the consecutive requests
+        # BUT keep rp_ (response propagate) headers as they should propagate to segments
+        [query_params.pop(key, None) for key in list(query_params.keys()) 
+         if key.lower().startswith("r_") and not key.lower().startswith("rp_")]
         # Remove force_playlist_proxy to avoid it being added to subsequent requests
         query_params.pop("force_playlist_proxy", None)
 

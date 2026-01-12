@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from importlib import resources
 
 from fastapi import FastAPI, Depends, Security, HTTPException
@@ -12,12 +13,29 @@ from mediaflow_proxy.configs import settings
 from mediaflow_proxy.middleware import UIAccessControlMiddleware
 from mediaflow_proxy.routes import proxy_router, extractor_router, speedtest_router, playlist_builder_router
 from mediaflow_proxy.schemas import GenerateUrlRequest, GenerateMultiUrlRequest, MultiUrlRequestItem
+from mediaflow_proxy.utils.cache_utils import EXTRACTOR_CACHE
 from mediaflow_proxy.utils.crypto_utils import EncryptionHandler, EncryptionMiddleware
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
 from mediaflow_proxy.utils.base64_utils import encode_url_to_base64, decode_base64_url, is_base64_url
 
 logging.basicConfig(level=settings.log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-app = FastAPI()
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan handler for startup and shutdown events."""
+    # Startup
+    if settings.clear_cache_on_startup:
+        logger.info("Clearing caches on startup (CLEAR_CACHE_ON_STARTUP=true)")
+        EXTRACTOR_CACHE.clear()
+        logger.info("Extractor cache cleared")
+    
+    yield
+    
+    # Shutdown (if needed)
+    pass
+app = FastAPI(lifespan=lifespan)
 api_password_query = APIKeyQuery(name="api_password", auto_error=False)
 api_password_header = APIKeyHeader(name="api_password", auto_error=False)
 app.add_middleware(
@@ -117,6 +135,7 @@ async def generate_url(request: GenerateUrlRequest):
         query_params=query_params,
         request_headers=request.request_headers,
         response_headers=request.response_headers,
+        propagate_response_headers=request.propagate_response_headers,
         remove_response_headers=request.remove_response_headers,
         encryption_handler=encryption_handler,
         expiration=request.expiration,
@@ -157,6 +176,7 @@ async def generate_urls(request: GenerateMultiUrlRequest):
             query_params=query_params,
             request_headers=url_item.request_headers,
             response_headers=url_item.response_headers,
+            propagate_response_headers=url_item.propagate_response_headers,
             remove_response_headers=url_item.remove_response_headers,
             encryption_handler=encryption_handler,
             expiration=request.expiration,

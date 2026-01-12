@@ -255,7 +255,7 @@
                         <div class="space-y-4">
                             <div>
                                 <div class="flex items-center justify-between mb-2">
-                                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Add Response Headers <span class="text-gray-400 font-normal">(r_ prefix)</span></label>
+                                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Add Response Headers <span class="text-gray-400 font-normal">(r_ prefix - manifest only)</span></label>
                                     <button onclick="addHlsResponseHeader()" class="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-medium flex items-center gap-1">
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
@@ -269,8 +269,24 @@
                             </div>
                             
                             <div>
+                                <div class="flex items-center justify-between mb-2">
+                                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Propagate Headers to Segments <span class="text-gray-400 font-normal">(rp_ prefix)</span></label>
+                                    <button onclick="addHlsPropagateHeader()" class="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-medium flex items-center gap-1">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                                        </svg>
+                                        Add
+                                    </button>
+                                </div>
+                                <div id="hls-propagate-headers-container" class="space-y-2">
+                                    <!-- Propagate headers will be added here dynamically -->
+                                </div>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Headers that propagate to segment URLs (e.g., content-type for disguised segments)</p>
+                            </div>
+                            
+                            <div>
                                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Remove Response Headers <span class="text-gray-400 font-normal">(x_headers)</span></label>
-                                <input type="text" id="hls-remove-headers" placeholder="X-Frame-Options, Content-Security-Policy"
+                                <input type="text" id="hls-remove-headers" placeholder="content-length, content-range"
                                     class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
                                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Comma-separated list of response headers to remove</p>
                             </div>
@@ -626,14 +642,21 @@
                                     class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 font-mono text-sm"></textarea>
                             </div>
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Response Headers <span class="text-gray-400 font-normal">(JSON)</span></label>
-                                <textarea id="encoded-response-headers" rows="3" placeholder='{"Content-Type": "video/mp4", "Cache-Control": "no-cache"}'
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Response Headers <span class="text-gray-400 font-normal">(JSON, r_ prefix)</span></label>
+                                <textarea id="encoded-response-headers" rows="3" placeholder='{"Cache-Control": "no-cache"}'
                                     class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 font-mono text-sm"></textarea>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Headers for manifest response only</p>
                             </div>
                         </div>
                         <div class="mt-4">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Propagate Headers to Segments <span class="text-gray-400 font-normal">(JSON, rp_ prefix)</span></label>
+                            <textarea id="encoded-propagate-headers" rows="2" placeholder='{"content-type": "video/mp2t"}'
+                                class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 font-mono text-sm"></textarea>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Headers that propagate to segment URLs (useful for disguised segments)</p>
+                        </div>
+                        <div class="mt-4">
                             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Remove Response Headers <span class="text-gray-400 font-normal">(comma-separated)</span></label>
-                            <input type="text" id="encoded-remove-headers" placeholder="X-Frame-Options, Content-Security-Policy"
+                            <input type="text" id="encoded-remove-headers" placeholder="content-length, content-range"
                                 class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
                             <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Response header names to remove from the proxied response</p>
                         </div>
@@ -824,6 +847,7 @@
         
         // HLS response headers management
         let hlsResponseHeaderCount = 0;
+        let hlsPropagateHeaderCount = 0;
         
         function addHlsResponseHeader() {
             const container = document.getElementById('hls-response-headers-container');
@@ -853,6 +877,42 @@
             document.querySelectorAll('#hls-response-headers-container > div').forEach(row => {
                 const name = row.querySelector('.response-header-name').value.trim();
                 const value = row.querySelector('.response-header-value').value.trim();
+                if (name && value) {
+                    headers[name] = value;
+                }
+            });
+            return headers;
+        }
+        
+        // HLS propagate headers management (rp_ prefix)
+        function addHlsPropagateHeader() {
+            const container = document.getElementById('hls-propagate-headers-container');
+            const headerId = `hls-propagate-header-${hlsPropagateHeaderCount++}`;
+            
+            const headerRow = document.createElement('div');
+            headerRow.id = headerId;
+            headerRow.className = 'flex gap-2 items-center';
+            headerRow.innerHTML = `
+                <input type="text" placeholder="Header Name (e.g., content-type)" class="propagate-header-name flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                <input type="text" placeholder="Header Value (e.g., video/mp2t)" class="propagate-header-value flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                <button onclick="removeHlsPropagateHeader('${headerId}')" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            `;
+            container.appendChild(headerRow);
+        }
+
+        function removeHlsPropagateHeader(headerId) {
+            document.getElementById(headerId).remove();
+        }
+
+        function getHlsPropagateHeaders() {
+            const headers = {};
+            document.querySelectorAll('#hls-propagate-headers-container > div').forEach(row => {
+                const name = row.querySelector('.propagate-header-name').value.trim();
+                const value = row.querySelector('.propagate-header-value').value.trim();
                 if (name && value) {
                     headers[name] = value;
                 }
@@ -1012,6 +1072,12 @@
                 const hlsResponseHeaders = getHlsResponseHeaders();
                 for (const [name, value] of Object.entries(hlsResponseHeaders)) {
                     params.append(`r_${name}`, value);
+                }
+                
+                // Add HLS propagate headers (rp_ prefix)
+                const hlsPropagateHeaders = getHlsPropagateHeaders();
+                for (const [name, value] of Object.entries(hlsPropagateHeaders)) {
+                    params.append(`rp_${name}`, value);
                 }
                 
                 // Add HLS remove headers (x_headers)
@@ -1194,6 +1260,7 @@
                 query_params: {},
                 request_headers: {},
                 response_headers: {},
+                propagate_response_headers: {},
                 remove_response_headers: []
             };
             
@@ -1230,6 +1297,17 @@
                 }
             }
             
+            // Parse propagate response headers
+            const propagateHeadersStr = document.getElementById('encoded-propagate-headers').value.trim();
+            if (propagateHeadersStr) {
+                try {
+                    requestBody.propagate_response_headers = JSON.parse(propagateHeadersStr);
+                } catch (e) {
+                    alert('Invalid JSON in propagate headers');
+                    return;
+                }
+            }
+
             // Parse remove response headers
             const removeHeadersStr = document.getElementById('encoded-remove-headers').value.trim();
             if (removeHeadersStr) {
