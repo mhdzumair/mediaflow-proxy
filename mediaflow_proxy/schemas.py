@@ -162,6 +162,10 @@ class HLSManifestParams(GenericParams):
         None,
         description="Time segments to skip, in compact format: 'start-end,start-end,...' (e.g., '0-112,280-300'). Segments are in seconds.",
     )
+    transformer: Optional[str] = Field(
+        None,
+        description="Stream transformer ID for host-specific content manipulation (e.g., 'ts_stream' for PNG/padding stripping).",
+    )
 
     @field_validator("resolution", mode="before")
     @classmethod

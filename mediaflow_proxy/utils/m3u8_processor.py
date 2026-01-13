@@ -100,6 +100,9 @@ class M3U8Processor:
         self.mediaflow_proxy_url = str(
             request.url_for("hls_manifest_proxy").replace(scheme=get_original_scheme(request))
         )
+        self.stream_proxy_url = str(
+            request.url_for("proxy_stream_endpoint").replace(scheme=get_original_scheme(request))
+        )
         self.playlist_url = None  # Will be set when processing starts
 
     async def process_m3u8(self, content: str, base_url: str) -> str:
@@ -465,16 +468,18 @@ class M3U8Processor:
 
         # Check if we should force MediaFlow proxy for all playlist URLs
         if self.force_playlist_proxy:
-            return await self.proxy_url(full_url, base_url, use_full_url=True)
+            return await self.proxy_url(full_url, base_url, use_full_url=True, is_playlist=True)
 
         # For playlist URLs, always use MediaFlow proxy regardless of strategy
         # Check for actual playlist file extensions, not just substring matches
         parsed_url = parse.urlparse(full_url)
-        if (parsed_url.path.endswith((".m3u", ".m3u8", ".m3u_plus")) or
-            parse.parse_qs(parsed_url.query).get("type", [""])[0] in ["m3u", "m3u8", "m3u_plus"]):
-            return await self.proxy_url(full_url, base_url, use_full_url=True)
+        is_playlist_url = (parsed_url.path.endswith((".m3u", ".m3u8", ".m3u_plus")) or
+            parse.parse_qs(parsed_url.query).get("type", [""])[0] in ["m3u", "m3u8", "m3u_plus"])
+        
+        if is_playlist_url:
+            return await self.proxy_url(full_url, base_url, use_full_url=True, is_playlist=True)
 
-        # Route non-playlist content URLs based on strategy
+        # Route non-playlist content URLs (segments) based on strategy
         if routing_strategy == "direct":
             # Return the URL directly without any proxying
             return full_url
@@ -492,9 +497,10 @@ class M3U8Processor:
             )
         else:
             # Default to MediaFlow proxy (routing_strategy == "mediaflow" or fallback)
-            return await self.proxy_url(full_url, base_url, use_full_url=True)
+            # Use stream endpoint for segment URLs
+            return await self.proxy_url(full_url, base_url, use_full_url=True, is_playlist=False)
 
-    async def proxy_url(self, url: str, base_url: str, use_full_url: bool = False) -> str:
+    async def proxy_url(self, url: str, base_url: str, use_full_url: bool = False, is_playlist: bool = True) -> str:
         """
         Proxies a URL, encoding it with the MediaFlow proxy URL.
 
@@ -502,6 +508,7 @@ class M3U8Processor:
             url (str): The URL to proxy.
             base_url (str): The base URL to resolve relative URLs.
             use_full_url (bool): Whether to use the URL as-is (True) or join with base_url (False).
+            is_playlist (bool): Whether this is a playlist URL (uses manifest endpoint) or segment URL (uses stream endpoint).
 
         Returns:
             str: The proxied URL.
@@ -519,10 +526,21 @@ class M3U8Processor:
          if key.lower().startswith("r_") and not key.lower().startswith("rp_")]
         # Remove force_playlist_proxy to avoid it being added to subsequent requests
         query_params.pop("force_playlist_proxy", None)
+        
+        # Use appropriate proxy URL based on content type
+        # For segment URLs, append /segment.ts to the path for player compatibility
+        # This ensures players like ffplay recognize the URL as a TS segment
+        if is_playlist:
+            proxy_url = self.mediaflow_proxy_url
+        else:
+            # Append segment.ts to the stream proxy URL path
+            proxy_url = self.stream_proxy_url.rstrip('/') + "/segment.ts"
+            # Remove h_range header - each segment should handle its own range requests
+            query_params.pop("h_range", None)
 
         return encode_mediaflow_proxy_url(
-            self.mediaflow_proxy_url,
-            "",
+            proxy_url,
+            None,  # No endpoint - URL is already complete
             full_url,
             query_params=query_params,
             encryption_handler=encryption_handler if has_encrypted else None,

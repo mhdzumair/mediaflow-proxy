@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import logging
+from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
 import httpx
@@ -25,6 +26,7 @@ from .utils.http_utils import (
 )
 from .utils.m3u8_processor import M3U8Processor
 from .utils.mpd_utils import pad_base64
+from .utils.stream_transformers import StreamTransformer, get_transformer
 from .configs import settings
 
 logger = logging.getLogger(__name__)
@@ -65,7 +67,10 @@ def handle_exceptions(exception: Exception) -> Response:
 
 
 async def handle_hls_stream_proxy(
-    request: Request, hls_params: HLSManifestParams, proxy_headers: ProxyRequestHeaders
+    request: Request, 
+    hls_params: HLSManifestParams, 
+    proxy_headers: ProxyRequestHeaders,
+    transformer_id: Optional[str] = None
 ) -> Response:
     """
     Handle HLS stream proxy requests.
@@ -76,6 +81,7 @@ async def handle_hls_stream_proxy(
         request (Request): The incoming FastAPI request object.
         hls_params (HLSManifestParams): Parameters for the HLS manifest.
         proxy_headers (ProxyRequestHeaders): Headers to be used in the proxy request.
+        transformer_id (str, optional): ID of the stream transformer to use for segment streaming.
 
     Returns:
         Union[Response, EnhancedStreamingResponse]: Either a processed m3u8 playlist or a streaming response.
@@ -106,12 +112,15 @@ async def handle_hls_stream_proxy(
         # Parse skip_segments from JSON string to list
         skip_segments_list = hls_params.get_skip_segments()
         
+        # Get transformer instance if specified
+        transformer = get_transformer(transformer_id)
+        
         # If force_playlist_proxy is enabled, skip detection and directly process as m3u8
         if hls_params.force_playlist_proxy:
             return await fetch_and_process_m3u8(
                 streamer, hls_params.destination, proxy_headers, request, 
                 hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy, 
-                hls_params.no_proxy, skip_segments_list
+                hls_params.no_proxy, skip_segments_list, transformer
             )
 
         parsed_url = urlparse(hls_params.destination)
@@ -122,7 +131,7 @@ async def handle_hls_stream_proxy(
             return await fetch_and_process_m3u8(
                 streamer, hls_params.destination, proxy_headers, request, 
                 hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy, 
-                hls_params.no_proxy, skip_segments_list
+                hls_params.no_proxy, skip_segments_list, transformer
             )
 
         # Create initial streaming response to check content type
@@ -135,7 +144,7 @@ async def handle_hls_stream_proxy(
             return await fetch_and_process_m3u8(
                 streamer, hls_params.destination, proxy_headers, request, 
                 hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy, 
-                hls_params.no_proxy, skip_segments_list
+                hls_params.no_proxy, skip_segments_list, transformer
             )
 
         # If we're removing content-range but upstream returned 206, change to 200
@@ -145,7 +154,7 @@ async def handle_hls_stream_proxy(
             status_code = 200
 
         return EnhancedStreamingResponse(
-            streamer.stream_content(),
+            streamer.stream_content(transformer),
             status_code=status_code,
             headers=response_headers,
             background=BackgroundTask(streamer.close),
@@ -159,6 +168,7 @@ async def handle_stream_request(
     method: str,
     video_url: str,
     proxy_headers: ProxyRequestHeaders,
+    transformer_id: Optional[str] = None,
 ) -> Response:
     """
     Handle general stream requests.
@@ -169,6 +179,7 @@ async def handle_stream_request(
         method (str): The HTTP method (e.g., 'GET' or 'HEAD').
         video_url (str): The URL of the video to stream.
         proxy_headers (ProxyRequestHeaders): Headers to be used in the proxy request.
+        transformer_id (str, optional): ID of the stream transformer to use for content manipulation.
 
     Returns:
         Union[Response, EnhancedStreamingResponse]: Either a HEAD response with headers or a streaming response.
@@ -208,6 +219,9 @@ async def handle_stream_request(
         status_code = streamer.response.status_code
         if status_code == 206 and "content-range" in [h.lower() for h in proxy_headers.remove]:
             status_code = 200
+        
+        # Get transformer instance if specified
+        transformer = get_transformer(transformer_id)
 
         if method == "HEAD":
             # For HEAD requests, just return the headers without streaming content
@@ -216,7 +230,7 @@ async def handle_stream_request(
         else:
             # For GET requests, return the streaming response
             return EnhancedStreamingResponse(
-                streamer.stream_content(),
+                streamer.stream_content(transformer),
                 headers=response_headers,
                 status_code=status_code,
                 background=BackgroundTask(streamer.close),
@@ -255,7 +269,12 @@ def prepare_response_headers(original_headers, proxy_response_headers, remove_he
     return response_headers
 
 
-async def proxy_stream(method: str, destination: str, proxy_headers: ProxyRequestHeaders):
+async def proxy_stream(
+    method: str, 
+    destination: str, 
+    proxy_headers: ProxyRequestHeaders,
+    transformer_id: Optional[str] = None
+):
     """
     Proxies the stream request to the given video URL.
 
@@ -263,11 +282,12 @@ async def proxy_stream(method: str, destination: str, proxy_headers: ProxyReques
         method (str): The HTTP method (e.g., GET, HEAD).
         destination (str): The URL of the stream to be proxied.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
+        transformer_id (str, optional): ID of the stream transformer to use.
 
     Returns:
         Response: The HTTP response with the streamed content.
     """
-    return await handle_stream_request(method, destination, proxy_headers)
+    return await handle_stream_request(method, destination, proxy_headers, transformer_id)
 
 
 async def fetch_and_process_m3u8(
@@ -279,7 +299,8 @@ async def fetch_and_process_m3u8(
     force_playlist_proxy: bool = None,
     key_only_proxy: bool = False,
     no_proxy: bool = False,
-    skip_segments: list = None
+    skip_segments: list = None,
+    transformer: Optional[StreamTransformer] = None
 ):
     """
     Fetches and processes the m3u8 playlist on-the-fly, converting it to an HLS playlist.
@@ -295,6 +316,7 @@ async def fetch_and_process_m3u8(
         no_proxy (bool, optional): If True, returns the manifest without proxying any URLs. Defaults to False.
         skip_segments (list, optional): List of time segments to skip. Each item should have 
                                         'start', 'end' (in seconds), and optionally 'type'.
+        transformer (StreamTransformer, optional): Transformer to apply to the stream content.
 
     Returns:
         Response: The HTTP response with the processed m3u8 playlist.
@@ -319,7 +341,7 @@ async def fetch_and_process_m3u8(
 
         # Create streaming response with on-the-fly processing
         return EnhancedStreamingResponse(
-            processor.process_m3u8_streaming(streamer.stream_content(), str(streamer.response.url)),
+            processor.process_m3u8_streaming(streamer.stream_content(transformer), str(streamer.response.url)),
             headers=response_headers,
             background=BackgroundTask(streamer.close),
         )

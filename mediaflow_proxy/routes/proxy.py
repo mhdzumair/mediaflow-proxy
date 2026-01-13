@@ -330,7 +330,7 @@ async def _handle_hls_with_dlhd_retry(
         
         return Response(content=processed_manifest, media_type="application/vnd.apple.mpegurl")
     
-    return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
+    return await handle_hls_stream_proxy(request, hls_params, proxy_headers, hls_params.transformer)
 
 
 @proxy_router.head("/hls/key_proxy/manifest.m3u8", name="hls_key_proxy")
@@ -357,7 +357,7 @@ async def hls_key_proxy(
     # Set the key_only_proxy flag to True
     hls_params.key_only_proxy = True
     
-    return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
+    return await handle_hls_stream_proxy(request, hls_params, proxy_headers, hls_params.transformer)
 
 
 @proxy_router.get("/hls/segment")
@@ -365,6 +365,7 @@ async def hls_segment_proxy(
     request: Request,
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
     segment_url: str = Query(..., description="URL of the HLS segment"),
+    transformer: str = Query(None, description="Stream transformer ID for content manipulation"),
 ):
     """
     Proxy HLS segments with optional pre-buffering support.
@@ -373,6 +374,7 @@ async def hls_segment_proxy(
         request (Request): The incoming HTTP request.
         segment_url (str): URL of the HLS segment to proxy.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
+        transformer (str, optional): Stream transformer ID for content manipulation.
 
     Returns:
         Response: The HTTP response with the segment content.
@@ -409,7 +411,7 @@ async def hls_segment_proxy(
     # prima di restituire, prova comunque a far partire il prebuffer dei successivi
     if settings.enable_hls_prebuffer:
         asyncio.create_task(hls_prebuffer.prebuffer_from_segment(segment_url, headers))
-    return await handle_stream_request("GET", segment_url, proxy_headers)
+    return await handle_stream_request("GET", segment_url, proxy_headers, transformer)
 
 
 @proxy_router.get("/dash/segment")
@@ -468,6 +470,7 @@ async def proxy_stream_endpoint(
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
     destination: str = Query(..., description="The URL of the stream.", alias="d"),
     filename: str | None = None,
+    transformer: str = Query(None, description="Stream transformer ID for content manipulation"),
 ):
     """
     Proxify stream requests to the given video URL.
@@ -477,6 +480,7 @@ async def proxy_stream_endpoint(
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
         destination (str): The URL of the stream to be proxied.
         filename (str | None): The filename to be used in the response headers.
+        transformer (str, optional): Stream transformer ID for content manipulation.
 
     Returns:
         Response: The HTTP response with the streamed content.
@@ -501,19 +505,24 @@ async def proxy_stream_endpoint(
         proxy_headers.request["range"] = "bytes=0-"
     
     if filename:
-        # If a filename is provided, set it in the headers using RFC 6266 format
-        try:
-            # Try to encode with latin-1 first (simple case)
-            filename.encode("latin-1")
-            content_disposition = f'attachment; filename="{filename}"'
-        except UnicodeEncodeError:
-            # For filenames with non-latin-1 characters, use RFC 6266 format with UTF-8
-            encoded_filename = quote(filename.encode("utf-8"))
-            content_disposition = f"attachment; filename*=UTF-8''{encoded_filename}"
+        # For segment files (.ts, .mp4, etc.), don't set content-disposition as attachment
+        # This allows the URL path to have proper extension for player compatibility
+        # while still streaming inline
+        segment_extensions = ('.ts', '.mp4', '.m4s', '.aac', '.m4a', '.vtt', '.srt')
+        if not filename.lower().endswith(segment_extensions):
+            # If a filename is provided (not a segment), set it in the headers using RFC 6266 format
+            try:
+                # Try to encode with latin-1 first (simple case)
+                filename.encode("latin-1")
+                content_disposition = f'attachment; filename="{filename}"'
+            except UnicodeEncodeError:
+                # For filenames with non-latin-1 characters, use RFC 6266 format with UTF-8
+                encoded_filename = quote(filename.encode("utf-8"))
+                content_disposition = f"attachment; filename*=UTF-8''{encoded_filename}"
 
-        proxy_headers.response.update({"content-disposition": content_disposition})
+            proxy_headers.response.update({"content-disposition": content_disposition})
 
-    return await proxy_stream(request.method, destination, proxy_headers)
+    return await proxy_stream(request.method, destination, proxy_headers, transformer)
 
 
 @proxy_router.get("/mpd/manifest.m3u8")
