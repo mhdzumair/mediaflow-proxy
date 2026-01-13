@@ -103,11 +103,15 @@ async def handle_hls_stream_proxy(
                 logger.warning(f"Failed to auto-resolve Vavoo URL: {e}")
                 # Continue with original URL if resolution fails
 
+        # Parse skip_segments from JSON string to list
+        skip_segments_list = hls_params.get_skip_segments()
+        
         # If force_playlist_proxy is enabled, skip detection and directly process as m3u8
         if hls_params.force_playlist_proxy:
             return await fetch_and_process_m3u8(
                 streamer, hls_params.destination, proxy_headers, request, 
-                hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy, hls_params.no_proxy
+                hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy, 
+                hls_params.no_proxy, skip_segments_list
             )
 
         parsed_url = urlparse(hls_params.destination)
@@ -117,7 +121,8 @@ async def handle_hls_stream_proxy(
         ] in ["m3u", "m3u8", "m3u_plus"]:
             return await fetch_and_process_m3u8(
                 streamer, hls_params.destination, proxy_headers, request, 
-                hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy, hls_params.no_proxy
+                hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy, 
+                hls_params.no_proxy, skip_segments_list
             )
 
         # Create initial streaming response to check content type
@@ -129,7 +134,8 @@ async def handle_hls_stream_proxy(
         if "mpegurl" in response_headers.get("content-type", "").lower():
             return await fetch_and_process_m3u8(
                 streamer, hls_params.destination, proxy_headers, request, 
-                hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy, hls_params.no_proxy
+                hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy, 
+                hls_params.no_proxy, skip_segments_list
             )
 
         # If we're removing content-range but upstream returned 206, change to 200
@@ -184,10 +190,18 @@ async def handle_stream_request(
                 logger.warning(f"Failed to auto-resolve Vavoo URL: {e}")
                 # Continue with original URL if resolution fails
 
+        # Debug: log request headers being sent
+        logger.debug(f"Request headers being sent to upstream: {proxy_headers.request}")
         await streamer.create_streaming_response(video_url, proxy_headers.request)
+        
+        # Debug: log upstream response headers
+        logger.debug(f"Upstream response status: {streamer.response.status_code}")
+        logger.debug(f"Upstream response headers: {dict(streamer.response.headers)}")
+        
         response_headers = prepare_response_headers(
             streamer.response.headers, proxy_headers.response, proxy_headers.remove, proxy_headers.propagate
         )
+        logger.debug(f"Prepared response headers: {response_headers}")
 
         # If we're removing content-range but upstream returned 206, change to 200
         # (206 Partial Content requires Content-Range header per HTTP spec)
@@ -264,7 +278,8 @@ async def fetch_and_process_m3u8(
     key_url: str = None, 
     force_playlist_proxy: bool = None,
     key_only_proxy: bool = False,
-    no_proxy: bool = False
+    no_proxy: bool = False,
+    skip_segments: list = None
 ):
     """
     Fetches and processes the m3u8 playlist on-the-fly, converting it to an HLS playlist.
@@ -278,6 +293,8 @@ async def fetch_and_process_m3u8(
         force_playlist_proxy (bool, optional): Force all playlist URLs to be proxied through MediaFlow. Defaults to None.
         key_only_proxy (bool, optional): Only proxy the key URL, leaving segment URLs direct. Defaults to False.
         no_proxy (bool, optional): If True, returns the manifest without proxying any URLs. Defaults to False.
+        skip_segments (list, optional): List of time segments to skip. Each item should have 
+                                        'start', 'end' (in seconds), and optionally 'type'.
 
     Returns:
         Response: The HTTP response with the processed m3u8 playlist.
@@ -288,7 +305,10 @@ async def fetch_and_process_m3u8(
             await streamer.create_streaming_response(url, proxy_headers.request)
 
         # Initialize processor and response headers
-        processor = M3U8Processor(request, key_url, force_playlist_proxy, key_only_proxy, no_proxy)
+        # skip_segments is already a list of dicts with 'start' and 'end' keys
+        processor = M3U8Processor(
+            request, key_url, force_playlist_proxy, key_only_proxy, no_proxy, skip_segments
+        )
         base_headers = {
             "content-disposition": "inline",
             "accept-ranges": "none",
@@ -363,9 +383,12 @@ async def get_manifest(
         raise HTTPException(status_code=e.status_code, detail=f"Failed to download MPD: {e.message}")
     drm_info = mpd_dict.get("drmInfo", {})
 
+    # Get skip segments if provided
+    skip_segments = manifest_params.get_skip_segments()
+
     if drm_info and not drm_info.get("isDrmProtected"):
         # For non-DRM protected MPD, we still create an HLS manifest
-        return await process_manifest(request, mpd_dict, proxy_headers, None, None, manifest_params.resolution)
+        return await process_manifest(request, mpd_dict, proxy_headers, None, None, manifest_params.resolution, skip_segments)
 
     key_id, key = await handle_drm_key_data(manifest_params.key_id, manifest_params.key, drm_info)
 
@@ -375,7 +398,7 @@ async def get_manifest(
     if key and len(key) != 32:
         key = base64.urlsafe_b64decode(pad_base64(key)).hex()
 
-    return await process_manifest(request, mpd_dict, proxy_headers, key_id, key, manifest_params.resolution)
+    return await process_manifest(request, mpd_dict, proxy_headers, key_id, key, manifest_params.resolution, skip_segments)
 
 
 async def get_playlist(
@@ -403,7 +426,11 @@ async def get_playlist(
         )
     except DownloadError as e:
         raise HTTPException(status_code=e.status_code, detail=f"Failed to download MPD: {e.message}")
-    return await process_playlist(request, mpd_dict, playlist_params.profile_id, proxy_headers)
+    
+    # Get skip segments if provided
+    skip_segments = playlist_params.get_skip_segments()
+    
+    return await process_playlist(request, mpd_dict, playlist_params.profile_id, proxy_headers, skip_segments)
 
 
 async def get_segment(
