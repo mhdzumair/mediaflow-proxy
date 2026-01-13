@@ -84,12 +84,13 @@ class Settings(BaseSettings):
     m3u8_content_routing: Literal["mediaflow", "stremio", "direct"] = (
         "mediaflow"  # Routing strategy for M3U8 content URLs: "mediaflow", "stremio", or "direct"
     )
-    enable_hls_prebuffer: bool = True  # Whether to enable HLS pre-buffering for improved streaming performance.
+    enable_hls_prebuffer: bool = False  # Whether to enable HLS pre-buffering for improved streaming performance.
     hls_prebuffer_segments: int = 5  # Number of segments to pre-buffer ahead.
     hls_prebuffer_cache_size: int = 50  # Maximum number of segments to cache in memory.
     hls_prebuffer_max_memory_percent: int = 80  # Maximum percentage of system memory to use for HLS pre-buffer cache.
     hls_prebuffer_emergency_threshold: int = 90  # Emergency threshold percentage to trigger aggressive cache cleanup.
     hls_prebuffer_inactivity_timeout: int = 60  # Seconds of inactivity before stopping playlist refresh loop.
+    hls_segment_cache_ttl: int = 300  # TTL (seconds) for cached HLS segments; 300s (5min) for VOD, lower for live.
     enable_dash_prebuffer: bool = True  # Whether to enable DASH pre-buffering for improved streaming performance.
     dash_prebuffer_segments: int = 5  # Number of segments to pre-buffer ahead.
     dash_prebuffer_cache_size: int = 50  # Maximum number of segments to cache in memory.

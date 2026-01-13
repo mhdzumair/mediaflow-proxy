@@ -100,9 +100,11 @@ class M3U8Processor:
         self.mediaflow_proxy_url = str(
             request.url_for("hls_manifest_proxy").replace(scheme=get_original_scheme(request))
         )
-        self.stream_proxy_url = str(
-            request.url_for("proxy_stream_endpoint").replace(scheme=get_original_scheme(request))
-        )
+        # Base URL for segment proxy - extension will be appended based on actual segment
+        # url_for with path param returns URL with placeholder, so we build it manually
+        self.segment_proxy_base_url = str(
+            request.url_for("hls_manifest_proxy").replace(scheme=get_original_scheme(request))
+        ).replace("/hls/manifest.m3u8", "/hls/segment")
         self.playlist_url = None  # Will be set when processing starts
 
     async def process_m3u8(self, content: str, base_url: str) -> str:
@@ -195,16 +197,26 @@ class M3U8Processor:
         if self.skip_filter.has_skip_segments():
             logger.info(f"Content filtering: processed playlist with {len(self.skip_filter.skip_segments)} skip ranges")
 
-        # Pre-buffer segments if enabled and this is a playlist
+        # Register playlist with the priority-based prefetcher
         if settings.enable_hls_prebuffer and "#EXTM3U" in content and self.playlist_url:
-            # Extract headers from request for pre-buffering
-            headers = {}
-            for key, value in self.request.query_params.items():
-                if key.startswith("h_"):
-                    headers[key[2:]] = value
+            # Skip master playlists
+            if "#EXT-X-STREAM-INF" not in content:
+                segment_urls = self._extract_segment_urls_from_content(content, self.playlist_url)
 
-            # Start pre-buffering in background using the actual playlist URL
-            asyncio.create_task(hls_prebuffer.prebuffer_playlist(self.playlist_url, headers))
+                if segment_urls:
+                    headers = {}
+                    for key, value in self.request.query_params.items():
+                        if key.startswith("h_"):
+                            headers[key[2:]] = value
+
+                    logger.info(f"[M3U8Processor] Registering playlist ({len(segment_urls)} segments): {self.playlist_url}")
+                    asyncio.create_task(
+                        hls_prebuffer.register_playlist(
+                            self.playlist_url,
+                            segment_urls,
+                            headers,
+                        )
+                    )
 
         return "\n".join(processed_lines)
 
@@ -240,14 +252,19 @@ class M3U8Processor:
 
         Yields:
             str: Processed lines of the m3u8 content.
+
+        Raises:
+            ValueError: If the content is not a valid m3u8 playlist (e.g., HTML error page).
         """
         # Store the playlist URL for prebuffering
         self.playlist_url = base_url
 
         buffer = ""  # String buffer for decoded content
+        raw_content = ""  # Accumulate raw content for prebuffer
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         is_playlist_detected = False
-        is_prebuffer_started = False
+        is_html_detected = False
+        initial_check_done = False
 
         # State for skip segment filtering
         discontinuity_pending = False  # Track if we need discontinuity before next URL
@@ -261,6 +278,24 @@ class M3U8Processor:
             # Incrementally decode the chunk
             decoded_chunk = decoder.decode(chunk)
             buffer += decoded_chunk
+            raw_content += decoded_chunk  # Accumulate for prebuffer
+
+            # Early detection: check if this is HTML instead of m3u8
+            # This helps catch upstream error pages quickly
+            if not initial_check_done and len(buffer) > 50:
+                initial_check_done = True
+                buffer_lower = buffer.lower().strip()
+                # Check for HTML markers
+                if buffer_lower.startswith("<!doctype") or buffer_lower.startswith("<html"):
+                    is_html_detected = True
+                    logger.error(f"Upstream returned HTML instead of m3u8 playlist: {base_url}")
+                    # Raise an error so the HTTP handler returns a proper error response
+                    # This allows the player to retry or show an error instead of thinking
+                    # the stream has ended normally
+                    raise ValueError(
+                        f"Upstream returned HTML instead of m3u8 playlist. "
+                        f"The stream may be offline or unavailable: {base_url}"
+                    )
 
             # Check for playlist marker early to avoid accumulating content
             if not is_playlist_detected and "#EXTM3U" in buffer:
@@ -290,28 +325,24 @@ class M3U8Processor:
                 # Keep the last line in the buffer (it might be incomplete)
                 buffer = lines[-1]
 
-            # Start pre-buffering early once we detect this is a playlist
-            # This avoids waiting until the entire playlist is processed
-            if (
-                settings.enable_hls_prebuffer
-                and is_playlist_detected
-                and not is_prebuffer_started
-                and self.playlist_url
-            ):
-                # Extract headers from request for pre-buffering
-                headers = {}
-                for key, value in self.request.query_params.items():
-                    if key.startswith("h_"):
-                        headers[key[2:]] = value
-
-                # Start pre-buffering in background using the actual playlist URL
-                asyncio.create_task(hls_prebuffer.prebuffer_playlist(self.playlist_url, headers))
-                is_prebuffer_started = True
+        # If HTML was detected, we already returned an error playlist
+        if is_html_detected:
+            return
 
         # Process any remaining data in the buffer plus final bytes
         final_chunk = decoder.decode(b"", final=True)
         if final_chunk:
             buffer += final_chunk
+
+        # Final validation: if we never detected a valid m3u8 playlist marker
+        if not is_playlist_detected:
+            logger.error(f"Invalid m3u8 content from upstream (no #EXTM3U marker found): {base_url}")
+            yield "#EXTM3U\n"
+            yield "#EXT-X-PLAYLIST-TYPE:VOD\n"
+            yield "# ERROR: Invalid m3u8 content from upstream (no #EXTM3U marker found)\n"
+            yield "# The upstream server may have returned an error page\n"
+            yield "#EXT-X-ENDLIST\n"
+            return
 
         if buffer:  # Process the last line if it's not empty
             if self.skip_filter.has_skip_segments():
@@ -328,6 +359,34 @@ class M3U8Processor:
         # Log skip statistics
         if self.skip_filter.has_skip_segments():
             logger.info(f"Content filtering: processed playlist with {len(self.skip_filter.skip_segments)} skip ranges")
+
+        # Register playlist with the priority-based prefetcher
+        # The prefetcher uses a smart approach:
+        # 1. When player requests a segment, it gets priority (downloaded first)
+        # 2. After serving priority segment, prefetcher continues sequentially
+        # 3. Multiple users watching same channel share the prefetcher
+        # 4. Inactive prefetchers are cleaned up automatically
+        if settings.enable_hls_prebuffer and is_playlist_detected and self.playlist_url and raw_content:
+            # Skip master playlists (they contain variant streams, not segments)
+            if "#EXT-X-STREAM-INF" not in raw_content:
+                # Extract segment URLs from the playlist
+                segment_urls = self._extract_segment_urls_from_content(raw_content, self.playlist_url)
+
+                if segment_urls:
+                    # Extract headers for prefetcher
+                    headers = {}
+                    for key, value in self.request.query_params.items():
+                        if key.startswith("h_"):
+                            headers[key[2:]] = value
+
+                    logger.info(f"[M3U8Processor] Registering playlist ({len(segment_urls)} segments): {self.playlist_url}")
+                    asyncio.create_task(
+                        hls_prebuffer.register_playlist(
+                            self.playlist_url,
+                            segment_urls,
+                            headers,
+                        )
+                    )
 
     async def _process_line_with_filtering(
         self, line: str, base_url: str, discontinuity_pending: bool, pending_extinf: Optional[str]
@@ -491,6 +550,29 @@ class M3U8Processor:
             # Use stream endpoint for segment URLs
             return await self.proxy_url(full_url, base_url, use_full_url=True, is_playlist=False)
 
+    def _extract_segment_urls_from_content(self, content: str, base_url: str) -> list:
+        """
+        Extract segment URLs from HLS playlist content.
+
+        Args:
+            content: Raw playlist content
+            base_url: Base URL for resolving relative URLs
+
+        Returns:
+            List of absolute segment URLs
+        """
+        segment_urls = []
+        for line in content.split("\n"):
+            line = line.strip()
+            if line and not line.startswith("#"):
+                # Absolute URL
+                if line.startswith("http://") or line.startswith("https://"):
+                    segment_urls.append(line)
+                else:
+                    # Relative URL - resolve against base
+                    segment_urls.append(parse.urljoin(base_url, line))
+        return segment_urls
+
     async def proxy_url(self, url: str, base_url: str, use_full_url: bool = False, is_playlist: bool = True) -> str:
         """
         Proxies a URL, encoding it with the MediaFlow proxy URL.
@@ -522,13 +604,26 @@ class M3U8Processor:
         query_params.pop("force_playlist_proxy", None)
 
         # Use appropriate proxy URL based on content type
-        # For segment URLs, append /segment.ts to the path for player compatibility
-        # This ensures players like ffplay recognize the URL as a TS segment
         if is_playlist:
             proxy_url = self.mediaflow_proxy_url
         else:
-            # Append segment.ts to the stream proxy URL path
-            proxy_url = self.stream_proxy_url.rstrip("/") + "/segment.ts"
+            # Determine segment extension from the URL
+            # Default to .ts for traditional HLS, but detect fMP4 extensions
+            segment_ext = "ts"
+            url_lower = full_url.lower()
+            # Check for fMP4/CMAF extensions
+            if url_lower.endswith(".m4s"):
+                segment_ext = "m4s"
+            elif url_lower.endswith(".mp4"):
+                segment_ext = "mp4"
+            elif url_lower.endswith(".m4a"):
+                segment_ext = "m4a"
+            elif url_lower.endswith(".m4v"):
+                segment_ext = "m4v"
+            elif url_lower.endswith(".aac"):
+                segment_ext = "aac"
+            # Build segment proxy URL with correct extension
+            proxy_url = f"{self.segment_proxy_base_url}.{segment_ext}"
             # Remove h_range header - each segment should handle its own range requests
             query_params.pop("h_range", None)
 

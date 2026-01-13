@@ -1,156 +1,323 @@
+"""
+HLS Pre-buffer system with priority-based sequential prefetching.
+
+This module provides a smart prebuffering system that:
+- Prioritizes player-requested segments (downloaded immediately)
+- Prefetches remaining segments sequentially in background
+- Supports multiple users watching the same channel (shared prefetcher)
+- Cleans up inactive prefetchers automatically
+
+Architecture:
+1. When playlist is fetched, register_playlist() creates a PlaylistPrefetcher
+2. PlaylistPrefetcher runs a background loop: priority queue -> sequential prefetch
+3. When player requests a segment, request_segment() adds it to priority queue
+4. Prefetcher downloads priority segment first, then continues sequential
+"""
+
 import asyncio
 import logging
 import time
-import psutil
-from dataclasses import dataclass, field
-from typing import Dict, Optional, List, Set
+from typing import Dict, Optional, List
 from urllib.parse import urljoin
 
-from mediaflow_proxy.utils.http_utils import create_httpx_client, download_file_with_retry
-from mediaflow_proxy.utils.cache_utils import get_cached_segment, set_cached_segment
+from mediaflow_proxy.utils.base_prebuffer import BasePrebuffer
+from mediaflow_proxy.utils.cache_utils import get_cached_segment
+from mediaflow_proxy.utils.http_utils import create_httpx_client
 from mediaflow_proxy.configs import settings
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class HLSPrebufferStats:
-    """Statistics for HLS prebuffer performance tracking."""
-
-    cache_hits: int = 0
-    cache_misses: int = 0
-    segments_prebuffered: int = 0
-    bytes_prebuffered: int = 0
-    prefetch_triggered: int = 0
-    playlists_tracked: int = 0
-    last_reset: float = field(default_factory=time.time)
-
-    @property
-    def hit_rate(self) -> float:
-        """Calculate cache hit rate percentage."""
-        total = self.cache_hits + self.cache_misses
-        return (self.cache_hits / total * 100) if total > 0 else 0.0
-
-    def reset(self) -> None:
-        """Reset statistics."""
-        self.cache_hits = 0
-        self.cache_misses = 0
-        self.segments_prebuffered = 0
-        self.bytes_prebuffered = 0
-        self.prefetch_triggered = 0
-        self.playlists_tracked = 0
-        self.last_reset = time.time()
-
-    def to_dict(self) -> dict:
-        """Convert stats to dictionary for logging."""
-        return {
-            "cache_hits": self.cache_hits,
-            "cache_misses": self.cache_misses,
-            "hit_rate": f"{self.hit_rate:.1f}%",
-            "segments_prebuffered": self.segments_prebuffered,
-            "bytes_prebuffered_mb": f"{self.bytes_prebuffered / 1024 / 1024:.2f}",
-            "prefetch_triggered": self.prefetch_triggered,
-            "playlists_tracked": self.playlists_tracked,
-            "uptime_seconds": int(time.time() - self.last_reset),
-        }
-
-
-class HLSPreBuffer:
+class PlaylistPrefetcher:
     """
-    Pre-buffer system for HLS streams to reduce latency and improve streaming performance.
-    Uses the shared SEGMENT_CACHE for consistent caching across the application.
+    Manages prefetching for a single playlist with priority support.
+
+    Key design for live streams with changing tokens:
+    - Does NOT start prefetching immediately on registration
+    - Only starts prefetching AFTER player requests a segment
+    - This ensures we prefetch from the CURRENT playlist, not stale ones
+
+    The prefetcher runs a background loop that:
+    1. Waits for player to request a segment (priority)
+    2. Downloads the priority segment first
+    3. Then prefetches subsequent segments sequentially
+    4. Stops when cancelled or all segments are prefetched
+    """
+
+    def __init__(
+        self,
+        playlist_url: str,
+        segment_urls: List[str],
+        headers: Dict[str, str],
+        prebuffer: "HLSPreBuffer",
+        prefetch_limit: int = 5,
+    ):
+        """
+        Initialize a playlist prefetcher.
+
+        Args:
+            playlist_url: URL of the HLS playlist
+            segment_urls: Ordered list of segment URLs from the playlist
+            headers: Headers to use for requests
+            prebuffer: Parent HLSPreBuffer instance for download methods
+            prefetch_limit: Maximum number of segments to prefetch ahead of player position
+        """
+        self.playlist_url = playlist_url
+        self.segment_urls = segment_urls
+        self.headers = headers
+        self.prebuffer = prebuffer
+        self.prefetch_limit = prefetch_limit
+
+        self.last_access = time.time()
+        self.current_index = 0  # Next segment to prefetch sequentially
+        self.player_index = 0  # Last segment index requested by player
+        self.priority_event = asyncio.Event()  # Signals priority segment available
+        self.priority_url: Optional[str] = None  # Current priority segment
+        self.cancelled = False
+        self._task: Optional[asyncio.Task] = None
+        self._lock = asyncio.Lock()  # Protects priority_url
+
+        # Track which segments are already cached or being downloaded
+        self.downloading: set = set()
+
+        # Track if prefetching has been activated by a player request
+        self.activated = False
+
+    def start(self) -> None:
+        """Start the prefetch background task."""
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(self._run())
+            logger.info(f"[PlaylistPrefetcher] Started (waiting for activation): {self.playlist_url}")
+
+    def stop(self) -> None:
+        """Stop the prefetch background task."""
+        self.cancelled = True
+        self.priority_event.set()  # Wake up the loop
+        if self._task and not self._task.done():
+            self._task.cancel()
+        logger.info(f"[PlaylistPrefetcher] Stopped for: {self.playlist_url}")
+
+    def update_segments(self, segment_urls: List[str]) -> None:
+        """
+        Update segment URLs (called when playlist is refreshed).
+
+        Args:
+            segment_urls: New list of segment URLs
+        """
+        self.segment_urls = segment_urls
+        self.last_access = time.time()
+        logger.debug(f"[PlaylistPrefetcher] Updated segments ({len(segment_urls)}): {self.playlist_url}")
+
+    async def request_priority(self, segment_url: str) -> None:
+        """
+        Player requested this segment - update indices and activate prefetching.
+
+        The player will download this segment via get_or_download().
+        The prefetcher's job is to prefetch segments AHEAD of the player,
+        not to download the segment the player is already requesting.
+
+        For VOD/movie streams: handles seek by detecting large jumps in segment
+        index and resetting the prefetch window accordingly.
+
+        Args:
+            segment_url: URL of the segment the player needs
+        """
+        self.last_access = time.time()
+        self.activated = True  # Activate prefetching
+
+        # Update player position for prefetch limit calculation
+        segment_index = self._find_segment_index(segment_url)
+        if segment_index >= 0:
+            old_player_index = self.player_index
+            self.player_index = segment_index
+            # Start prefetching from the NEXT segment (player handles current one)
+            self.current_index = segment_index + 1
+
+            # Detect seek: if player jumped more than prefetch_limit segments
+            # This handles VOD seek scenarios where user jumps to different position
+            jump_distance = abs(segment_index - old_player_index)
+            if jump_distance > self.prefetch_limit and old_player_index >= 0:
+                logger.info(
+                    f"[PlaylistPrefetcher] Seek detected: jumped {jump_distance} segments "
+                    f"(from {old_player_index} to {segment_index})"
+                )
+
+        # Signal the prefetch loop to wake up and start prefetching ahead
+        async with self._lock:
+            self.priority_url = segment_url
+            self.priority_event.set()
+
+    def _find_segment_index(self, segment_url: str) -> int:
+        """Find the index of a segment URL in the list."""
+        try:
+            return self.segment_urls.index(segment_url)
+        except ValueError:
+            return -1
+
+    async def _run(self) -> None:
+        """
+        Main prefetch loop.
+
+        For live streams: waits until activated by player request before prefetching.
+        Priority: Player-requested segment > Sequential prefetch
+        After downloading priority segment, continue sequential from that point.
+
+        Prefetching is LIMITED to `prefetch_limit` segments ahead of the player's
+        current position to avoid downloading the entire stream.
+        """
+        logger.info(f"[PlaylistPrefetcher] Loop started for: {self.playlist_url}")
+
+        while not self.cancelled:
+            try:
+                # Wait for activation (player request) before doing anything
+                if not self.activated:
+                    try:
+                        await asyncio.wait_for(self.priority_event.wait(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        continue
+
+                # Check for priority segment first
+                async with self._lock:
+                    priority_url = self.priority_url
+                    self.priority_url = None
+                    self.priority_event.clear()
+
+                if priority_url:
+                    # Player is already downloading this segment via get_or_download()
+                    # We just need to update our indices and skip to prefetching NEXT segments
+                    # This avoids duplicate download attempts and inflated cache miss stats
+                    priority_index = self._find_segment_index(priority_url)
+                    if priority_index >= 0:
+                        self.player_index = priority_index
+                        self.current_index = priority_index + 1  # Start prefetching from next segment
+                        logger.info(
+                            f"[PlaylistPrefetcher] Player at index {self.player_index}, "
+                            f"will prefetch up to {self.prefetch_limit} segments ahead"
+                        )
+                    continue
+
+                # Calculate prefetch limit based on player position
+                max_prefetch_index = self.player_index + self.prefetch_limit + 1
+
+                # No priority - prefetch next sequential segment (only if within limit)
+                if (
+                    self.activated
+                    and self.current_index < len(self.segment_urls)
+                    and self.current_index < max_prefetch_index
+                ):
+                    url = self.segment_urls[self.current_index]
+
+                    # Skip if already cached or being downloaded
+                    if url not in self.downloading:
+                        cached = await get_cached_segment(url)
+                        if not cached:
+                            logger.info(
+                                f"[PlaylistPrefetcher] Prefetching [{self.current_index}] "
+                                f"(player at {self.player_index}, limit {self.prefetch_limit}): {url}"
+                            )
+                            await self._download_segment(url)
+                        else:
+                            logger.debug(f"[PlaylistPrefetcher] Already cached [{self.current_index}]: {url}")
+
+                    self.current_index += 1
+                else:
+                    # Reached prefetch limit or end of segments - wait for player to advance
+                    try:
+                        await asyncio.wait_for(self.priority_event.wait(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        pass
+
+            except asyncio.CancelledError:
+                logger.info(f"[PlaylistPrefetcher] Loop cancelled: {self.playlist_url}")
+                return
+            except Exception as e:
+                logger.warning(f"[PlaylistPrefetcher] Error in loop: {e}")
+                await asyncio.sleep(0.5)
+
+        logger.info(f"[PlaylistPrefetcher] Loop ended: {self.playlist_url}")
+
+    async def _download_segment(self, url: str) -> None:
+        """
+        Download and cache a segment using the parent prebuffer.
+
+        Args:
+            url: URL of the segment to download
+        """
+        if url in self.downloading:
+            return
+
+        self.downloading.add(url)
+        try:
+            # Use the base prebuffer's get_or_download for cross-process coordination
+            await self.prebuffer.get_or_download(url, self.headers)
+        finally:
+            self.downloading.discard(url)
+
+
+class HLSPreBuffer(BasePrebuffer):
+    """
+    Pre-buffer system for HLS streams with priority-based prefetching.
 
     Features:
-    - Initial prebuffering when playlist is first requested
-    - Continuous prefetching triggered on each segment request
-    - Automatic playlist refresh for live streams
-    - Cache statistics and monitoring
+    - Priority queue: Player-requested segments downloaded first
+    - Sequential prefetch: Background prefetch of remaining segments
+    - Multi-user support: Multiple users share same prefetcher
+    - Automatic cleanup: Inactive prefetchers removed after timeout
     """
 
-    def __init__(self, max_cache_size: Optional[int] = None, prebuffer_segments: Optional[int] = None):
+    def __init__(
+        self,
+        max_cache_size: Optional[int] = None,
+        prebuffer_segments: Optional[int] = None,
+    ):
         """
         Initialize the HLS pre-buffer system.
 
         Args:
-            max_cache_size (int): Maximum number of segments to cache (uses config if None)
-            prebuffer_segments (int): Number of segments to pre-buffer ahead (uses config if None)
+            max_cache_size: Maximum number of segments to cache (uses config if None)
+            prebuffer_segments: Number of segments to pre-buffer ahead (uses config if None)
         """
-        self.max_cache_size = max_cache_size or settings.hls_prebuffer_cache_size
-        self.prebuffer_segments = prebuffer_segments or settings.hls_prebuffer_segments
-        self.max_memory_percent = settings.hls_prebuffer_max_memory_percent
-        self.emergency_threshold = settings.hls_prebuffer_emergency_threshold
-        self.segment_ttl = 60  # Segment cache TTL in seconds
-        self.inactivity_timeout = settings.hls_prebuffer_inactivity_timeout  # Seconds before stopping refresh
+        super().__init__(
+            max_cache_size=max_cache_size or settings.hls_prebuffer_cache_size,
+            prebuffer_segments=prebuffer_segments or settings.hls_prebuffer_segments,
+            max_memory_percent=settings.hls_prebuffer_max_memory_percent,
+            emergency_threshold=settings.hls_prebuffer_emergency_threshold,
+            segment_ttl=settings.hls_segment_cache_ttl,
+        )
 
-        # Track playlist -> segment URLs mapping
-        self.segment_urls: Dict[str, List[str]] = {}
+        self.inactivity_timeout = settings.hls_prebuffer_inactivity_timeout
 
-        # Reverse mapping: segment URL -> (playlist_url, index)
-        self.segment_to_playlist: Dict[str, tuple] = {}
+        # Active prefetchers: playlist_url -> PlaylistPrefetcher
+        self.active_prefetchers: Dict[str, PlaylistPrefetcher] = {}
 
-        # Playlist state: {headers, last_access, refresh_task, target_duration, is_live}
-        self.playlist_state: Dict[str, dict] = {}
+        # Reverse mapping: segment URL -> playlist_url
+        self.segment_to_playlist: Dict[str, str] = {}
 
-        # Track URLs being downloaded to avoid duplicates
-        self._downloading: Set[str] = set()
-        self._download_lock = asyncio.Lock()
+        # Lock for prefetcher management
+        self._prefetcher_lock = asyncio.Lock()
 
-        # Statistics
-        self.stats = HLSPrebufferStats()
+        # Cleanup task
+        self._cleanup_task: Optional[asyncio.Task] = None
+        self._cleanup_interval = 30  # Check every 30 seconds
 
         self.client = create_httpx_client()
 
-    def _get_memory_usage_percent(self) -> float:
-        """Get current memory usage percentage."""
-        try:
-            memory = psutil.virtual_memory()
-            return memory.percent
-        except Exception as e:
-            logger.warning(f"Failed to get memory usage: {e}")
-            return 0.0
-
-    def _check_memory_threshold(self) -> bool:
-        """Check if memory usage exceeds the emergency threshold."""
-        return self._get_memory_usage_percent() > self.emergency_threshold
-
-    def record_cache_hit(self) -> None:
-        """Record a cache hit for statistics."""
-        self.stats.cache_hits += 1
-
-    def record_cache_miss(self) -> None:
-        """Record a cache miss for statistics."""
-        self.stats.cache_misses += 1
-
     def log_stats(self) -> None:
-        """Log current prebuffer statistics."""
-        logger.info(f"HLS Prebuffer Stats: {self.stats.to_dict()}")
-
-    def _parse_target_duration(self, playlist_content: str) -> Optional[int]:
-        """Parse EXT-X-TARGETDURATION from a media playlist."""
-        for line in playlist_content.splitlines():
-            line = line.strip()
-            if line.startswith("#EXT-X-TARGETDURATION:"):
-                try:
-                    value = line.split(":", 1)[1].strip()
-                    return int(float(value))
-                except Exception:
-                    return None
-        return None
-
-    def _is_live_playlist(self, playlist_content: str) -> bool:
-        """Check if playlist is live (no EXT-X-ENDLIST tag)."""
-        return "#EXT-X-ENDLIST" not in playlist_content
+        """Log current prebuffer statistics with HLS-specific info."""
+        stats = self.stats.to_dict()
+        stats["active_prefetchers"] = len(self.active_prefetchers)
+        logger.info(f"HLS Prebuffer Stats: {stats}")
 
     def _extract_segment_urls(self, playlist_content: str, base_url: str) -> List[str]:
         """
         Extract segment URLs from HLS playlist content.
 
         Args:
-            playlist_content (str): Content of the HLS playlist
-            base_url (str): Base URL for resolving relative URLs
+            playlist_content: Content of the HLS playlist
+            base_url: Base URL for resolving relative URLs
 
         Returns:
-            List[str]: List of segment URLs
+            List of segment URLs
         """
         segment_urls = []
         lines = playlist_content.split("\n")
@@ -166,393 +333,139 @@ class HLSPreBuffer:
                     segment_url = urljoin(base_url, line)
                     segment_urls.append(segment_url)
 
-        logger.debug(f"Extracted {len(segment_urls)} segment URLs from playlist")
         return segment_urls
 
-    def _extract_variant_urls(self, playlist_content: str, base_url: str) -> List[str]:
-        """
-        Extract variant playlist URLs from master playlist.
+    def _is_master_playlist(self, playlist_content: str) -> bool:
+        """Check if this is a master playlist (contains variant streams)."""
+        return "#EXT-X-STREAM-INF" in playlist_content
 
-        Args:
-            playlist_content (str): Content of the master playlist
-            base_url (str): Base URL for resolving relative URLs
-
-        Returns:
-            List[str]: List of variant playlist URLs
-        """
-        variant_urls = []
-        lines = [line.strip() for line in playlist_content.split("\n")]
-        take_next_uri = False
-
-        for line in lines:
-            if line.startswith("#EXT-X-STREAM-INF"):
-                take_next_uri = True
-                continue
-            if take_next_uri:
-                take_next_uri = False
-                if line and not line.startswith("#"):
-                    variant_urls.append(urljoin(base_url, line))
-
-        logger.debug(f"Extracted {len(variant_urls)} variant URLs from master playlist")
-        return variant_urls
-
-    async def prebuffer_playlist(self, playlist_url: str, headers: Dict[str, str], start_refresh: bool = False) -> None:
-        """
-        Pre-buffer segments from an HLS playlist.
-
-        This method only does initial segment parsing and optional prebuffering.
-        The refresh loop is NOT started here - it's started when segments are actually requested
-        via get_segment() or prebuffer_from_segment().
-
-        Args:
-            playlist_url (str): URL of the HLS playlist
-            headers (Dict[str, str]): Headers to use for requests
-            start_refresh (bool): Whether to start the refresh loop (only True when called from segment request)
-        """
-        try:
-            # Skip if already tracking this playlist (avoid duplicate prebuffering)
-            if playlist_url in self.playlist_state:
-                logger.debug(f"Playlist already being tracked, skipping: {playlist_url}")
-                return
-
-            logger.debug(f"Starting pre-buffer for playlist: {playlist_url}")
-
-            # Download playlist
-            playlist_content = await download_file_with_retry(playlist_url, headers)
-            if not playlist_content:
-                logger.warning(f"Failed to download playlist: {playlist_url}")
-                return
-
-            playlist_text = playlist_content.decode("utf-8", errors="ignore")
-
-            # Check if master playlist - don't prebuffer variants automatically
-            # Let the player choose which variant to use
-            if "#EXT-X-STREAM-INF" in playlist_text:
-                logger.debug(
-                    "Master playlist detected, not prebuffering variants (will prebuffer when player requests)"
-                )
-                return
-
-            # Media playlist - extract segments
-            segment_urls = self._extract_segment_urls(playlist_text, playlist_url)
-            if not segment_urls:
-                logger.warning(f"No segments found in playlist: {playlist_url}")
-                return
-
-            # Store segment URLs and build reverse mapping
-            self.segment_urls[playlist_url] = segment_urls
-            for idx, url in enumerate(segment_urls):
-                self.segment_to_playlist[url] = (playlist_url, idx)
-
-            # Determine if live
-            is_live = self._is_live_playlist(playlist_text)
-            target_duration = self._parse_target_duration(playlist_text) or 6
-
-            # For live streams, prebuffer from the END (most recent)
-            # For VOD, prebuffer from the beginning
-            if is_live:
-                segments_to_buffer = segment_urls[-self.prebuffer_segments :]
-            else:
-                segments_to_buffer = segment_urls[: self.prebuffer_segments]
-
-            # Prebuffer segments
-            await self._prebuffer_segments(segments_to_buffer, headers)
-
-            logger.info(f"Pre-buffered {len(segments_to_buffer)} segments for {playlist_url} (live={is_live})")
-            self.stats.playlists_tracked += 1
-
-            # Store playlist state (but don't start refresh loop unless explicitly requested)
-            self.playlist_state[playlist_url] = {
-                "headers": headers,
-                "last_access": time.time(),
-                "refresh_task": None,
-                "target_duration": target_duration,
-                "is_live": is_live,
-            }
-
-            # Only start refresh loop if explicitly requested (i.e., when segment is being played)
-            if start_refresh and is_live:
-                self._start_refresh_loop(playlist_url, headers, target_duration)
-
-        except Exception as e:
-            logger.warning(f"Failed to pre-buffer playlist {playlist_url}: {e}")
-
-    def _start_refresh_loop(self, playlist_url: str, headers: Dict[str, str], target_duration: int) -> None:
-        """Start the refresh loop for a live playlist if not already running."""
-        state = self.playlist_state.get(playlist_url)
-        if not state:
-            return
-
-        if not state.get("refresh_task") or state["refresh_task"].done():
-            task = asyncio.create_task(self._refresh_playlist_loop(playlist_url, headers, target_duration))
-            state["refresh_task"] = task
-            logger.debug(f"Started refresh loop for: {playlist_url}")
-
-    async def _prebuffer_segments(self, segment_urls: List[str], headers: Dict[str, str]) -> None:
-        """
-        Pre-buffer a list of segments.
-
-        Args:
-            segment_urls: List of segment URLs to prebuffer
-            headers: Headers to use for requests
-        """
-        # Check memory before starting
-        if self._get_memory_usage_percent() > self.max_memory_percent:
-            logger.warning("Memory usage too high, skipping prebuffer")
-            return
-
-        tasks = []
-        for url in segment_urls:
-            tasks.append(self._download_and_cache_segment(url, headers))
-
-        if tasks:
-            # Use semaphore to limit concurrent downloads
-            semaphore = asyncio.Semaphore(5)
-
-            async def limited_task(task):
-                async with semaphore:
-                    return await task
-
-            await asyncio.gather(*[limited_task(t) for t in tasks], return_exceptions=True)
-
-    async def _download_and_cache_segment(self, segment_url: str, headers: Dict[str, str]) -> None:
-        """Download and cache a segment using the shared cache."""
-        # Check if already cached
-        cached = await get_cached_segment(segment_url)
-        if cached:
-            logger.debug(f"Segment already cached: {segment_url}")
-            return
-
-        # Avoid duplicate downloads
-        async with self._download_lock:
-            if segment_url in self._downloading:
-                return
-            self._downloading.add(segment_url)
-
-        try:
-            # Check memory
-            if self._get_memory_usage_percent() > self.max_memory_percent:
-                return
-
-            content = await download_file_with_retry(segment_url, headers)
-            if content:
-                await set_cached_segment(segment_url, content, ttl=self.segment_ttl)
-                self.stats.segments_prebuffered += 1
-                self.stats.bytes_prebuffered += len(content)
-                logger.debug(f"Prebuffered HLS segment ({len(content)} bytes): {segment_url}")
-        except Exception as e:
-            logger.warning(f"Failed to prebuffer segment {segment_url}: {e}")
-        finally:
-            async with self._download_lock:
-                self._downloading.discard(segment_url)
-
-    async def get_segment(self, segment_url: str, headers: Dict[str, str]) -> Optional[bytes]:
-        """
-        Get a segment from cache or download it.
-
-        Args:
-            segment_url: URL of the segment
-            headers: Headers to use for request
-
-        Returns:
-            Segment data if available, None otherwise
-        """
-        # Check cache first
-        cached = await get_cached_segment(segment_url)
-        if cached:
-            self.record_cache_hit()
-            logger.info(f"HLS Segment cache HIT: {segment_url.split('/')[-1]}")
-
-            # Update last access time for playlist and ensure refresh loop is running
-            mapping = self.segment_to_playlist.get(segment_url)
-            if mapping:
-                playlist_url = mapping[0]
-                state = self.playlist_state.get(playlist_url)
-                if state:
-                    state["last_access"] = time.time()
-                    # Start refresh loop if this is a live stream and not already running
-                    if state.get("is_live") and (not state.get("refresh_task") or state["refresh_task"].done()):
-                        self._start_refresh_loop(playlist_url, headers, state.get("target_duration", 6))
-
-            return cached
-
-        self.record_cache_miss()
-
-        # Download and cache
-        try:
-            content = await download_file_with_retry(segment_url, headers)
-            if content:
-                await set_cached_segment(segment_url, content, ttl=self.segment_ttl)
-                return content
-        except Exception as e:
-            logger.warning(f"Failed to get segment {segment_url}: {e}")
-
-        return None
-
-    async def prebuffer_from_segment(self, segment_url: str, headers: Dict[str, str]) -> None:
-        """
-        Trigger prebuffering of next segments based on current segment.
-        This is called when a segment is actually being played, so we start the refresh loop here.
-
-        Args:
-            segment_url: URL of the current segment
-            headers: Headers to use for requests
-        """
-        self.stats.prefetch_triggered += 1
-
-        mapping = self.segment_to_playlist.get(segment_url)
-        if not mapping:
-            return
-
-        playlist_url, current_index = mapping
-
-        # Update last access time and ensure refresh loop is running
-        state = self.playlist_state.get(playlist_url)
-        if state:
-            state["last_access"] = time.time()
-            # Start refresh loop if this is a live stream and not already running
-            if state.get("is_live") and (not state.get("refresh_task") or state["refresh_task"].done()):
-                self._start_refresh_loop(playlist_url, headers, state.get("target_duration", 6))
-
-        # Get segment list
-        segment_list = self.segment_urls.get(playlist_url, [])
-        if not segment_list:
-            return
-
-        # Prebuffer next N segments
-        start_index = current_index + 1
-        end_index = min(start_index + self.prebuffer_segments, len(segment_list))
-        next_segments = segment_list[start_index:end_index]
-
-        if next_segments:
-            logger.debug(f"Prefetching {len(next_segments)} upcoming HLS segments")
-            asyncio.create_task(self._prebuffer_segments(next_segments, headers))
-
-    async def prebuffer_next_segments(
-        self, playlist_url: str, current_segment_index: int, headers: Dict[str, str]
+    async def register_playlist(
+        self,
+        playlist_url: str,
+        segment_urls: List[str],
+        headers: Dict[str, str],
     ) -> None:
         """
-        Pre-buffer next segments based on current playback position.
+        Register a playlist for prefetching.
+
+        Creates a new PlaylistPrefetcher or updates existing one.
+        Called by M3U8 processor when a playlist is fetched.
 
         Args:
-            playlist_url: URL of the playlist
-            current_segment_index: Index of current segment
+            playlist_url: URL of the HLS playlist
+            segment_urls: Ordered list of segment URLs from the playlist
             headers: Headers to use for requests
         """
-        segment_list = self.segment_urls.get(playlist_url, [])
-        if not segment_list:
+        if not segment_urls:
+            logger.debug(f"[register_playlist] No segments, skipping: {playlist_url}")
             return
 
-        start_index = current_segment_index + 1
-        end_index = min(start_index + self.prebuffer_segments, len(segment_list))
-        next_segments = segment_list[start_index:end_index]
+        async with self._prefetcher_lock:
+            # Update reverse mapping
+            for url in segment_urls:
+                self.segment_to_playlist[url] = playlist_url
 
-        if next_segments:
-            await self._prebuffer_segments(next_segments, headers)
+            if playlist_url in self.active_prefetchers:
+                # Update existing prefetcher
+                prefetcher = self.active_prefetchers[playlist_url]
+                prefetcher.update_segments(segment_urls)
+                prefetcher.headers = headers
+                logger.info(f"[register_playlist] Updated existing prefetcher: {playlist_url}")
+            else:
+                # Create new prefetcher with configured prefetch limit
+                prefetcher = PlaylistPrefetcher(
+                    playlist_url=playlist_url,
+                    segment_urls=segment_urls,
+                    headers=headers,
+                    prebuffer=self,
+                    prefetch_limit=settings.hls_prebuffer_segments,
+                )
+                self.active_prefetchers[playlist_url] = prefetcher
+                prefetcher.start()
+                logger.info(
+                    f"[register_playlist] Created new prefetcher ({len(segment_urls)} segments, "
+                    f"prefetch_limit={settings.hls_prebuffer_segments}): {playlist_url}"
+                )
 
-    async def _refresh_playlist_loop(self, playlist_url: str, headers: Dict[str, str], target_duration: int) -> None:
+            # Ensure cleanup task is running
+            self._ensure_cleanup_task()
+
+    async def request_segment(self, segment_url: str) -> None:
         """
-        Periodically refresh a live playlist to track new segments.
-        Only prebuffers new segments if there's been recent activity.
+        Player requested a segment - set as priority for prefetching.
+
+        Finds the prefetcher for this segment and adds it to priority queue.
+        Called by the segment endpoint when a segment is requested.
 
         Args:
-            playlist_url: URL of the playlist
-            headers: Headers to use for requests
-            target_duration: Target segment duration for refresh interval
+            segment_url: URL of the segment the player needs
         """
-        sleep_interval = max(2, min(15, target_duration))
+        playlist_url = self.segment_to_playlist.get(segment_url)
+        if not playlist_url:
+            logger.debug(f"[request_segment] No prefetcher found for: {segment_url}")
+            return
 
+        prefetcher = self.active_prefetchers.get(playlist_url)
+        if prefetcher:
+            await prefetcher.request_priority(segment_url)
+        else:
+            logger.debug(f"[request_segment] Prefetcher not active for: {playlist_url}")
+
+    def _ensure_cleanup_task(self) -> None:
+        """Ensure the cleanup task is running."""
+        if self._cleanup_task is None or self._cleanup_task.done():
+            self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+
+    async def _cleanup_loop(self) -> None:
+        """Periodically clean up inactive prefetchers."""
         while True:
             try:
-                state = self.playlist_state.get(playlist_url)
-                if not state:
-                    logger.info(f"HLS prebuffer: playlist state removed, stopping refresh: {playlist_url}")
-                    return
-
-                last_access = state.get("last_access", 0)
-                time_since_access = time.time() - last_access
-
-                # Check for inactivity - use configurable timeout
-                if time_since_access > self.inactivity_timeout:
-                    logger.info(
-                        f"Stopping HLS prebuffer for inactive playlist ({time_since_access:.0f}s idle): {playlist_url}"
-                    )
-                    self._cleanup_playlist(playlist_url)
-                    return
-
-                # Only refresh and prebuffer if there's been recent activity (within 2x target duration)
-                # This prevents unnecessary fetching when stream is paused/stopped
-                recent_activity = time_since_access < (target_duration * 2)
-
-                if not recent_activity:
-                    # Just wait, don't fetch anything
-                    await asyncio.sleep(sleep_interval)
-                    continue
-
-                # Refresh playlist
-                playlist_content = await download_file_with_retry(playlist_url, headers)
-                if not playlist_content:
-                    await asyncio.sleep(sleep_interval)
-                    continue
-
-                playlist_text = playlist_content.decode("utf-8", errors="ignore")
-
-                # Update target duration if changed
-                new_target = self._parse_target_duration(playlist_text)
-                if new_target:
-                    sleep_interval = max(2, min(15, new_target))
-
-                # Extract new segment URLs
-                new_urls = self._extract_segment_urls(playlist_text, playlist_url)
-                if new_urls:
-                    old_urls = set(self.segment_urls.get(playlist_url, []))
-                    self.segment_urls[playlist_url] = new_urls
-
-                    # Update reverse mapping
-                    for idx, url in enumerate(new_urls):
-                        self.segment_to_playlist[url] = (playlist_url, idx)
-
-                    # Find new segments and prebuffer them (only if recently active)
-                    new_segment_urls = [u for u in new_urls if u not in old_urls]
-                    if new_segment_urls and recent_activity:
-                        # Prebuffer the most recent new segments
-                        segments_to_buffer = new_segment_urls[-self.prebuffer_segments :]
-                        asyncio.create_task(self._prebuffer_segments(segments_to_buffer, headers))
-                        logger.debug(f"Prebuffering {len(segments_to_buffer)} new segments for {playlist_url}")
-
+                await asyncio.sleep(self._cleanup_interval)
+                await self._cleanup_inactive_prefetchers()
+            except asyncio.CancelledError:
+                return
             except Exception as e:
-                logger.debug(f"Playlist refresh error for {playlist_url}: {e}")
+                logger.warning(f"[cleanup_loop] Error: {e}")
 
-            await asyncio.sleep(sleep_interval)
+    async def _cleanup_inactive_prefetchers(self) -> None:
+        """Remove prefetchers that haven't been accessed recently."""
+        now = time.time()
+        to_remove = []
 
-    def _cleanup_playlist(self, playlist_url: str) -> None:
-        """Clean up state for a playlist."""
-        # Remove segment mappings
-        urls = self.segment_urls.pop(playlist_url, [])
-        for url in urls:
-            self.segment_to_playlist.pop(url, None)
+        async with self._prefetcher_lock:
+            for playlist_url, prefetcher in self.active_prefetchers.items():
+                inactive_time = now - prefetcher.last_access
+                if inactive_time > self.inactivity_timeout:
+                    to_remove.append(playlist_url)
+                    logger.info(f"[cleanup] Removing inactive prefetcher ({inactive_time:.0f}s): {playlist_url}")
 
-        # Remove playlist state
-        state = self.playlist_state.pop(playlist_url, None)
-        if state and state.get("refresh_task"):
-            state["refresh_task"].cancel()
+            for playlist_url in to_remove:
+                prefetcher = self.active_prefetchers.pop(playlist_url, None)
+                if prefetcher:
+                    prefetcher.stop()
+                    # Clean up reverse mapping
+                    for url in prefetcher.segment_urls:
+                        self.segment_to_playlist.pop(url, None)
+
+        if to_remove:
+            logger.info(f"[cleanup] Removed {len(to_remove)} inactive prefetchers")
 
     def get_stats(self) -> dict:
         """Get current prebuffer statistics."""
-        return self.stats.to_dict()
+        stats = self.stats.to_dict()
+        stats["active_prefetchers"] = len(self.active_prefetchers)
+        return stats
 
     def clear_cache(self) -> None:
         """Clear all prebuffer state and log final stats."""
         self.log_stats()
 
-        # Cancel all refresh tasks
-        for state in self.playlist_state.values():
-            if state.get("refresh_task"):
-                state["refresh_task"].cancel()
+        # Stop all prefetchers
+        for prefetcher in self.active_prefetchers.values():
+            prefetcher.stop()
 
-        self.segment_urls.clear()
+        self.active_prefetchers.clear()
         self.segment_to_playlist.clear()
-        self.playlist_state.clear()
         self.stats.reset()
 
         logger.info("HLS pre-buffer state cleared")
@@ -560,6 +473,8 @@ class HLSPreBuffer:
     async def close(self) -> None:
         """Close the pre-buffer system."""
         self.clear_cache()
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
         await self.client.aclose()
 
 

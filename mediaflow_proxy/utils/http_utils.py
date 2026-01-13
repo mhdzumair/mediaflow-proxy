@@ -71,10 +71,12 @@ async def fetch_with_retry(client, method, url, headers, follow_redirects=True, 
         logger.warning(f"Timeout while downloading {url}")
         raise DownloadError(409, f"Timeout while downloading {url}")
     except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error {e.response.status_code} while downloading {url}")
         if e.response.status_code == 404:
-            logger.error(f"Segment Resource not found: {url}")
+            # 404 for segments is common with live HLS streams (token expiration)
+            # Log at debug level to reduce noise
+            logger.debug(f"Segment not found (404): {url}")
             raise e
+        logger.error(f"HTTP error {e.response.status_code} while downloading {url}")
         raise DownloadError(e.response.status_code, f"HTTP error {e.response.status_code} while downloading {url}")
     except Exception as e:
         logger.error(f"Error downloading {url}: {e}")
@@ -119,10 +121,12 @@ class Streamer:
             logger.warning("Timeout while creating streaming response")
             raise DownloadError(409, "Timeout while creating streaming response")
         except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error {e.response.status_code} while creating streaming response")
             if e.response.status_code == 404:
-                logger.error(f"Segment Resource not found: {url}")
+                # 404 for segments is common with live HLS streams (token expiration)
+                # Log at debug level to reduce noise
+                logger.debug(f"Segment not found (404): {url}")
                 raise e
+            logger.error(f"HTTP error {e.response.status_code} while creating streaming response")
             raise DownloadError(
                 e.response.status_code, f"HTTP error {e.response.status_code} while creating streaming response"
             )
