@@ -20,6 +20,7 @@ from tqdm.asyncio import tqdm as tqdm_asyncio
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.const import SUPPORTED_REQUEST_HEADERS
 from mediaflow_proxy.utils.crypto_utils import EncryptionHandler
+from mediaflow_proxy.utils.stream_transformers import StreamTransformer
 
 logger = logging.getLogger(__name__)
 
@@ -81,10 +82,6 @@ async def fetch_with_retry(client, method, url, headers, follow_redirects=True, 
 
 
 class Streamer:
-    # PNG signature and IEND marker for fake PNG header detection (StreamWish/FileMoon)
-    _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-    _PNG_IEND_MARKER = b"\x49\x45\x4E\x44\xAE\x42\x60\x82"
-
     def __init__(self, client):
         """
         Initializes the Streamer with an HTTP client.
@@ -136,67 +133,31 @@ class Streamer:
             logger.error(f"Error creating streaming response: {e}")
             raise RuntimeError(f"Error creating streaming response: {e}")
 
-    @staticmethod
-    def _find_ts_start(buffer: bytes) -> typing.Optional[int]:
+    async def stream_content(
+        self, transformer: typing.Optional[StreamTransformer] = None
+    ) -> typing.AsyncGenerator[bytes, None]:
         """
-        Find MPEG-TS sync byte (0x47) aligned on 188 bytes.
-        Returns offset where TS starts or None.
-        """
-        TS_SYNC = 0x47
-        TS_PACKET = 188
-
-        max_i = len(buffer) - TS_PACKET
-        for i in range(max(0, max_i)):
-            if buffer[i] == TS_SYNC and buffer[i + TS_PACKET] == TS_SYNC:
-                return i
-        return None
-
-    @staticmethod
-    def _strip_fake_png_wrapper(chunk: bytes) -> bytes:
-        """
-        Strip fake PNG wrapper from chunk data.
-
-        Some streaming services (StreamWish, FileMoon) prepend a fake PNG image
-        to video data to evade detection. This method detects and removes it.
-
+        Stream content from the response, optionally applying a transformer.
+        
         Args:
-            chunk: The raw chunk data that may contain a fake PNG header.
-
-        Returns:
-            The chunk with fake PNG wrapper removed, or original chunk if not present.
+            transformer: Optional StreamTransformer to apply host-specific
+                        content manipulation (e.g., PNG stripping, TS detection).
+                        If None, content is streamed directly without modification.
+        
+        Yields:
+            Bytes chunks from the upstream response.
         """
-        if not chunk.startswith(Streamer._PNG_SIGNATURE):
-            return chunk
-
-        # Find the IEND marker that signals end of PNG data
-        iend_pos = chunk.find(Streamer._PNG_IEND_MARKER)
-        if iend_pos == -1:
-            # IEND not found in this chunk - return as-is to avoid data corruption
-            logger.debug("PNG signature detected but IEND marker not found in chunk")
-            return chunk
-
-        # Calculate position after IEND marker
-        content_start = iend_pos + len(Streamer._PNG_IEND_MARKER)
-
-        # Skip any padding bytes (null or 0xFF) between PNG and actual content
-        while content_start < len(chunk) and chunk[content_start] in (0x00, 0xFF):
-            content_start += 1
-
-        stripped_bytes = content_start
-        logger.debug(f"Stripped {stripped_bytes} bytes of fake PNG wrapper from stream")
-
-        return chunk[content_start:]
-
-    async def stream_content(self) -> typing.AsyncGenerator[bytes, None]:
         if not self.response:
             raise RuntimeError("No response available for streaming")
 
-        buffer = bytearray()
-        ts_started = False
-        MAX_PREFETCH = 512 * 1024  # 512 KB safety limit
-
         try:
             self.parse_content_range()
+            
+            # Choose the chunk source based on whether we have a transformer
+            if transformer:
+                chunk_source = transformer.transform(self.response.aiter_bytes())
+            else:
+                chunk_source = self.response.aiter_bytes()
 
             if settings.enable_streaming_progress:
                 with tqdm_asyncio(
@@ -209,103 +170,13 @@ class Streamer:
                     ncols=100,
                     mininterval=1,
                 ) as self.progress_bar:
-                    async for chunk in self.response.aiter_bytes():
-                        if ts_started:
-                            # Normal streaming once TS has started
-                            yield chunk
-                            self.bytes_transferred += len(chunk)
-                            self.progress_bar.update(len(chunk))
-                            continue
-
-                        # Prebuffer phase (until we find TS or pass through)
-                        buffer += chunk
-
-                        # Fast-path: if it's an m3u8 playlist, don't do TS detection
-                        if len(buffer) >= 7 and buffer[:7] in (b"#EXTM3U", b"#EXT-X-"):
-                            yield bytes(buffer)
-                            self.bytes_transferred += len(buffer)
-                            self.progress_bar.update(len(buffer))
-                            buffer.clear()
-                            ts_started = True
-                            continue
-
-                        # Strip fake PNG wrapper if present
-                        if buffer.startswith(self._PNG_SIGNATURE):
-                            if self._PNG_IEND_MARKER in buffer:
-                                buffer = bytearray(self._strip_fake_png_wrapper(bytes(buffer)))
-
-                        # Skip pure 0xFF padding bytes (TurboVid style)
-                        while buffer and buffer[0] == 0xFF:
-                            buffer.pop(0)
-
-                        ts_offset = self._find_ts_start(bytes(buffer))
-                        if ts_offset is None:
-                            # Keep buffering until we find TS or hit limit
-                            if len(buffer) > MAX_PREFETCH:
-                                logger.warning("TS sync not found after large prebuffer, forcing passthrough")
-                                yield bytes(buffer)
-                                self.bytes_transferred += len(buffer)
-                                self.progress_bar.update(len(buffer))
-                                buffer.clear()
-                                ts_started = True
-                            continue
-
-                        # TS found: emit from ts_offset and switch to pass-through
-                        ts_started = True
-                        out = bytes(buffer[ts_offset:])
-                        buffer.clear()
-
-                        if out:
-                            yield out
-                            self.bytes_transferred += len(out)
-                            self.progress_bar.update(len(out))
-            else:
-                async for chunk in self.response.aiter_bytes():
-                    if ts_started:
-                        # Normal streaming once TS has started
+                    async for chunk in chunk_source:
                         yield chunk
                         self.bytes_transferred += len(chunk)
-                        continue
-
-                    # Prebuffer phase (until we find TS or pass through)
-                    buffer += chunk
-
-                    # Fast-path: if it's an m3u8 playlist, don't do TS detection
-                    if len(buffer) >= 7 and buffer[:7] in (b"#EXTM3U", b"#EXT-X-"):
-                        yield bytes(buffer)
-                        self.bytes_transferred += len(buffer)
-                        buffer.clear()
-                        ts_started = True
-                        continue
-
-                    # Strip fake PNG wrapper if present
-                    if buffer.startswith(self._PNG_SIGNATURE):
-                        if self._PNG_IEND_MARKER in buffer:
-                            buffer = bytearray(self._strip_fake_png_wrapper(bytes(buffer)))
-
-                    # Skip pure 0xFF padding bytes (TurboVid style)
-                    while buffer and buffer[0] == 0xFF:
-                        buffer.pop(0)
-
-                    ts_offset = self._find_ts_start(bytes(buffer))
-                    if ts_offset is None:
-                        # Keep buffering until we find TS or hit limit
-                        if len(buffer) > MAX_PREFETCH:
-                            logger.warning("TS sync not found after large prebuffer, forcing passthrough")
-                            yield bytes(buffer)
-                            self.bytes_transferred += len(buffer)
-                            buffer.clear()
-                            ts_started = True
-                        continue
-
-                    # TS found: emit from ts_offset and switch to pass-through
-                    ts_started = True
-                    out = bytes(buffer[ts_offset:])
-                    buffer.clear()
-
-                    if out:
-                        yield out
-                        self.bytes_transferred += len(out)
+                        self.progress_bar.update(len(chunk))
+            else:
+                async for chunk in chunk_source:
+                    yield chunk
                     self.bytes_transferred += len(chunk)
 
         except httpx.TimeoutException:
@@ -337,9 +208,6 @@ class Streamer:
                 return
             else:
                 raise DownloadError(502, f"ReadError while streaming: {e}")
-        except Exception as e:
-            logger.error(f"Error streaming content: {e}")
-            raise
 
             
     @staticmethod
@@ -453,6 +321,7 @@ def encode_mediaflow_proxy_url(
     expiration: int = None,
     ip: str = None,
     filename: typing.Optional[str] = None,
+    stream_transformer: typing.Optional[str] = None,
 ) -> str:
     """
     Encodes & Encrypt (Optional) a MediaFlow proxy URL with query parameters and headers.
@@ -470,6 +339,7 @@ def encode_mediaflow_proxy_url(
         expiration (int, optional): The expiration time for the encrypted token. Defaults to None.
         ip (str, optional): The public IP address to include in the query parameters. Defaults to None.
         filename (str, optional): Filename to be preserved for media players like Infuse. Defaults to None.
+        stream_transformer (str, optional): ID of the stream transformer to apply. Defaults to None.
 
     Returns:
         str: The encoded MediaFlow proxy URL.
@@ -497,6 +367,10 @@ def encode_mediaflow_proxy_url(
     # Add remove headers if provided (x_ prefix for "exclude")
     if remove_response_headers:
         query_params["x_headers"] = ",".join(remove_response_headers)
+    
+    # Add stream transformer if provided
+    if stream_transformer:
+        query_params["transformer"] = stream_transformer
 
     # Construct the base URL
     if endpoint is None:
