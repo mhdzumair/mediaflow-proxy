@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import re
 from typing import Annotated
@@ -26,7 +25,6 @@ from mediaflow_proxy.schemas import (
     MPDInitParams,
 )
 from mediaflow_proxy.utils.base64_utils import process_potential_base64_url
-from mediaflow_proxy.utils.dash_prebuffer import dash_prebuffer
 from mediaflow_proxy.utils.extractor_helpers import (
     check_and_extract_dlhd_stream,
     check_and_extract_sportsonline_stream,
@@ -40,6 +38,7 @@ from mediaflow_proxy.utils.http_utils import (
     apply_header_manipulation,
 )
 from mediaflow_proxy.utils.m3u8_processor import M3U8Processor
+from mediaflow_proxy.utils.stream_transformers import apply_transformer_to_bytes
 
 
 logger = logging.getLogger(__name__)
@@ -358,18 +357,41 @@ async def hls_key_proxy(
     return await handle_hls_stream_proxy(request, hls_params, proxy_headers, hls_params.transformer)
 
 
-@proxy_router.get("/hls/segment")
+# Map file extensions to MIME types for HLS segments
+HLS_SEGMENT_MIME_TYPES = {
+    "ts": "video/mp2t",      # MPEG-TS (traditional HLS)
+    "m4s": "video/mp4",      # fMP4 segment (modern HLS/CMAF)
+    "mp4": "video/mp4",      # fMP4 segment (alternative extension)
+    "m4a": "audio/mp4",      # Audio-only fMP4 segment
+    "m4v": "video/mp4",      # Video fMP4 segment (alternative)
+    "aac": "audio/aac",      # AAC audio segment
+}
+
+
+@proxy_router.get("/hls/segment.{ext}", name="hls_segment_proxy")
 async def hls_segment_proxy(
     request: Request,
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
-    segment_url: str = Query(..., description="URL of the HLS segment"),
+    ext: str,
+    segment_url: str = Query(..., description="URL of the HLS segment", alias="d"),
     transformer: str = Query(None, description="Stream transformer ID for content manipulation"),
 ):
     """
-    Proxy HLS segments with optional pre-buffering support.
+    Proxy HLS segments with pre-buffering support.
+
+    This endpoint supports multiple segment formats:
+    - /hls/segment.ts  - MPEG-TS segments (traditional HLS)
+    - /hls/segment.m4s - fMP4 segments (modern HLS/CMAF)
+    - /hls/segment.mp4 - fMP4 segments (alternative)
+    - /hls/segment.m4a - Audio fMP4 segments
+    - /hls/segment.aac - AAC audio segments
+
+    Uses event-based coordination to prevent duplicate downloads between
+    player requests and background prebuffering.
 
     Args:
         request (Request): The incoming HTTP request.
+        ext (str): File extension determining the segment format.
         segment_url (str): URL of the HLS segment to proxy.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
         transformer (str, optional): Stream transformer ID for content manipulation.
@@ -377,8 +399,16 @@ async def hls_segment_proxy(
     Returns:
         Response: The HTTP response with the segment content.
     """
+    # Get MIME type for this extension
+    mime_type = HLS_SEGMENT_MIME_TYPES.get(ext.lower(), "application/octet-stream")
+
     # Sanitize segment URL to fix common encoding issues
+    original_url = segment_url
     segment_url = sanitize_url(segment_url)
+
+    logger.info(f"[hls_segment_proxy] Request for: {segment_url}")
+    if original_url != segment_url:
+        logger.warning(f"[hls_segment_proxy] URL was sanitized! Original: {original_url}")
 
     # Extract headers for pre-buffering
     headers = {}
@@ -386,69 +416,36 @@ async def hls_segment_proxy(
         if key.startswith("h_"):
             headers[key[2:]] = value
 
-    # Try to get segment from pre-buffer cache first
     if settings.enable_hls_prebuffer:
-        cached_segment = await hls_prebuffer.get_segment(segment_url, headers)
-        if cached_segment:
-            # Avvia prebuffer dei successivi in background
-            asyncio.create_task(hls_prebuffer.prebuffer_from_segment(segment_url, headers))
-            # Apply header manipulation to cached response
+        # Notify the prefetcher that this segment is needed (priority download)
+        # This ensures the player's segment is downloaded first, then prefetcher
+        # continues with sequential prefetch of remaining segments
+        await hls_prebuffer.request_segment(segment_url)
+
+        # Use cross-process coordination to get the segment
+        segment_data = await hls_prebuffer.get_or_download(segment_url, headers)
+
+        if segment_data:
+            logger.info(f"[hls_segment_proxy] Serving from prebuffer ({len(segment_data)} bytes): {segment_url}")
+
+            # Apply transformer if specified (e.g., PNG wrapper stripping)
+            if transformer:
+                segment_data = await apply_transformer_to_bytes(segment_data, transformer)
+
+            # Return cached/downloaded segment
             base_headers = {
-                "content-type": "video/mp2t",
+                "content-type": mime_type,
                 "cache-control": "public, max-age=3600",
                 "access-control-allow-origin": "*",
             }
             response_headers = apply_header_manipulation(base_headers, proxy_headers)
-            return Response(content=cached_segment, media_type="video/mp2t", headers=response_headers)
+            return Response(content=segment_data, media_type=mime_type, headers=response_headers)
 
-    # Fallback to direct streaming se non in cache:
-    # prima di restituire, prova comunque a far partire il prebuffer dei successivi
-    if settings.enable_hls_prebuffer:
-        asyncio.create_task(hls_prebuffer.prebuffer_from_segment(segment_url, headers))
+        # get_or_download returned None (timeout or error) - fall through to streaming
+        logger.warning(f"[hls_segment_proxy] Prebuffer timeout, using direct streaming: {segment_url}")
+
+    # Fallback to direct streaming
     return await handle_stream_request("GET", segment_url, proxy_headers, transformer)
-
-
-@proxy_router.get("/dash/segment")
-async def dash_segment_proxy(
-    request: Request,
-    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
-    segment_url: str = Query(..., description="URL of the DASH segment"),
-):
-    """
-    Proxy DASH segments with optional pre-buffering support.
-
-    Args:
-        request (Request): The incoming HTTP request.
-        segment_url (str): URL of the DASH segment to proxy.
-        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
-
-    Returns:
-        Response: The HTTP response with the segment content.
-    """
-    # Sanitize segment URL to fix common encoding issues
-    segment_url = sanitize_url(segment_url)
-
-    # Extract headers for pre-buffering
-    headers = {}
-    for key, value in request.query_params.items():
-        if key.startswith("h_"):
-            headers[key[2:]] = value
-
-    # Try to get segment from pre-buffer cache first
-    if settings.enable_dash_prebuffer:
-        cached_segment = await dash_prebuffer.get_segment(segment_url, headers)
-        if cached_segment:
-            # Apply header manipulation to cached response
-            base_headers = {
-                "content-type": "video/mp4",
-                "cache-control": "public, max-age=3600",
-                "access-control-allow-origin": "*",
-            }
-            response_headers = apply_header_manipulation(base_headers, proxy_headers)
-            return Response(content=cached_segment, media_type="video/mp4", headers=response_headers)
-
-    # Fallback to direct streaming if not in cache
-    return await handle_stream_request("GET", segment_url, proxy_headers)
 
 
 @proxy_router.head("/stream")
@@ -464,6 +461,9 @@ async def proxy_stream_endpoint(
 ):
     """
     Proxify stream requests to the given video URL.
+
+    This is a general-purpose stream proxy endpoint. For HLS segments with prebuffer
+    support, use the dedicated /hls/segment.ts endpoint instead.
 
     Args:
         request (Request): The incoming HTTP request.
@@ -495,22 +495,17 @@ async def proxy_stream_endpoint(
         proxy_headers.request["range"] = "bytes=0-"
 
     if filename:
-        # For segment files (.ts, .mp4, etc.), don't set content-disposition as attachment
-        # This allows the URL path to have proper extension for player compatibility
-        # while still streaming inline
-        segment_extensions = (".ts", ".mp4", ".m4s", ".aac", ".m4a", ".vtt", ".srt")
-        if not filename.lower().endswith(segment_extensions):
-            # If a filename is provided (not a segment), set it in the headers using RFC 6266 format
-            try:
-                # Try to encode with latin-1 first (simple case)
-                filename.encode("latin-1")
-                content_disposition = f'attachment; filename="{filename}"'
-            except UnicodeEncodeError:
-                # For filenames with non-latin-1 characters, use RFC 6266 format with UTF-8
-                encoded_filename = quote(filename.encode("utf-8"))
-                content_disposition = f"attachment; filename*=UTF-8''{encoded_filename}"
+        # If a filename is provided (not a segment), set it in the headers using RFC 6266 format
+        try:
+            # Try to encode with latin-1 first (simple case)
+            filename.encode("latin-1")
+            content_disposition = f'attachment; filename="{filename}"'
+        except UnicodeEncodeError:
+            # For filenames with non-latin-1 characters, use RFC 6266 format with UTF-8
+            encoded_filename = quote(filename.encode("utf-8"))
+            content_disposition = f"attachment; filename*=UTF-8''{encoded_filename}"
 
-            proxy_headers.response.update({"content-disposition": content_disposition})
+        proxy_headers.response.update({"content-disposition": content_disposition})
 
     return await proxy_stream(request.method, destination, proxy_headers, transformer)
 

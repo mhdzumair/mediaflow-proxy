@@ -195,3 +195,38 @@ def get_transformer(transformer_id: typing.Optional[str]) -> typing.Optional[Str
         return None
 
     return transformer_class()
+
+
+async def apply_transformer_to_bytes(
+    data: bytes,
+    transformer_id: typing.Optional[str],
+) -> bytes:
+    """
+    Apply a transformer to already-downloaded bytes data.
+
+    This is useful when serving cached segments that need transformation.
+    Creates a single-chunk async iterator and collects the transformed output.
+
+    Args:
+        data: The raw bytes data to transform.
+        transformer_id: The transformer identifier (e.g., "ts_stream").
+
+    Returns:
+        Transformed bytes, or original data if no transformer specified.
+    """
+    if not transformer_id:
+        return data
+
+    transformer = get_transformer(transformer_id)
+    if not transformer:
+        return data
+
+    async def single_chunk_iterator():
+        yield data
+
+    # Collect all transformed chunks
+    result = bytearray()
+    async for chunk in transformer.transform(single_chunk_iterator()):
+        result.extend(chunk)
+
+    return bytes(result)

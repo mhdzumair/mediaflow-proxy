@@ -1,4 +1,5 @@
 import asyncio
+import fcntl
 import hashlib
 import json
 import logging
@@ -8,6 +9,7 @@ import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union, Any
@@ -315,6 +317,141 @@ class AsyncMemoryCache:
             return False
 
 
+class CrossProcessLock:
+    """
+    File-based lock for cross-process coordination.
+
+    Uses fcntl.flock() for cross-process locking, which works across
+    multiple uvicorn workers. Each lock is represented by a file in
+    the lock directory.
+    """
+
+    def __init__(self, lock_dir: Optional[str] = None):
+        """
+        Initialize the cross-process lock manager.
+
+        Args:
+            lock_dir: Directory to store lock files. Defaults to /tmp/mediaflow_locks
+        """
+        if lock_dir is None:
+            lock_dir = os.path.join(tempfile.gettempdir(), "mediaflow_locks")
+        self.lock_dir = Path(lock_dir)
+        self._init_lock_dir()
+        self._open_files: dict[str, Any] = {}  # Track open file handles per key
+
+    def _init_lock_dir(self) -> None:
+        """Create lock directory if it doesn't exist."""
+        try:
+            self.lock_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.error(f"Failed to create lock directory {self.lock_dir}: {e}")
+            raise
+
+    def _get_lock_path(self, key: str) -> Path:
+        """Get the lock file path for a given key."""
+        key_hash = hashlib.md5(key.encode()).hexdigest()
+        return self.lock_dir / f"{key_hash}.lock"
+
+    @asynccontextmanager
+    async def acquire(self, key: str, timeout: float = 30.0):
+        """
+        Acquire an exclusive lock for a key.
+
+        This is an async context manager that acquires a file-based lock.
+        The lock is released when the context exits.
+
+        Args:
+            key: The key to lock (typically a URL)
+            timeout: Maximum time to wait for the lock (seconds)
+
+        Yields:
+            None when lock is acquired
+
+        Raises:
+            asyncio.TimeoutError: If lock cannot be acquired within timeout
+        """
+        lock_path = self._get_lock_path(key)
+        lock_file = None
+        acquired = False
+
+        try:
+            # Open the lock file (create if doesn't exist)
+            loop = asyncio.get_event_loop()
+
+            def _open_lock_file():
+                return open(lock_path, "w")
+
+            lock_file = await loop.run_in_executor(None, _open_lock_file)
+
+            # Try to acquire the lock with timeout
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                try:
+                    # Non-blocking lock attempt
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                    logger.debug(f"[CrossProcessLock] Acquired lock for: {key[:80]}...")
+                    break
+                except BlockingIOError:
+                    # Lock is held by another process, wait a bit
+                    await asyncio.sleep(0.05)  # 50ms between retries
+
+            if not acquired:
+                raise asyncio.TimeoutError(f"Failed to acquire lock for {key[:80]}... within {timeout}s")
+
+            yield
+
+        finally:
+            if lock_file is not None:
+                try:
+                    if acquired:
+                        # Release the lock
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                        logger.debug(f"[CrossProcessLock] Released lock for: {key[:80]}...")
+                    lock_file.close()
+                except Exception as e:
+                    logger.warning(f"[CrossProcessLock] Error releasing lock: {e}")
+
+    async def cleanup_stale_locks(self, max_age_seconds: int = 300) -> int:
+        """
+        Remove lock files older than max_age_seconds.
+
+        This should be called periodically to clean up orphaned lock files
+        from crashed processes.
+
+        Args:
+            max_age_seconds: Maximum age of lock files to keep
+
+        Returns:
+            Number of lock files removed
+        """
+        removed_count = 0
+        try:
+            current_time = time.time()
+            for lock_file in self.lock_dir.glob("*.lock"):
+                try:
+                    file_age = current_time - lock_file.stat().st_mtime
+                    if file_age > max_age_seconds:
+                        lock_file.unlink(missing_ok=True)
+                        removed_count += 1
+                except FileNotFoundError:
+                    # File was already deleted
+                    pass
+                except Exception as e:
+                    logger.warning(f"[CrossProcessLock] Error removing stale lock {lock_file}: {e}")
+        except Exception as e:
+            logger.error(f"[CrossProcessLock] Error during stale lock cleanup: {e}")
+
+        if removed_count > 0:
+            logger.info(f"[CrossProcessLock] Cleaned up {removed_count} stale lock files")
+
+        return removed_count
+
+
+# Global cross-process lock instance for segment downloads
+SEGMENT_DOWNLOAD_LOCK = CrossProcessLock()
+
+
 # Create cache instances
 INIT_SEGMENT_CACHE = HybridCache(
     cache_dir_name="init_segment_cache",
@@ -337,9 +474,12 @@ EXTRACTOR_CACHE = HybridCache(
     max_memory_size=50 * 1024 * 1024,
 )
 
-# Cache for media segments (prebuffer) - memory only with short TTL for live streams
-SEGMENT_CACHE = AsyncMemoryCache(
-    max_memory_size=200 * 1024 * 1024,  # 200MB for media segments
+# Cache for media segments (prebuffer) - file-backed for cross-worker sharing
+# Uses HybridCache so segments cached by one worker are available to all workers
+SEGMENT_CACHE = HybridCache(
+    cache_dir_name="segment_cache",
+    ttl=60,  # Short TTL for live streams (60 seconds)
+    max_memory_size=200 * 1024 * 1024,  # 200MB memory cache per worker
 )
 
 

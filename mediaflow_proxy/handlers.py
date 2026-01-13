@@ -54,7 +54,12 @@ def handle_exceptions(exception: Exception) -> Response:
         Response: An HTTP response corresponding to the exception type.
     """
     if isinstance(exception, httpx.HTTPStatusError):
-        logger.error(f"Upstream service error while handling request: {exception}")
+        # 404 errors are common for live HLS streams with expiring tokens
+        # Log at debug level to reduce noise
+        if exception.response.status_code == 404:
+            logger.debug(f"Upstream 404 (likely expired segment): {exception.request.url}")
+        else:
+            logger.error(f"Upstream service error while handling request: {exception}")
         return Response(status_code=exception.response.status_code, content=f"Upstream service error: {exception}")
     elif isinstance(exception, DownloadError):
         logger.error(f"Error downloading content: {exception}")
@@ -358,12 +363,44 @@ async def fetch_and_process_m3u8(
         # Don't include propagate headers for manifests - they should only apply to segments
         response_headers = apply_header_manipulation(base_headers, proxy_headers, include_propagate=False)
 
+        # Get the generator for processing
+        m3u8_generator = processor.process_m3u8_streaming(
+            streamer.stream_content(transformer), str(streamer.response.url)
+        )
+
+        # Pre-fetch the first chunk to validate the content before starting the response
+        # This allows us to return a proper HTTP error if the upstream returns HTML
+        first_chunk = None
+        try:
+            first_chunk = await m3u8_generator.__anext__()
+        except ValueError as e:
+            # Upstream returned HTML instead of m3u8
+            await streamer.close()
+            raise HTTPException(status_code=502, detail=str(e))
+        except StopAsyncIteration:
+            # Empty response - this shouldn't happen for valid m3u8
+            await streamer.close()
+            raise HTTPException(status_code=502, detail="Upstream returned empty m3u8 playlist")
+
+        # Create a wrapper that yields the first chunk then continues with the rest
+        async def prefetched_generator():
+            yield first_chunk
+            try:
+                async for chunk in m3u8_generator:
+                    yield chunk
+            except ValueError as e:
+                # This shouldn't happen since we already validated the first chunk,
+                # but handle it gracefully if it does
+                logger.error(f"Unexpected ValueError during m3u8 streaming: {e}")
+
         # Create streaming response with on-the-fly processing
         return EnhancedStreamingResponse(
-            processor.process_m3u8_streaming(streamer.stream_content(transformer), str(streamer.response.url)),
+            prefetched_generator(),
             headers=response_headers,
             background=BackgroundTask(streamer.close),
         )
+    except HTTPException:
+        raise
     except Exception as e:
         await streamer.close()
         return handle_exceptions(e)
@@ -485,6 +522,10 @@ async def get_segment(
     """
     Retrieves and processes a media segment, decrypting it if necessary.
 
+    Uses event-based coordination with the DASH prebuffer to prevent duplicate
+    downloads. The prebuffer's get_or_download() handles cache checks, waiting
+    for existing downloads, and starting new downloads as needed.
+
     Args:
         segment_params (MPDSegmentParams): The parameters for the segment request.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
@@ -494,21 +535,34 @@ async def get_segment(
     """
     try:
         live_cache_ttl = settings.mpd_live_init_cache_ttl if segment_params.is_live else None
-        segment_cache_ttl = settings.dash_segment_cache_ttl
+        segment_url = segment_params.segment_url
 
-        # Check segment cache first (from prebuffer)
-        segment_content = await get_cached_segment(segment_params.segment_url)
-        cache_hit = segment_content is not None
-
-        # Track cache statistics
-        if cache_hit:
-            dash_prebuffer.record_cache_hit()
-            logger.info(f"Segment cache HIT: {segment_params.segment_url.split('/')[-1]}")
+        # Use event-based coordination for segment download
+        # get_or_download() handles:
+        # - Cache check
+        # - Waiting for existing downloads (via asyncio.Event)
+        # - Starting new download if needed
+        # - Caching the result
+        if settings.enable_dash_prebuffer:
+            segment_content = await dash_prebuffer.get_or_download(
+                segment_url, proxy_headers.request
+            )
         else:
-            dash_prebuffer.record_cache_miss()
+            # Prebuffer disabled - check cache then download directly
+            segment_content = await get_cached_segment(segment_url)
+            if not segment_content:
+                segment_content = await download_file_with_retry(segment_url, proxy_headers.request)
+                # Cache for future requests
+                if segment_content and segment_params.is_live:
+                    asyncio.create_task(
+                        set_cached_segment(segment_url, segment_content, ttl=settings.dash_segment_cache_ttl)
+                    )
 
-        # Fetch init segment and media segment in parallel for better performance
-        init_task = get_cached_init_segment(
+        if not segment_content:
+            raise HTTPException(status_code=502, detail="Failed to download segment")
+
+        # Fetch init segment (uses its own cache)
+        init_content = await get_cached_init_segment(
             segment_params.init_url,
             proxy_headers.request,
             cache_token=segment_params.key_id,
@@ -516,33 +570,18 @@ async def get_segment(
             byte_range=segment_params.init_range,
         )
 
-        if cache_hit:
-            # Only fetch init if segment was cached
-            init_content = await init_task
-        else:
-            # Fetch both in parallel
-            segment_task = download_file_with_retry(segment_params.segment_url, proxy_headers.request)
-            init_content, segment_content = await asyncio.gather(init_task, segment_task)
-
-            # Cache the segment for future requests (configurable TTL)
-            if segment_content and segment_params.is_live:
-                asyncio.create_task(
-                    set_cached_segment(segment_params.segment_url, segment_content, ttl=segment_cache_ttl)
-                )
-
         # Trigger continuous prefetch for live streams
         if settings.enable_dash_prebuffer and segment_params.is_live:
-            # Extract MPD base URL from init_url for prefetching
-            # The MPD URL is stored in active_streams when manifest was first requested
-            for mpd_url, stream_info in dash_prebuffer.active_streams.items():
+            for mpd_url in dash_prebuffer.active_streams:
                 asyncio.create_task(
                     dash_prebuffer.prefetch_upcoming_segments(
                         mpd_url,
-                        segment_params.segment_url,
+                        segment_url,
                         proxy_headers.request,
                     )
                 )
                 break  # Only need to trigger once
+
     except Exception as e:
         return handle_exceptions(e)
 
