@@ -249,6 +249,17 @@
                         </div>
                     </div>
                     
+                    <!-- Skip Segments Section -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Skip Segments <span class="text-gray-400 font-normal">(Intro/Outro Skip)</span></h4>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Time Ranges to Skip</label>
+                            <input type="text" id="hls-skip-segments" placeholder="0-90,1750-1800 (start-end in seconds, comma-separated)"
+                                class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Format: start-end,start-end (e.g., "0-90" skips first 90 seconds, "0-112,1750-1800" skips intro and outro). Supports decimal values.</p>
+                        </div>
+                    </div>
+                    
                     <!-- HLS Response Headers Section -->
                     <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
                         <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Response Headers <span class="text-gray-400 font-normal">(Advanced)</span></h4>
@@ -334,6 +345,17 @@
                             <option value="240p">240p</option>
                         </select>
                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Select specific resolution (falls back to closest lower if not available)</p>
+                    </div>
+                    
+                    <!-- Skip Segments Section -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Skip Segments <span class="text-gray-400 font-normal">(Intro/Outro Skip)</span></h4>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Time Ranges to Skip</label>
+                            <input type="text" id="mpd-skip-segments" placeholder="0-90,1750-1800 (start-end in seconds, comma-separated)"
+                                class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Format: start-end,start-end (e.g., "0-90" skips first 90 seconds, "0-112,1750-1800" skips intro and outro). Supports decimal values.</p>
+                        </div>
                     </div>
                     
                     <!-- MPD Response Headers Section -->
@@ -1068,6 +1090,10 @@
                 const resolution = document.getElementById('hls-resolution').value;
                 if (resolution) params.append('resolution', resolution);
                 
+                // Skip segments
+                const skipSegments = document.getElementById('hls-skip-segments').value.trim();
+                if (skipSegments) params.append('skip', skipSegments);
+                
                 // Add HLS response headers (r_ prefix)
                 const hlsResponseHeaders = getHlsResponseHeaders();
                 for (const [name, value] of Object.entries(hlsResponseHeaders)) {
@@ -1104,6 +1130,10 @@
                 // Resolution selection
                 const resolution = document.getElementById('mpd-resolution').value;
                 if (resolution) params.append('resolution', resolution);
+                
+                // Skip segments
+                const skipSegments = document.getElementById('mpd-skip-segments').value.trim();
+                if (skipSegments) params.append('skip', skipSegments);
                 
                 // Add MPD response headers (r_ prefix)
                 const mpdResponseHeaders = getMpdResponseHeaders();

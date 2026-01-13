@@ -10,13 +10,14 @@ from mediaflow_proxy.utils.crypto_utils import encryption_handler
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url, get_original_scheme, ProxyRequestHeaders, apply_header_manipulation
 from mediaflow_proxy.utils.dash_prebuffer import dash_prebuffer
 from mediaflow_proxy.utils.cache_utils import get_cached_processed_init, set_cached_processed_init
+from mediaflow_proxy.utils.m3u8_processor import SkipSegmentFilter
 from mediaflow_proxy.configs import settings
 
 logger = logging.getLogger(__name__)
 
 
 async def process_manifest(
-    request: Request, mpd_dict: dict, proxy_headers: ProxyRequestHeaders, key_id: str = None, key: str = None, resolution: str = None
+    request: Request, mpd_dict: dict, proxy_headers: ProxyRequestHeaders, key_id: str = None, key: str = None, resolution: str = None, skip_segments: list = None
 ) -> Response:
     """
     Processes the MPD manifest and converts it to an HLS manifest.
@@ -28,11 +29,12 @@ async def process_manifest(
         key_id (str, optional): The DRM key ID. Defaults to None.
         key (str, optional): The DRM key. Defaults to None.
         resolution (str, optional): Target resolution (e.g., '1080p', '720p'). Defaults to None.
+        skip_segments (list, optional): List of time segments to skip. Each item should have 'start' and 'end' keys.
 
     Returns:
         Response: The HLS manifest as an HTTP response.
     """
-    hls_content = build_hls(mpd_dict, request, key_id, key, resolution)
+    hls_content = build_hls(mpd_dict, request, key_id, key, resolution, skip_segments)
     
     # Start DASH pre-buffering in background if enabled
     if settings.enable_dash_prebuffer:
@@ -54,7 +56,7 @@ async def process_manifest(
 
 
 async def process_playlist(
-    request: Request, mpd_dict: dict, profile_id: str, proxy_headers: ProxyRequestHeaders
+    request: Request, mpd_dict: dict, profile_id: str, proxy_headers: ProxyRequestHeaders, skip_segments: list = None
 ) -> Response:
     """
     Processes the MPD manifest and converts it to an HLS playlist for a specific profile.
@@ -64,6 +66,7 @@ async def process_playlist(
         mpd_dict (dict): The MPD manifest data.
         profile_id (str): The profile ID to generate the playlist for.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
+        skip_segments (list, optional): List of time segments to skip. Each item should have 'start' and 'end' keys.
 
     Returns:
         Response: The HLS playlist as an HTTP response.
@@ -75,7 +78,7 @@ async def process_playlist(
     if not matching_profiles:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    hls_content = build_hls_playlist(mpd_dict, matching_profiles, request)
+    hls_content = build_hls_playlist(mpd_dict, matching_profiles, request, skip_segments)
     
     # Trigger prebuffering of upcoming segments for live streams
     if settings.enable_dash_prebuffer and mpd_dict.get("isLive", False):
@@ -186,7 +189,7 @@ async def process_init_segment(
     return Response(content=processed_content, media_type=mimetype, headers=response_headers)
 
 
-def build_hls(mpd_dict: dict, request: Request, key_id: str = None, key: str = None, resolution: str = None) -> str:
+def build_hls(mpd_dict: dict, request: Request, key_id: str = None, key: str = None, resolution: str = None, skip_segments: list = None) -> str:
     """
     Builds an HLS manifest from the MPD manifest.
 
@@ -196,12 +199,19 @@ def build_hls(mpd_dict: dict, request: Request, key_id: str = None, key: str = N
         key_id (str, optional): The DRM key ID. Defaults to None.
         key (str, optional): The DRM key. Defaults to None.
         resolution (str, optional): Target resolution (e.g., '1080p', '720p'). Defaults to None.
+        skip_segments (list, optional): List of time segments to skip. Each item should have 'start' and 'end' keys.
 
     Returns:
         str: The HLS manifest as a string.
     """
     hls = ["#EXTM3U", "#EXT-X-VERSION:6"]
     query_params = dict(request.query_params)
+    
+    # Preserve skip parameter in query params so it propagates to playlists
+    if skip_segments:
+        # Convert back to compact format for URL
+        skip_str = ",".join(f"{s['start']}-{s['end']}" for s in skip_segments)
+        query_params["skip"] = skip_str
     has_encrypted = query_params.pop("has_encrypted", False)
 
     video_profiles = {}
@@ -292,7 +302,7 @@ def _filter_video_profiles_by_resolution(video_profiles: dict, target_resolution
     return {profile_id: (profile, playlist_url)}
 
 
-def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -> str:
+def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request, skip_segments: list = None) -> str:
     """
     Builds an HLS playlist from the MPD manifest for specific profiles.
 
@@ -300,6 +310,7 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
         mpd_dict (dict): The MPD manifest data.
         profiles (list[dict]): The profiles to include in the playlist.
         request (Request): The incoming HTTP request.
+        skip_segments (list, optional): List of time segments to skip. Each item should have 'start' and 'end' keys.
 
     Returns:
         str: The HLS playlist as a string.
@@ -307,7 +318,11 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
     hls = ["#EXTM3U", "#EXT-X-VERSION:6"]
 
     added_segments = 0
+    skipped_segments = 0
     is_live = mpd_dict.get("isLive", False)
+    
+    # Initialize skip filter if skip_segments provided
+    skip_filter = SkipSegmentFilter(skip_segments) if skip_segments else None
     
     # Use EXT-X-MAP for live streams to avoid duplicate moov atoms
     use_map = is_live
@@ -398,11 +413,28 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
             )
             hls.append(f'#EXT-X-MAP:URI="{init_map_url}"')
 
+        need_discontinuity = False
         for segment in trimmed_segments:
+            duration = segment["extinf"]
+            
+            # Check if this segment should be skipped
+            if skip_filter:
+                if skip_filter.should_skip_segment(duration):
+                    skip_filter.advance_time(duration)
+                    skipped_segments += 1
+                    need_discontinuity = True
+                    continue
+                skip_filter.advance_time(duration)
+            
+            # Add discontinuity marker after skipped segments
+            if need_discontinuity:
+                hls.append("#EXT-X-DISCONTINUITY")
+                need_discontinuity = False
+            
             program_date_time = segment.get("program_date_time")
             if program_date_time:
                 hls.append(f"#EXT-X-PROGRAM-DATE-TIME:{program_date_time}")
-            hls.append(f'#EXTINF:{segment["extinf"]:.3f},')
+            hls.append(f'#EXTINF:{duration:.3f},')
             
             segment_query_params = {
                 "init_url": init_url,
@@ -435,5 +467,8 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request) -
     if not mpd_dict["isLive"]:
         hls.append("#EXT-X-ENDLIST")
 
-    logger.info(f"Added {added_segments} segments to HLS playlist")
+    if skip_filter and skipped_segments > 0:
+        logger.info(f"Added {added_segments} segments to HLS playlist (skipped {skipped_segments} segments)")
+    else:
+        logger.info(f"Added {added_segments} segments to HLS playlist")
     return "\n".join(hls)

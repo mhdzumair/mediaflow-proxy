@@ -42,6 +42,7 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 - Real-time HLS manifest manipulation
 - HLS Key URL modifications for bypassing stream restrictions
 - **Base64 URL Support** - Automatic detection and processing of base64 encoded URLs
+- **Segment Skipping** - Skip specific time ranges in HLS and DASH streams (intro/outro skipping, ad removal)
 
 ### DASH/MPD Support Status
 
@@ -861,6 +862,15 @@ Disables the proxy for the current destination, performing a direct request.
 - **Usage:** Add `&no_proxy=true` to the proxy URL  
 - **Effect:** Bypasses all proxy functions for the destination, useful for debugging or testing stream access directly.
 
+**`&skip=0-112,280-300`**  
+Skip specific time ranges in HLS and DASH/MPD streams. Useful for skipping intros, outros, credits, or any unwanted content.  
+- **Usage:** Add `&skip=start-end,start-end,...` to the proxy URL (times in seconds)  
+- **Effect:** Removes segments that overlap with the specified time ranges and inserts `#EXT-X-DISCONTINUITY` markers for seamless playback.  
+- **Supported Endpoints:** `/proxy/hls/manifest.m3u8`, `/proxy/mpd/manifest.m3u8`, `/proxy/mpd/playlist.m3u8`  
+- **Precision:** Segment-level precision (segments overlapping with skip ranges are removed entirely)  
+- **Decimal Support:** Supports decimal values for precise timing (e.g., `skip=0-112.5,120.25-150.75`)  
+- **Example:** `&skip=0-90` skips the first 90 seconds (intro), `&skip=0-90,1750-1800` skips intro and outro
+
 **`&x_headers=content-length,transfer-encoding`**  
 Remove specific headers from the proxied response.  
 - **Usage:** Add `&x_headers=header1,header2` to the proxy URL (comma-separated list)  
@@ -928,6 +938,22 @@ mpv "http://localhost:8888/proxy/hls/manifest.m3u8?d=https://devstreaming-cdn.ap
 
 # Select highest resolution
 mpv "http://localhost:8888/proxy/hls/manifest.m3u8?d=https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8&max_res=true&api_password=your_password"
+```
+
+#### HLS/DASH Stream with Segment Skipping (Intro/Outro Skip)
+
+```bash
+# Skip intro (first 90 seconds) in HLS stream
+mpv "http://localhost:8888/proxy/hls/manifest.m3u8?d=https://example.com/playlist.m3u8&skip=0-90&api_password=your_password"
+
+# Skip intro and outro in HLS stream
+mpv "http://localhost:8888/proxy/hls/manifest.m3u8?d=https://example.com/playlist.m3u8&skip=0-112,1750-1800&api_password=your_password"
+
+# Skip intro in DASH/MPD stream
+mpv "http://localhost:8888/proxy/mpd/manifest.m3u8?d=https://example.com/manifest.mpd&skip=0-90&api_password=your_password"
+
+# Skip multiple segments with decimal precision
+mpv "http://localhost:8888/proxy/hls/manifest.m3u8?d=https://example.com/playlist.m3u8&skip=0-112.5,1750.25-1800.75&api_password=your_password"
 ```
 
 #### Stream with Header Removal (Fix Content-Length Issues)

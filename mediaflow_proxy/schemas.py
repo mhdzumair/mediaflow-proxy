@@ -12,6 +12,57 @@ def validate_resolution_format(value: str) -> str:
     return value
 
 
+def parse_skip_segments(skip_str: str) -> list[dict]:
+    """
+    Parse compact skip segment format into list of segment dicts.
+    
+    Format: "start-end,start-end,..." (e.g., "0-112,280-300")
+    
+    Args:
+        skip_str: Comma-separated list of start-end ranges in seconds.
+        
+    Returns:
+        List of dicts with 'start' and 'end' keys.
+        
+    Raises:
+        ValueError: If format is invalid or end <= start.
+    """
+    if not skip_str or not skip_str.strip():
+        return []
+    
+    segments = []
+    for part in skip_str.split(","):
+        part = part.strip()
+        if not part:
+            continue
+            
+        if "-" not in part:
+            raise ValueError(f"Invalid segment format '{part}'. Expected 'start-end' (e.g., '0-112')")
+        
+        # Handle negative numbers by splitting only on the last hyphen for end
+        # But since times are always positive, we can split on first hyphen
+        parts = part.split("-", 1)
+        if len(parts) != 2:
+            raise ValueError(f"Invalid segment format '{part}'. Expected 'start-end' (e.g., '0-112')")
+        
+        try:
+            start = float(parts[0])
+            end = float(parts[1])
+        except ValueError:
+            raise ValueError(f"Invalid segment format '{part}'. Start and end must be numbers.")
+        
+        if start < 0:
+            raise ValueError(f"Start time cannot be negative: {start}")
+        if end < 0:
+            raise ValueError(f"End time cannot be negative: {end}")
+        if end <= start:
+            raise ValueError(f"End time ({end}) must be greater than start time ({start})")
+        
+        segments.append({"start": start, "end": end})
+    
+    return segments
+
+
 class GenerateUrlRequest(BaseModel):
     mediaflow_proxy_url: str = Field(..., description="The base URL for the mediaflow proxy.")
     endpoint: Optional[str] = Field(None, description="The specific endpoint to be appended to the base URL.")
@@ -107,6 +158,10 @@ class HLSManifestParams(GenericParams):
         None,
         description="Select a specific resolution stream (e.g., '1080p', '720p', '480p'). Falls back to closest lower resolution if exact match not found.",
     )
+    skip: Optional[str] = Field(
+        None,
+        description="Time segments to skip, in compact format: 'start-end,start-end,...' (e.g., '0-112,280-300'). Segments are in seconds.",
+    )
 
     @field_validator("resolution", mode="before")
     @classmethod
@@ -114,6 +169,12 @@ class HLSManifestParams(GenericParams):
         if value is None:
             return None
         return validate_resolution_format(str(value))
+
+    def get_skip_segments(self) -> Optional[list[dict]]:
+        """Parse and return skip segments as a list of dicts with 'start' and 'end' keys."""
+        if self.skip is None:
+            return None
+        return parse_skip_segments(self.skip)
 
 
 class MPDManifestParams(GenericParams):
@@ -124,6 +185,10 @@ class MPDManifestParams(GenericParams):
         None,
         description="Select a specific resolution stream (e.g., '1080p', '720p', '480p'). Falls back to closest lower resolution if exact match not found.",
     )
+    skip: Optional[str] = Field(
+        None,
+        description="Time segments to skip, in compact format: 'start-end,start-end,...' (e.g., '0-112,280-300'). Segments are in seconds.",
+    )
 
     @field_validator("resolution", mode="before")
     @classmethod
@@ -132,12 +197,28 @@ class MPDManifestParams(GenericParams):
             return None
         return validate_resolution_format(str(value))
 
+    def get_skip_segments(self) -> Optional[list[dict]]:
+        """Parse and return skip segments as a list of dicts with 'start' and 'end' keys."""
+        if self.skip is None:
+            return None
+        return parse_skip_segments(self.skip)
+
 
 class MPDPlaylistParams(GenericParams):
     destination: Annotated[str, Field(description="The URL of the MPD manifest.", alias="d")]
     profile_id: str = Field(..., description="The profile ID to generate the playlist for.")
     key_id: Optional[str] = Field(None, description="The DRM key ID (optional).")
     key: Optional[str] = Field(None, description="The DRM key (optional).")
+    skip: Optional[str] = Field(
+        None,
+        description="Time segments to skip, in compact format: 'start-end,start-end,...' (e.g., '0-112,280-300'). Segments are in seconds.",
+    )
+
+    def get_skip_segments(self) -> Optional[list[dict]]:
+        """Parse and return skip segments as a list of dicts with 'start' and 'end' keys."""
+        if self.skip is None:
+            return None
+        return parse_skip_segments(self.skip)
 
 
 class MPDSegmentParams(GenericParams):

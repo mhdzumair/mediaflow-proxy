@@ -318,8 +318,14 @@ async def _handle_hls_with_dlhd_retry(
         
         new_manifest = "\n".join(new_manifest_lines)
 
+        # Parse skip segments (already returns list of dicts with 'start' and 'end' keys)
+        skip_segments_list = hls_params.get_skip_segments()
+
         # Process the new manifest to proxy all URLs within it
-        processor = M3U8Processor(request, hls_params.key_url, hls_params.force_playlist_proxy, hls_params.key_only_proxy, hls_params.no_proxy)
+        processor = M3U8Processor(
+            request, hls_params.key_url, hls_params.force_playlist_proxy, 
+            hls_params.key_only_proxy, hls_params.no_proxy, skip_segments_list
+        )
         processed_manifest = await processor.process_m3u8(new_manifest, base_url=hls_params.destination)
         
         return Response(content=processed_manifest, media_type="application/vnd.apple.mpegurl")
@@ -484,6 +490,7 @@ async def proxy_stream_endpoint(
         # Update destination and headers with extracted stream data
         destination = dlhd_result["destination_url"]
         proxy_headers.request.update(dlhd_result.get("request_headers", {}))
+
     if proxy_headers.request.get("range", "").strip() == "":
         proxy_headers.request.pop("range", None)
 
