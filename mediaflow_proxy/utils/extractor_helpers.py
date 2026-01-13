@@ -4,6 +4,7 @@ Helper functions for automatic stream extraction in proxy routes.
 This module provides caching and extraction helpers for DLHD/DaddyLive
 and Sportsonline/Sportzonline streams that are auto-detected in proxy routes.
 """
+
 import logging
 import re
 import time
@@ -28,67 +29,61 @@ _sportsonline_cache_duration = 600  # 10 minutes in seconds
 
 
 async def check_and_extract_dlhd_stream(
-    request: Request, 
-    destination: str, 
-    proxy_headers: ProxyRequestHeaders,
-    force_refresh: bool = False
+    request: Request, destination: str, proxy_headers: ProxyRequestHeaders, force_refresh: bool = False
 ) -> dict | None:
     """
     Check if destination contains DLHD/DaddyLive patterns and extract stream directly.
     Uses caching to avoid repeated extractions (10 minute cache).
-    
+
     Args:
         request (Request): The incoming HTTP request.
         destination (str): The destination URL to check.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
         force_refresh (bool): Force re-extraction even if cached data exists.
-        
+
     Returns:
         dict | None: Extracted stream data if DLHD link detected, None otherwise.
     """
     # Check for common DLHD/DaddyLive patterns in the URL
     # This includes stream-XXX pattern and domain names like dlhd.dad or daddylive.sx
     is_dlhd_link = (
-        re.search(r'stream-\d+', destination) or
-        "dlhd.dad" in urlparse(destination).netloc or
-        "daddylive.sx" in urlparse(destination).netloc
+        re.search(r"stream-\d+", destination)
+        or "dlhd.dad" in urlparse(destination).netloc
+        or "daddylive.sx" in urlparse(destination).netloc
     )
-    
+
     if not is_dlhd_link:
         return None
-    
+
     logger.info(f"DLHD link detected: {destination}")
-    
+
     # Check cache first (unless force_refresh is True)
     current_time = time.time()
     if not force_refresh and destination in _dlhd_extraction_cache:
         cached_entry = _dlhd_extraction_cache[destination]
         cache_age = current_time - cached_entry["timestamp"]
-        
+
         if cache_age < _dlhd_cache_duration:
             logger.info(f"Using cached DLHD data (age: {cache_age:.1f}s)")
             return cached_entry["data"]
         else:
             logger.info(f"DLHD cache expired (age: {cache_age:.1f}s), re-extracting...")
             del _dlhd_extraction_cache[destination]
-    
+
     # Extract stream data
     try:
         logger.info(f"Extracting DLHD stream data from: {destination}")
         extractor = ExtractorFactory.get_extractor("DLHD", proxy_headers.request)
         result = await extractor.extract(destination)
-        
+
         logger.info(f"DLHD extraction successful. Stream URL: {result.get('destination_url')}")
-        
+
         # Cache the result
-        _dlhd_extraction_cache[destination] = {
-            "data": result,
-            "timestamp": current_time
-        }
+        _dlhd_extraction_cache[destination] = {"data": result, "timestamp": current_time}
         logger.info(f"DLHD data cached for {_dlhd_cache_duration}s")
-        
+
         return result
-        
+
     except (ExtractorError, DownloadError) as e:
         logger.error(f"DLHD extraction failed: {str(e)}")
         raise HTTPException(status_code=400, detail=f"DLHD extraction failed: {str(e)}")
@@ -98,10 +93,7 @@ async def check_and_extract_dlhd_stream(
 
 
 async def check_and_extract_sportsonline_stream(
-    request: Request,
-    destination: str,
-    proxy_headers: ProxyRequestHeaders,
-    force_refresh: bool = False
+    request: Request, destination: str, proxy_headers: ProxyRequestHeaders, force_refresh: bool = False
 ) -> dict | None:
     """
     Check if destination contains Sportsonline/Sportzonline patterns and extract stream directly.

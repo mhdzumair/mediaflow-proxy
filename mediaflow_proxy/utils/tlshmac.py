@@ -11,17 +11,20 @@ Note that this makes this code FIPS non-compliant!
 # fields to suppport the same uses
 from . import tlshashlib
 from .compat import compatHMAC
+
 try:
     from hmac import compare_digest
+
     __all__ = ["new", "compare_digest", "HMAC"]
 except ImportError:
     __all__ = ["new", "HMAC"]
 
 try:
     from hmac import HMAC, new
+
     # if we can calculate HMAC on MD5, then use the built-in HMAC
     # implementation
-    _val = HMAC(b'some key', b'msg', 'md5')
+    _val = HMAC(b"some key", b"msg", "md5")
     _val.digest()
     del _val
 except Exception:
@@ -38,10 +41,10 @@ except Exception:
             """
             self.key = key
             if digestmod is None:
-                digestmod = 'md5'
+                digestmod = "md5"
             if callable(digestmod):
                 digestmod = digestmod()
-            if not hasattr(digestmod, 'digest_size'):
+            if not hasattr(digestmod, "digest_size"):
                 digestmod = tlshashlib.new(digestmod)
             self.block_size = digestmod.block_size
             self.digest_size = digestmod.digest_size
@@ -51,10 +54,10 @@ except Exception:
                 k_hash.update(compatHMAC(key))
                 key = k_hash.digest()
             if len(key) < self.block_size:
-                key = key + b'\x00' * (self.block_size - len(key))
+                key = key + b"\x00" * (self.block_size - len(key))
             key = bytearray(key)
-            ipad = bytearray(b'\x36' * self.block_size)
-            opad = bytearray(b'\x5c' * self.block_size)
+            ipad = bytearray(b"\x36" * self.block_size)
+            opad = bytearray(b"\x5c" * self.block_size)
             i_key = bytearray(i ^ j for i, j in zip(key, ipad))
             self._o_key = bytearray(i ^ j for i, j in zip(key, opad))
             self._context = digestmod.copy()
@@ -81,7 +84,6 @@ except Exception:
             new._o_key = self._o_key
             new._context = self._context.copy()
             return new
-
 
     def new(*args, **kwargs):
         """General constructor that works in FIPS mode."""

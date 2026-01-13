@@ -30,11 +30,13 @@ async def lifespan(app: FastAPI):
         logger.info("Clearing caches on startup (CLEAR_CACHE_ON_STARTUP=true)")
         EXTRACTOR_CACHE.clear()
         logger.info("Extractor cache cleared")
-    
+
     yield
-    
+
     # Shutdown (if needed)
     pass
+
+
 app = FastAPI(lifespan=lifespan)
 api_password_query = APIKeyQuery(name="api_password", auto_error=False)
 api_password_header = APIKeyHeader(name="api_password", auto_error=False)
@@ -198,10 +200,10 @@ async def generate_urls(request: GenerateMultiUrlRequest):
 async def encode_url_base64(url: str):
     """
     Encode a URL to base64 format.
-    
+
     Args:
         url (str): The URL to encode.
-        
+
     Returns:
         dict: A dictionary containing the encoded URL.
     """
@@ -221,17 +223,17 @@ async def encode_url_base64(url: str):
 async def decode_url_base64(encoded_url: str):
     """
     Decode a base64 encoded URL.
-    
+
     Args:
         encoded_url (str): The base64 encoded URL to decode.
-        
+
     Returns:
         dict: A dictionary containing the decoded URL.
     """
     decoded_url = decode_base64_url(encoded_url)
     if decoded_url is None:
         raise HTTPException(status_code=400, detail="Invalid base64 encoded URL")
-    
+
     return {"decoded_url": decoded_url, "encoded_url": encoded_url}
 
 
@@ -244,21 +246,21 @@ async def decode_url_base64(encoded_url: str):
 async def check_base64_url(url: str):
     """
     Check if a string appears to be a base64 encoded URL.
-    
+
     Args:
         url (str): The string to check.
-        
+
     Returns:
         dict: A dictionary indicating if the string is likely base64 encoded.
     """
     is_base64 = is_base64_url(url)
     result = {"url": url, "is_base64": is_base64}
-    
+
     if is_base64:
         decoded_url = decode_base64_url(url)
         if decoded_url:
             result["decoded_url"] = decoded_url
-    
+
     return result
 
 

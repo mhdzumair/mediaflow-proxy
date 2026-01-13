@@ -17,39 +17,39 @@ logger = logging.getLogger(__name__)
 class SkipSegmentFilter:
     """
     Helper class to filter HLS segments based on time ranges.
-    
+
     Tracks cumulative playback time and determines which segments
     should be skipped based on the provided skip segment list.
     """
-    
+
     def __init__(self, skip_segments: Optional[List[dict]] = None):
         """
         Initialize the skip segment filter.
-        
+
         Args:
             skip_segments: List of skip segment dicts with 'start' and 'end' keys.
         """
         self.skip_segments = skip_segments or []
         self.current_time = 0.0  # Cumulative playback time in seconds
-        
+
     def should_skip_segment(self, duration: float) -> bool:
         """
         Determine if the current segment should be skipped.
-        
+
         Args:
             duration: Duration of the current segment in seconds.
-            
+
         Returns:
             True if the segment overlaps with any skip range, False otherwise.
         """
         segment_start = self.current_time
         segment_end = self.current_time + duration
-        
+
         # Check if this segment overlaps with any skip range
         for skip in self.skip_segments:
             skip_start = skip.get("start", 0)
             skip_end = skip.get("end", 0)
-            
+
             # Check for overlap: segment overlaps if it starts before skip ends AND ends after skip starts
             if segment_start < skip_end and segment_end > skip_start:
                 logger.debug(
@@ -57,13 +57,13 @@ class SkipSegmentFilter:
                     f"(overlaps with skip range {skip_start:.2f}s-{skip_end:.2f}s)"
                 )
                 return True
-                
+
         return False
-    
+
     def advance_time(self, duration: float):
         """Advance the cumulative playback time."""
         self.current_time += duration
-        
+
     def has_skip_segments(self) -> bool:
         """Check if there are any skip segments configured."""
         return bool(self.skip_segments)
@@ -71,13 +71,13 @@ class SkipSegmentFilter:
 
 class M3U8Processor:
     def __init__(
-        self, 
-        request, 
-        key_url: str = None, 
-        force_playlist_proxy: bool = None, 
-        key_only_proxy: bool = False, 
+        self,
+        request,
+        key_url: str = None,
+        force_playlist_proxy: bool = None,
+        key_only_proxy: bool = False,
         no_proxy: bool = False,
-        skip_segments: Optional[List[dict]] = None
+        skip_segments: Optional[List[dict]] = None,
     ):
         """
         Initializes the M3U8Processor with the request and URL prefix.
@@ -108,7 +108,7 @@ class M3U8Processor:
     async def process_m3u8(self, content: str, base_url: str) -> str:
         """
         Processes the m3u8 content, proxying URLs and handling key lines.
-        
+
         For content filtering with skip_segments, this follows the IntroHater approach:
         - Segments within skip ranges are completely removed (EXTINF + URL)
         - A #EXT-X-DISCONTINUITY marker is added BEFORE the URL of the first segment
@@ -123,23 +123,23 @@ class M3U8Processor:
         """
         # Store the playlist URL for prebuffering
         self.playlist_url = base_url
-        
+
         lines = content.splitlines()
         processed_lines = []
-        
+
         # Track if we need to add discontinuity before next URL (after skipping segments)
         discontinuity_pending = False
         # Buffer the current EXTINF line - only output when we output the URL
         pending_extinf: Optional[str] = None
-        
+
         i = 0
         while i < len(lines):
             line = lines[i]
-            
+
             # Handle EXTINF lines (segment duration markers)
             if line.startswith("#EXTINF:"):
                 duration = self._parse_extinf_duration(line)
-                
+
                 if self.skip_filter.has_skip_segments() and self.skip_filter.should_skip_segment(duration):
                     # Skip this segment entirely - don't buffer the EXTINF
                     discontinuity_pending = True  # Mark that we need discontinuity before next kept segment
@@ -153,73 +153,68 @@ class M3U8Processor:
                     pending_extinf = line
                     i += 1
                     continue
-            
+
             # Handle segment URLs (non-comment, non-empty lines)
             if not line.startswith("#") and line.strip():
                 if pending_extinf is None:
                     # No pending EXTINF means this segment was skipped
                     i += 1
                     continue
-                
+
                 # Add discontinuity BEFORE the EXTINF if we just skipped segments
                 # Per HLS spec, EXT-X-DISCONTINUITY must appear before the first segment of the new content
                 if discontinuity_pending:
                     processed_lines.append("#EXT-X-DISCONTINUITY")
                     discontinuity_pending = False
-                
+
                 # Output the buffered EXTINF and proxied URL
                 processed_lines.append(pending_extinf)
                 processed_lines.append(await self.proxy_content_url(line, base_url))
                 pending_extinf = None
                 i += 1
                 continue
-            
+
             # Handle existing discontinuity markers - pass through but reset pending flag
             if line.startswith("#EXT-X-DISCONTINUITY"):
                 processed_lines.append(line)
                 discontinuity_pending = False  # Don't add duplicate
                 i += 1
                 continue
-            
+
             # Handle key lines
             if "URI=" in line:
                 processed_lines.append(await self.process_key_line(line, base_url))
                 i += 1
                 continue
-            
+
             # All other lines (headers, comments, etc.)
             processed_lines.append(line)
             i += 1
-        
+
         # Log skip statistics
         if self.skip_filter.has_skip_segments():
             logger.info(f"Content filtering: processed playlist with {len(self.skip_filter.skip_segments)} skip ranges")
-        
+
         # Pre-buffer segments if enabled and this is a playlist
-        if (settings.enable_hls_prebuffer and 
-            "#EXTM3U" in content and
-            self.playlist_url):
-            
+        if settings.enable_hls_prebuffer and "#EXTM3U" in content and self.playlist_url:
             # Extract headers from request for pre-buffering
             headers = {}
             for key, value in self.request.query_params.items():
                 if key.startswith("h_"):
                     headers[key[2:]] = value
-            
+
             # Start pre-buffering in background using the actual playlist URL
-            asyncio.create_task(
-                hls_prebuffer.prebuffer_playlist(self.playlist_url, headers)
-            )
-        
+            asyncio.create_task(hls_prebuffer.prebuffer_playlist(self.playlist_url, headers))
+
         return "\n".join(processed_lines)
-    
+
     def _parse_extinf_duration(self, line: str) -> float:
         """
         Parse the duration from an #EXTINF line.
-        
+
         Args:
             line: The #EXTINF line (e.g., "#EXTINF:10.0," or "#EXTINF:10,title")
-            
+
         Returns:
             The duration in seconds as a float.
         """
@@ -235,7 +230,7 @@ class M3U8Processor:
         """
         Processes the m3u8 content on-the-fly, yielding processed lines as they are read.
         Optimized to avoid accumulating the entire playlist content in memory.
-        
+
         Note: When skip_segments are configured, this method buffers lines to properly
         handle EXTINF + segment URL pairs that need to be skipped together.
 
@@ -248,12 +243,12 @@ class M3U8Processor:
         """
         # Store the playlist URL for prebuffering
         self.playlist_url = base_url
-        
+
         buffer = ""  # String buffer for decoded content
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         is_playlist_detected = False
         is_prebuffer_started = False
-        
+
         # State for skip segment filtering
         discontinuity_pending = False  # Track if we need discontinuity before next URL
         pending_extinf = None  # Buffer EXTINF line until we decide to emit it
@@ -278,7 +273,7 @@ class M3U8Processor:
                 for line in lines[:-1]:
                     if not line:  # Skip empty lines
                         continue
-                    
+
                     # Handle segment filtering if skip_segments are configured
                     if self.skip_filter.has_skip_segments():
                         result = await self._process_line_with_filtering(
@@ -297,21 +292,20 @@ class M3U8Processor:
 
             # Start pre-buffering early once we detect this is a playlist
             # This avoids waiting until the entire playlist is processed
-            if (settings.enable_hls_prebuffer and 
-                is_playlist_detected and 
-                not is_prebuffer_started and
-                self.playlist_url):
-                
+            if (
+                settings.enable_hls_prebuffer
+                and is_playlist_detected
+                and not is_prebuffer_started
+                and self.playlist_url
+            ):
                 # Extract headers from request for pre-buffering
                 headers = {}
                 for key, value in self.request.query_params.items():
                     if key.startswith("h_"):
                         headers[key[2:]] = value
-                
+
                 # Start pre-buffering in background using the actual playlist URL
-                asyncio.create_task(
-                    hls_prebuffer.prebuffer_playlist(self.playlist_url, headers)
-                )
+                asyncio.create_task(hls_prebuffer.prebuffer_playlist(self.playlist_url, headers))
                 is_prebuffer_started = True
 
         # Process any remaining data in the buffer plus final bytes
@@ -330,31 +324,27 @@ class M3U8Processor:
             else:
                 processed_line = await self.process_line(buffer, base_url)
                 yield processed_line
-        
+
         # Log skip statistics
         if self.skip_filter.has_skip_segments():
             logger.info(f"Content filtering: processed playlist with {len(self.skip_filter.skip_segments)} skip ranges")
 
     async def _process_line_with_filtering(
-        self, 
-        line: str, 
-        base_url: str,
-        discontinuity_pending: bool,
-        pending_extinf: Optional[str]
+        self, line: str, base_url: str, discontinuity_pending: bool, pending_extinf: Optional[str]
     ) -> tuple:
         """
         Process a single line with segment filtering (skip/mute/black).
-        
+
         Uses the IntroHater approach: discontinuity is added BEFORE the URL of the
         first segment after a skipped section, not before the EXTINF.
-        
+
         Returns a tuple of (processed_lines, discontinuity_pending, pending_extinf).
         processed_lines is None if the line should be skipped, otherwise a string to output.
         """
         # Handle EXTINF lines (segment duration markers)
         if line.startswith("#EXTINF:"):
             duration = self._parse_extinf_duration(line)
-            
+
             if self.skip_filter.should_skip_segment(duration):
                 # Skip this segment - don't buffer the EXTINF
                 self.skip_filter.advance_time(duration)
@@ -363,34 +353,34 @@ class M3U8Processor:
                 # Keep this segment
                 self.skip_filter.advance_time(duration)
                 return (None, discontinuity_pending, line)  # Buffer EXTINF
-        
+
         # Handle segment URLs (non-comment, non-empty lines)
         if not line.startswith("#") and line.strip():
             if pending_extinf is None:
                 # No pending EXTINF means this segment was skipped
                 return (None, discontinuity_pending, None)
-            
+
             # Build output: optional discontinuity + EXTINF + URL
             # Per HLS spec, EXT-X-DISCONTINUITY must appear before the first segment of the new content
             processed_url = await self.proxy_content_url(line, base_url)
-            
+
             output_lines = []
             if discontinuity_pending:
                 output_lines.append("#EXT-X-DISCONTINUITY")
             output_lines.append(pending_extinf)
             output_lines.append(processed_url)
-            
+
             return ("\n".join(output_lines), False, None)
-        
+
         # Handle existing discontinuity markers - pass through and reset pending
         if line.startswith("#EXT-X-DISCONTINUITY"):
             return (line, False, pending_extinf)
-        
+
         # Handle key lines
         if "URI=" in line:
             processed = await self.process_key_line(line, base_url)
             return (processed, discontinuity_pending, pending_extinf)
-        
+
         # All other lines (headers, comments, etc.)
         return (line, discontinuity_pending, pending_extinf)
 
@@ -431,7 +421,7 @@ class M3U8Processor:
                 full_url = parse.urljoin(base_url, original_uri)
                 line = line.replace(f'URI="{original_uri}"', f'URI="{full_url}"')
             return line
-        
+
         uri_match = re.search(r'URI="([^"]+)"', line)
         if uri_match:
             original_uri = uri_match.group(1)
@@ -473,9 +463,10 @@ class M3U8Processor:
         # For playlist URLs, always use MediaFlow proxy regardless of strategy
         # Check for actual playlist file extensions, not just substring matches
         parsed_url = parse.urlparse(full_url)
-        is_playlist_url = (parsed_url.path.endswith((".m3u", ".m3u8", ".m3u_plus")) or
-            parse.parse_qs(parsed_url.query).get("type", [""])[0] in ["m3u", "m3u8", "m3u_plus"])
-        
+        is_playlist_url = parsed_url.path.endswith((".m3u", ".m3u8", ".m3u_plus")) or parse.parse_qs(
+            parsed_url.query
+        ).get("type", [""])[0] in ["m3u", "m3u8", "m3u_plus"]
+
         if is_playlist_url:
             return await self.proxy_url(full_url, base_url, use_full_url=True, is_playlist=True)
 
@@ -522,11 +513,14 @@ class M3U8Processor:
         has_encrypted = query_params.pop("has_encrypted", False)
         # Remove the response headers (r_) from the query params to avoid it being added to the consecutive requests
         # BUT keep rp_ (response propagate) headers as they should propagate to segments
-        [query_params.pop(key, None) for key in list(query_params.keys()) 
-         if key.lower().startswith("r_") and not key.lower().startswith("rp_")]
+        [
+            query_params.pop(key, None)
+            for key in list(query_params.keys())
+            if key.lower().startswith("r_") and not key.lower().startswith("rp_")
+        ]
         # Remove force_playlist_proxy to avoid it being added to subsequent requests
         query_params.pop("force_playlist_proxy", None)
-        
+
         # Use appropriate proxy URL based on content type
         # For segment URLs, append /segment.ts to the path for player compatibility
         # This ensures players like ffplay recognize the URL as a TS segment
@@ -534,7 +528,7 @@ class M3U8Processor:
             proxy_url = self.mediaflow_proxy_url
         else:
             # Append segment.ts to the stream proxy URL path
-            proxy_url = self.stream_proxy_url.rstrip('/') + "/segment.ts"
+            proxy_url = self.stream_proxy_url.rstrip("/") + "/segment.ts"
             # Remove h_range header - each segment should handle its own range requests
             query_params.pop("h_range", None)
 

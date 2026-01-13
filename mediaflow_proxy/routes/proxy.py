@@ -49,42 +49,42 @@ proxy_router = APIRouter()
 def sanitize_url(url: str) -> str:
     """
     Sanitize URL to fix common encoding issues and handle base64 encoded URLs.
-    
+
     Args:
         url (str): The URL to sanitize.
-        
+
     Returns:
         str: The sanitized URL.
     """
     original_url = url
-    
+
     # First, try to process potential base64 encoded URLs
     url = process_potential_base64_url(url)
-    
+
     # Fix malformed URLs where https%22// should be https://
-    url = re.sub(r'https%22//', 'https://', url)
-    url = re.sub(r'http%22//', 'http://', url)
-    
+    url = re.sub(r"https%22//", "https://", url)
+    url = re.sub(r"http%22//", "http://", url)
+
     # Fix malformed URLs where https%3A%22// should be https://
-    url = re.sub(r'https%3A%22//', 'https://', url)
-    url = re.sub(r'http%3A%22//', 'http://', url)
-    
+    url = re.sub(r"https%3A%22//", "https://", url)
+    url = re.sub(r"http%3A%22//", "http://", url)
+
     # Fix malformed URLs where https:"// should be https:// (after partial decoding)
-    url = re.sub(r'https:"//', 'https://', url)
-    url = re.sub(r'http:"//', 'http://', url)
-    
+    url = re.sub(r'https:"//', "https://", url)
+    url = re.sub(r'http:"//', "http://", url)
+
     # Fix URLs where key_id and key parameters are incorrectly appended to the base URL
     # This happens when the URL contains &key_id= and &key= which should be handled as proxy parameters
-    if '&key_id=' in url and '&key=' in url:
+    if "&key_id=" in url and "&key=" in url:
         # Split the URL at the first occurrence of &key_id= to separate the base URL from the incorrectly appended parameters
-        base_url = url.split('&key_id=')[0]
+        base_url = url.split("&key_id=")[0]
         logger.info(f"Removed incorrectly appended key parameters from URL: '{url}' -> '{base_url}'")
         url = base_url
-    
+
     # Log if URL was changed
     if url != original_url:
         logger.info(f"URL sanitized: '{original_url}' -> '{url}'")
-    
+
     # Also try URL decoding to see what we get
     try:
         decoded_url = unquote(url)
@@ -93,22 +93,22 @@ def sanitize_url(url: str) -> str:
             # If after decoding we still have malformed protocol, fix it
             if ':"/' in decoded_url:
                 # Fix https:"// or http:"// patterns
-                fixed_decoded = re.sub(r'([a-z]+):"//', r'\1://', decoded_url)
+                fixed_decoded = re.sub(r'([a-z]+):"//', r"\1://", decoded_url)
                 logger.info(f"Fixed decoded URL: '{fixed_decoded}'")
                 return fixed_decoded
     except Exception as e:
         logger.warning(f"Error decoding URL '{url}': {e}")
-    
+
     return url
 
 
 def extract_drm_params_from_url(url: str) -> tuple[str, str, str]:
     """
     Extract DRM parameters (key_id and key) from a URL if they are incorrectly appended.
-    
+
     Args:
         url (str): The URL that may contain appended DRM parameters.
-        
+
     Returns:
         tuple: (clean_url, key_id, key) where clean_url has the parameters removed,
                and key_id/key are the extracted values (or None if not found).
@@ -116,26 +116,26 @@ def extract_drm_params_from_url(url: str) -> tuple[str, str, str]:
     key_id = None
     key = None
     clean_url = url
-    
+
     # Check if URL contains incorrectly appended key_id and key parameters
-    if '&key_id=' in url and '&key=' in url:
+    if "&key_id=" in url and "&key=" in url:
         # Extract key_id
-        key_id_match = re.search(r'&key_id=([^&]+)', url)
+        key_id_match = re.search(r"&key_id=([^&]+)", url)
         if key_id_match:
             key_id = key_id_match.group(1)
-        
+
         # Extract key
-        key_match = re.search(r'&key=([^&]+)', url)
+        key_match = re.search(r"&key=([^&]+)", url)
         if key_match:
             key = key_match.group(1)
-        
+
         # Remove the parameters from the URL
-        clean_url = re.sub(r'&key_id=[^&]*', '', url)
-        clean_url = re.sub(r'&key=[^&]*', '', clean_url)
-        
+        clean_url = re.sub(r"&key_id=[^&]*", "", url)
+        clean_url = re.sub(r"&key=[^&]*", "", clean_url)
+
         logger.info(f"Extracted DRM parameters from URL: key_id={key_id}, key={key}")
         logger.info(f"Cleaned URL: '{url}' -> '{clean_url}'")
-    
+
     return clean_url, key_id, key
 
 
@@ -159,10 +159,10 @@ async def hls_manifest_proxy(
     """
     # Sanitize destination URL to fix common encoding issues
     hls_params.destination = sanitize_url(hls_params.destination)
-    
+
     # Check if this is a retry after 403 error (dlhd_retry parameter)
     force_refresh = request.query_params.get("dlhd_retry") == "1"
-    
+
     # Check if destination contains DLHD pattern and extract stream directly
     dlhd_result = await check_and_extract_dlhd_stream(
         request, hls_params.destination, proxy_headers, force_refresh=force_refresh
@@ -171,16 +171,16 @@ async def hls_manifest_proxy(
     if dlhd_result:
         # Store original DLHD URL for cache invalidation on 403 errors
         dlhd_original_url = hls_params.destination
-        
+
         # Update destination and headers with extracted stream data
         hls_params.destination = dlhd_result["destination_url"]
         extracted_headers = dlhd_result.get("request_headers", {})
         proxy_headers.request.update(extracted_headers)
-        
+
         # Check if extractor wants key-only proxy (DLHD uses hls_key_proxy endpoint)
         if dlhd_result.get("mediaflow_endpoint") == "hls_key_proxy":
             hls_params.key_only_proxy = True
-        
+
         # Also add headers to query params so they propagate to key/segment requests
         # This is necessary because M3U8Processor encodes headers as h_* query params
         query_dict = dict(request.query_params)
@@ -196,9 +196,7 @@ async def hls_manifest_proxy(
         request._query_params = QueryParams(query_dict)
 
     # Check if destination contains Sportsonline pattern and extract stream directly
-    sportsonline_result = await check_and_extract_sportsonline_stream(
-        request, hls_params.destination, proxy_headers
-    )
+    sportsonline_result = await check_and_extract_sportsonline_stream(request, hls_params.destination, proxy_headers)
     if sportsonline_result:
         # Update destination and headers with extracted stream data
         hls_params.destination = sportsonline_result["destination_url"]
@@ -231,10 +229,7 @@ async def hls_manifest_proxy(
 
 
 async def _handle_hls_with_dlhd_retry(
-    request: Request,
-    hls_params: HLSManifestParams,
-    proxy_headers: ProxyRequestHeaders,
-    dlhd_original_url: str | None
+    request: Request, hls_params: HLSManifestParams, proxy_headers: ProxyRequestHeaders, dlhd_original_url: str | None
 ):
     """
     Handle HLS request with automatic retry on 403 errors for DLHD streams.
@@ -261,12 +256,10 @@ async def _handle_hls_with_dlhd_retry(
                 ) from e
             except httpx.RequestError as e:
                 raise HTTPException(status_code=502, detail=f"Network error fetching HLS manifest: {e}") from e
-        
+
         streams = parse_hls_playlist(playlist_content, base_url=hls_params.destination)
         if not streams:
-            raise HTTPException(
-                status_code=404, detail="No streams found in the manifest."
-            )
+            raise HTTPException(status_code=404, detail="No streams found in the manifest.")
 
         # Select stream based on resolution parameter or max_res
         if hls_params.resolution:
@@ -279,18 +272,19 @@ async def _handle_hls_with_dlhd_retry(
             # max_res: select highest resolution
             selected_stream = max(
                 streams,
-                key=lambda s: s.get("resolution", (0, 0))[0]
-                * s.get("resolution", (0, 0))[1],
+                key=lambda s: s.get("resolution", (0, 0))[0] * s.get("resolution", (0, 0))[1],
             )
 
         if selected_stream.get("resolution", (0, 0)) == (0, 0):
-            logger.warning("Selected stream has resolution (0, 0); resolution parsing may have failed or not be available in the manifest.")
+            logger.warning(
+                "Selected stream has resolution (0, 0); resolution parsing may have failed or not be available in the manifest."
+            )
 
         # Rebuild the manifest preserving master-level directives
         # but removing non-selected variant blocks
         lines = playlist_content.splitlines()
         selected_variant_index = streams.index(selected_stream)
-        
+
         variant_index = -1
         new_manifest_lines = []
         i = 0
@@ -301,21 +295,21 @@ async def _handle_hls_with_dlhd_retry(
                 next_line = ""
                 if i + 1 < len(lines) and not lines[i + 1].startswith("#"):
                     next_line = lines[i + 1]
-                
+
                 # Only keep the selected variant
                 if variant_index == selected_variant_index:
                     new_manifest_lines.append(line)
                     if next_line:
                         new_manifest_lines.append(next_line)
-                
+
                 # Skip variant block (stream-inf + optional url)
                 i += 2 if next_line else 1
                 continue
-            
+
             # Preserve all other lines (master directives, media tags, etc.)
             new_manifest_lines.append(line)
             i += 1
-        
+
         new_manifest = "\n".join(new_manifest_lines)
 
         # Parse skip segments (already returns list of dicts with 'start' and 'end' keys)
@@ -323,13 +317,17 @@ async def _handle_hls_with_dlhd_retry(
 
         # Process the new manifest to proxy all URLs within it
         processor = M3U8Processor(
-            request, hls_params.key_url, hls_params.force_playlist_proxy, 
-            hls_params.key_only_proxy, hls_params.no_proxy, skip_segments_list
+            request,
+            hls_params.key_url,
+            hls_params.force_playlist_proxy,
+            hls_params.key_only_proxy,
+            hls_params.no_proxy,
+            skip_segments_list,
         )
         processed_manifest = await processor.process_m3u8(new_manifest, base_url=hls_params.destination)
-        
+
         return Response(content=processed_manifest, media_type="application/vnd.apple.mpegurl")
-    
+
     return await handle_hls_stream_proxy(request, hls_params, proxy_headers, hls_params.transformer)
 
 
@@ -353,10 +351,10 @@ async def hls_key_proxy(
     """
     # Sanitize destination URL to fix common encoding issues
     hls_params.destination = sanitize_url(hls_params.destination)
-    
+
     # Set the key_only_proxy flag to True
     hls_params.key_only_proxy = True
-    
+
     return await handle_hls_stream_proxy(request, hls_params, proxy_headers, hls_params.transformer)
 
 
@@ -381,7 +379,7 @@ async def hls_segment_proxy(
     """
     # Sanitize segment URL to fix common encoding issues
     segment_url = sanitize_url(segment_url)
-    
+
     # Extract headers for pre-buffering
     headers = {}
     for key, value in request.query_params.items():
@@ -398,14 +396,10 @@ async def hls_segment_proxy(
             base_headers = {
                 "content-type": "video/mp2t",
                 "cache-control": "public, max-age=3600",
-                "access-control-allow-origin": "*"
+                "access-control-allow-origin": "*",
             }
             response_headers = apply_header_manipulation(base_headers, proxy_headers)
-            return Response(
-                content=cached_segment,
-                media_type="video/mp2t",
-                headers=response_headers
-            )
+            return Response(content=cached_segment, media_type="video/mp2t", headers=response_headers)
 
     # Fallback to direct streaming se non in cache:
     # prima di restituire, prova comunque a far partire il prebuffer dei successivi
@@ -433,13 +427,13 @@ async def dash_segment_proxy(
     """
     # Sanitize segment URL to fix common encoding issues
     segment_url = sanitize_url(segment_url)
-    
+
     # Extract headers for pre-buffering
     headers = {}
     for key, value in request.query_params.items():
         if key.startswith("h_"):
             headers[key[2:]] = value
-    
+
     # Try to get segment from pre-buffer cache first
     if settings.enable_dash_prebuffer:
         cached_segment = await dash_prebuffer.get_segment(segment_url, headers)
@@ -448,15 +442,11 @@ async def dash_segment_proxy(
             base_headers = {
                 "content-type": "video/mp4",
                 "cache-control": "public, max-age=3600",
-                "access-control-allow-origin": "*"
+                "access-control-allow-origin": "*",
             }
             response_headers = apply_header_manipulation(base_headers, proxy_headers)
-            return Response(
-                content=cached_segment,
-                media_type="video/mp4",
-                headers=response_headers
-            )
-    
+            return Response(content=cached_segment, media_type="video/mp4", headers=response_headers)
+
     # Fallback to direct streaming if not in cache
     return await handle_stream_request("GET", segment_url, proxy_headers)
 
@@ -487,7 +477,7 @@ async def proxy_stream_endpoint(
     """
     # Sanitize destination URL to fix common encoding issues
     destination = sanitize_url(destination)
-    
+
     # Check if destination contains DLHD pattern and extract stream directly
     dlhd_result = await check_and_extract_dlhd_stream(request, destination, proxy_headers)
     if dlhd_result:
@@ -500,15 +490,15 @@ async def proxy_stream_endpoint(
 
     if proxy_headers.request.get("if-range", "").strip() == "":
         proxy_headers.request.pop("if-range", None)
-    
+
     if "range" not in proxy_headers.request:
         proxy_headers.request["range"] = "bytes=0-"
-    
+
     if filename:
         # For segment files (.ts, .mp4, etc.), don't set content-disposition as attachment
         # This allows the URL path to have proper extension for player compatibility
         # while still streaming inline
-        segment_extensions = ('.ts', '.mp4', '.m4s', '.aac', '.m4a', '.vtt', '.srt')
+        segment_extensions = (".ts", ".mp4", ".m4s", ".aac", ".m4a", ".vtt", ".srt")
         if not filename.lower().endswith(segment_extensions):
             # If a filename is provided (not a segment), set it in the headers using RFC 6266 format
             try:
@@ -544,19 +534,19 @@ async def mpd_manifest_proxy(
     """
     # Extract DRM parameters from destination URL if they are incorrectly appended
     clean_url, extracted_key_id, extracted_key = extract_drm_params_from_url(manifest_params.destination)
-    
+
     # Update the destination with the cleaned URL
     manifest_params.destination = clean_url
-    
+
     # Use extracted parameters if they exist and the manifest params don't already have them
     if extracted_key_id and not manifest_params.key_id:
         manifest_params.key_id = extracted_key_id
     if extracted_key and not manifest_params.key:
         manifest_params.key = extracted_key
-    
+
     # Sanitize destination URL to fix common encoding issues
     manifest_params.destination = sanitize_url(manifest_params.destination)
-    
+
     return await get_manifest(request, manifest_params, proxy_headers)
 
 
@@ -579,19 +569,19 @@ async def playlist_endpoint(
     """
     # Extract DRM parameters from destination URL if they are incorrectly appended
     clean_url, extracted_key_id, extracted_key = extract_drm_params_from_url(playlist_params.destination)
-    
+
     # Update the destination with the cleaned URL
     playlist_params.destination = clean_url
-    
+
     # Use extracted parameters if they exist and the playlist params don't already have them
     if extracted_key_id and not playlist_params.key_id:
         playlist_params.key_id = extracted_key_id
     if extracted_key and not playlist_params.key:
         playlist_params.key = extracted_key
-    
+
     # Sanitize destination URL to fix common encoding issues
     playlist_params.destination = sanitize_url(playlist_params.destination)
-    
+
     return await get_playlist(request, playlist_params, proxy_headers)
 
 
@@ -629,6 +619,7 @@ async def init_endpoint(
         Response: The HTTP response with the processed init segment.
     """
     from mediaflow_proxy.handlers import get_init_segment
+
     return await get_init_segment(init_params, proxy_headers)
 
 

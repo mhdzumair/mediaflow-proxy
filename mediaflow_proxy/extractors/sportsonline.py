@@ -1,10 +1,10 @@
 import re
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from urllib.parse import urlparse
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
-from mediaflow_proxy.utils.packed import detect, unpack
+from mediaflow_proxy.utils.packed import unpack
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +36,13 @@ class SportsonlineExtractor(BaseExtractor):
         # Find all eval(function...) blocks - more greedy to capture full packed code
         pattern = re.compile(r"eval\(function\(p,a,c,k,e,.*?\)\)(?:\s*;|\s*<)", re.DOTALL)
         raw_matches = pattern.findall(html)
-        
+
         # If no matches with the strict pattern, try a more relaxed one
         if not raw_matches:
             # Try to find eval(function and capture until we find the closing ))
             pattern = re.compile(r"eval\(function\(p,a,c,k,e,[dr]\).*?\}\(.*?\)\)", re.DOTALL)
             raw_matches = pattern.findall(html)
-        
+
         return raw_matches
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
@@ -59,25 +59,25 @@ class SportsonlineExtractor(BaseExtractor):
                 raise ExtractorError("No iframe found on the page")
 
             iframe_url = iframe_match.group(1)
-            
+
             # Normalize iframe URL
-            if iframe_url.startswith('//'):
-                iframe_url = 'https:' + iframe_url
-            elif iframe_url.startswith('/'):
+            if iframe_url.startswith("//"):
+                iframe_url = "https:" + iframe_url
+            elif iframe_url.startswith("/"):
                 parsed_main = urlparse(url)
                 iframe_url = f"{parsed_main.scheme}://{parsed_main.netloc}{iframe_url}"
-            
+
             logger.info(f"Found iframe URL: {iframe_url}")
 
             # Step 2: Fetch iframe with Referer
             iframe_headers = {
-                'Referer': 'https://sportzonline.st/',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9,it;q=0.8',
-                'Cache-Control': 'no-cache'
+                "Referer": "https://sportzonline.st/",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9,it;q=0.8",
+                "Cache-Control": "no-cache",
             }
-            
+
             iframe_response = await self._make_request(iframe_url, headers=iframe_headers, timeout=15)
             iframe_html = iframe_response.text
 
@@ -85,9 +85,9 @@ class SportsonlineExtractor(BaseExtractor):
 
             # Step 3: Detect packed blocks
             packed_blocks = self._detect_packed_blocks(iframe_html)
-            
+
             logger.info(f"Found {len(packed_blocks)} packed blocks")
-            
+
             if not packed_blocks:
                 logger.warning("No packed blocks found, trying direct m3u8 search")
                 # Fallback: try direct m3u8 search
@@ -95,13 +95,10 @@ class SportsonlineExtractor(BaseExtractor):
                 if direct_match:
                     m3u8_url = direct_match.group(1)
                     logger.info(f"Found direct m3u8 URL: {m3u8_url}")
-                    
+
                     return {
                         "destination_url": m3u8_url,
-                        "request_headers": {
-                            'Referer': iframe_url,
-                            'User-Agent': iframe_headers['User-Agent']
-                        },
+                        "request_headers": {"Referer": iframe_url, "User-Agent": iframe_headers["User-Agent"]},
                         "mediaflow_endpoint": self.mediaflow_endpoint,
                     }
                 else:
@@ -133,13 +130,13 @@ class SportsonlineExtractor(BaseExtractor):
                     r'file\s*:\s*["\']([^"\']+\.m3u8[^"\']*)["\']',  # file: "...m3u8"
                     r'["\']([^"\']*https?://[^"\']+\.m3u8[^"\']*)["\']',  # any m3u8 URL
                 ]
-                
+
                 for pattern in patterns:
                     src_match = re.search(pattern, unpacked_code)
                     if src_match:
                         m3u8_url = src_match.group(1)
                         # Verify it looks like a valid m3u8 URL
-                        if '.m3u8' in m3u8_url or 'http' in m3u8_url:
+                        if ".m3u8" in m3u8_url or "http" in m3u8_url:
                             break
                         m3u8_url = None
 
@@ -161,11 +158,11 @@ class SportsonlineExtractor(BaseExtractor):
                             src_match = re.search(pattern, unpacked_code)
                             if src_match:
                                 test_url = src_match.group(1)
-                                if '.m3u8' in test_url or 'http' in test_url:
+                                if ".m3u8" in test_url or "http" in test_url:
                                     m3u8_url = test_url
                                     logger.info(f"Found m3u8 in block {i}")
                                     break
-                        
+
                         if m3u8_url:
                             break
                     except Exception as e:
@@ -180,10 +177,7 @@ class SportsonlineExtractor(BaseExtractor):
             # Return stream configuration
             return {
                 "destination_url": m3u8_url,
-                "request_headers": {
-                    'Referer': iframe_url,
-                    'User-Agent': iframe_headers['User-Agent']
-                },
+                "request_headers": {"Referer": iframe_url, "User-Agent": iframe_headers["User-Agent"]},
                 "mediaflow_endpoint": self.mediaflow_endpoint,
             }
 

@@ -27,6 +27,7 @@ class VavooExtractor(BaseExtractor):
             "accept-encoding": "gzip",
         }
         import time
+
         current_time = int(time.time() * 1000)
 
         data = {
@@ -40,21 +41,11 @@ class VavooExtractor(BaseExtractor):
                     "brand": "google",
                     "model": "Pixel",
                     "name": "sdk_gphone64_arm64",
-                    "uniqueId": "d10e5d99ab665233"
+                    "uniqueId": "d10e5d99ab665233",
                 },
-                "os": {
-                    "name": "android",
-                    "version": "13"
-                },
-                "app": {
-                    "platform": "android",
-                    "version": "3.1.21"
-                },
-                "version": {
-                    "package": "tv.vavoo.app",
-                    "binary": "3.1.21",
-                    "js": "3.1.21"
-                },
+                "os": {"name": "android", "version": "13"},
+                "app": {"platform": "android", "version": "3.1.21"},
+                "version": {"package": "tv.vavoo.app", "binary": "3.1.21", "js": "3.1.21"},
             },
             "appFocusTime": 0,
             "playerActive": False,
@@ -75,11 +66,9 @@ class VavooExtractor(BaseExtractor):
                 "ssVersion": 1,
                 "enabled": True,
                 "autoServer": True,
-                "id": "de-fra"
+                "id": "de-fra",
             },
-            "iap": {
-                "supported": False
-            }
+            "iap": {"supported": False},
         }
 
         try:
@@ -139,14 +128,9 @@ class VavooExtractor(BaseExtractor):
             "accept": "application/json",
             "content-type": "application/json; charset=utf-8",
             "accept-encoding": "gzip",
-            "mediahubmx-signature": signature
+            "mediahubmx-signature": signature,
         }
-        data = {
-            "language": "de",
-            "region": "AT",
-            "url": link,
-            "clientVersion": "3.1.21"
-        }
+        data = {"language": "de", "region": "AT", "url": link, "clientVersion": "3.1.21"}
         try:
             logger.info(f"Attempting to resolve Vavoo URL: {link}")
             resp = await self._make_request(
@@ -161,7 +145,11 @@ class VavooExtractor(BaseExtractor):
             try:
                 result = resp.json()
             except Exception:
-                logger.warning("Vavoo resolve returned non-json response (status=%s). Body preview: %s", resp.status_code, getattr(resp, "text", "")[:500])
+                logger.warning(
+                    "Vavoo resolve returned non-json response (status=%s). Body preview: %s",
+                    resp.status_code,
+                    getattr(resp, "text", "")[:500],
+                )
                 return None
 
             logger.debug("Vavoo API response: %s", result)

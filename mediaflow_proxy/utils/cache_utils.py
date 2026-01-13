@@ -219,7 +219,7 @@ class HybridCache:
             logger.error(f"Error writing to cache: {e}")
             try:
                 await aiofiles.os.remove(temp_path)
-            except:
+            except OSError:
                 pass
             return False
 
@@ -240,17 +240,17 @@ class HybridCache:
 
     def clear(self) -> bool:
         """Clear all items from both memory and file caches (synchronous).
-        
+
         This method is safe to call from multiple processes - if the directory
         was already deleted by another process, it will simply recreate it.
         """
         import shutil
-        
+
         # Clear memory cache
         with self.memory_cache._lock:
             self.memory_cache._cache.clear()
             self.memory_cache._current_size = 0
-        
+
         # Clear file cache directory
         try:
             if self.cache_dir.exists():
@@ -264,14 +264,14 @@ class HybridCache:
         except Exception as e:
             logger.error(f"Error clearing cache directory: {e}")
             return False
-        
+
         # Recreate the directory
         try:
             self._init_cache_dirs()
         except Exception as e:
             logger.error(f"Error recreating cache directory: {e}")
             return False
-        
+
         return True
 
 
@@ -357,7 +357,7 @@ async def get_cached_init_segment(
     rely on different DRM keys or initialization payloads (e.g. key rotation).
 
     ttl overrides the default cache TTL; pass a value <= 0 to skip caching entirely.
-    
+
     byte_range specifies a byte range for SegmentBase MPDs (e.g., '0-11568').
     """
 
@@ -378,7 +378,7 @@ async def get_cached_init_segment(
         request_headers = dict(headers)
         if byte_range:
             request_headers["Range"] = f"bytes={byte_range}"
-        
+
         init_content = await download_file_with_retry(init_url, request_headers)
         if init_content and use_cache:
             await INIT_SEGMENT_CACHE.set(cache_key, init_content, ttl=ttl)
@@ -446,11 +446,11 @@ async def get_cached_processed_init(
     key_id: str,
 ) -> Optional[bytes]:
     """Get processed (DRM-stripped) init segment from cache.
-    
+
     Args:
         init_url: URL of the init segment
         key_id: DRM key ID used for processing
-        
+
     Returns:
         Processed init segment bytes if cached, None otherwise
     """
@@ -465,13 +465,13 @@ async def set_cached_processed_init(
     ttl: Optional[int] = None,
 ) -> bool:
     """Cache processed (DRM-stripped) init segment.
-    
+
     Args:
         init_url: URL of the init segment
         key_id: DRM key ID used for processing
         processed_content: The processed init segment bytes
         ttl: Optional TTL override
-        
+
     Returns:
         True if cached successfully
     """
@@ -485,10 +485,10 @@ async def set_cached_processed_init(
 
 async def get_cached_segment(segment_url: str) -> Optional[bytes]:
     """Get media segment from prebuffer cache.
-    
+
     Args:
         segment_url: URL of the segment
-        
+
     Returns:
         Segment bytes if cached, None otherwise
     """
@@ -497,12 +497,12 @@ async def get_cached_segment(segment_url: str) -> Optional[bytes]:
 
 async def set_cached_segment(segment_url: str, content: bytes, ttl: int = 60) -> bool:
     """Cache media segment with configurable TTL.
-    
+
     Args:
         segment_url: URL of the segment
         content: Segment bytes
         ttl: Time to live in seconds (default 60s, configurable via dash_segment_cache_ttl)
-        
+
     Returns:
         True if cached successfully
     """

@@ -16,10 +16,9 @@ class VidmolyExtractor(BaseExtractor):
             raise ExtractorError("VIDMOLY: Invalid domain")
 
         headers = {
-            "User-Agent":
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120 Safari/537.36",
             "Referer": url,
             "Sec-Fetch-Dest": "iframe",
         }
@@ -29,10 +28,7 @@ class VidmolyExtractor(BaseExtractor):
         html = response.text
 
         # --- Extract master m3u8 ---
-        match = re.search(
-            r'sources:\s*\[\{file:"([^"]+)',
-            html
-        )
+        match = re.search(r'sources:\s*\[\{file:"([^"]+)', html)
         if not match:
             raise ExtractorError("VIDMOLY: Stream URL not found")
 
@@ -50,9 +46,7 @@ class VidmolyExtractor(BaseExtractor):
             raise
 
         if test.status_code >= 400:
-            raise ExtractorError(
-                f"VIDMOLY: Stream unavailable ({test.status_code})"
-            )
+            raise ExtractorError(f"VIDMOLY: Stream unavailable ({test.status_code})")
 
         # Return MASTER playlist, not variant
         # Let MediaFlow Proxy handle variants

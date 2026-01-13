@@ -7,7 +7,12 @@ from fastapi import Request, Response, HTTPException
 
 from mediaflow_proxy.drm.decrypter import decrypt_segment, process_drm_init_segment
 from mediaflow_proxy.utils.crypto_utils import encryption_handler
-from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url, get_original_scheme, ProxyRequestHeaders, apply_header_manipulation
+from mediaflow_proxy.utils.http_utils import (
+    encode_mediaflow_proxy_url,
+    get_original_scheme,
+    ProxyRequestHeaders,
+    apply_header_manipulation,
+)
 from mediaflow_proxy.utils.dash_prebuffer import dash_prebuffer
 from mediaflow_proxy.utils.cache_utils import get_cached_processed_init, set_cached_processed_init
 from mediaflow_proxy.utils.m3u8_processor import SkipSegmentFilter
@@ -17,7 +22,13 @@ logger = logging.getLogger(__name__)
 
 
 async def process_manifest(
-    request: Request, mpd_dict: dict, proxy_headers: ProxyRequestHeaders, key_id: str = None, key: str = None, resolution: str = None, skip_segments: list = None
+    request: Request,
+    mpd_dict: dict,
+    proxy_headers: ProxyRequestHeaders,
+    key_id: str = None,
+    key: str = None,
+    resolution: str = None,
+    skip_segments: list = None,
 ) -> Response:
     """
     Processes the MPD manifest and converts it to an HLS manifest.
@@ -35,7 +46,7 @@ async def process_manifest(
         Response: The HLS manifest as an HTTP response.
     """
     hls_content = build_hls(mpd_dict, request, key_id, key, resolution, skip_segments)
-    
+
     # Start DASH pre-buffering in background if enabled
     if settings.enable_dash_prebuffer:
         # Extract headers for pre-buffering
@@ -43,15 +54,13 @@ async def process_manifest(
         for key, value in request.query_params.items():
             if key.startswith("h_"):
                 headers[key[2:]] = value
-        
+
         # Get the original MPD URL from the request
         mpd_url = request.query_params.get("d", "")
         if mpd_url:
             # Start pre-buffering in background
-            asyncio.create_task(
-                dash_prebuffer.prebuffer_dash_manifest(mpd_url, headers)
-            )
-    
+            asyncio.create_task(dash_prebuffer.prebuffer_dash_manifest(mpd_url, headers))
+
     return Response(content=hls_content, media_type="application/vnd.apple.mpegurl", headers=proxy_headers.response)
 
 
@@ -79,7 +88,7 @@ async def process_playlist(
         raise HTTPException(status_code=404, detail="Profile not found")
 
     hls_content = build_hls_playlist(mpd_dict, matching_profiles, request, skip_segments)
-    
+
     # Trigger prebuffering of upcoming segments for live streams
     if settings.enable_dash_prebuffer and mpd_dict.get("isLive", False):
         # Extract headers for pre-buffering
@@ -87,12 +96,10 @@ async def process_playlist(
         for key, value in request.query_params.items():
             if key.startswith("h_"):
                 headers[key[2:]] = value
-        
+
         # Use the new prefetch method for live playlists
-        asyncio.create_task(
-            dash_prebuffer.prefetch_for_live_playlist(matching_profiles, headers)
-        )
-    
+        asyncio.create_task(dash_prebuffer.prefetch_for_live_playlist(matching_profiles, headers))
+
     # Don't include propagate headers for playlists - they should only apply to segments
     response_headers = apply_header_manipulation({}, proxy_headers, include_propagate=False)
     return Response(content=hls_content, media_type="application/vnd.apple.mpegurl", headers=response_headers)
@@ -171,13 +178,13 @@ async def process_init_segment(
                 logger.debug(f"Using cached processed init segment for {init_url}")
                 response_headers = apply_header_manipulation({}, proxy_headers)
                 return Response(content=cached_processed, media_type=mimetype, headers=response_headers)
-        
+
         # For DRM protected content, we need to process the init segment
         # to remove encryption-related boxes but keep the moov structure
         now = time.time()
         processed_content = process_drm_init_segment(init_content, key_id, key)
         logger.info(f"Processing of {mimetype} init segment took {time.time() - now:.4f} seconds")
-        
+
         # Cache the processed init segment
         if init_url:
             await set_cached_processed_init(init_url, key_id, processed_content, ttl=3600)
@@ -189,7 +196,14 @@ async def process_init_segment(
     return Response(content=processed_content, media_type=mimetype, headers=response_headers)
 
 
-def build_hls(mpd_dict: dict, request: Request, key_id: str = None, key: str = None, resolution: str = None, skip_segments: list = None) -> str:
+def build_hls(
+    mpd_dict: dict,
+    request: Request,
+    key_id: str = None,
+    key: str = None,
+    resolution: str = None,
+    skip_segments: list = None,
+) -> str:
     """
     Builds an HLS manifest from the MPD manifest.
 
@@ -206,7 +220,7 @@ def build_hls(mpd_dict: dict, request: Request, key_id: str = None, key: str = N
     """
     hls = ["#EXTM3U", "#EXT-X-VERSION:6"]
     query_params = dict(request.query_params)
-    
+
     # Preserve skip parameter in query params so it propagates to playlists
     if skip_segments:
         # Convert back to compact format for URL
@@ -270,7 +284,7 @@ def _filter_video_profiles_by_resolution(video_profiles: dict, target_resolution
         Filtered dictionary with only the selected profile.
     """
     # Parse target height from "1080p" -> 1080
-    target_height = int(target_resolution.rstrip('p'))
+    target_height = int(target_resolution.rstrip("p"))
 
     # Convert to list and sort by height descending
     profiles_list = [
@@ -278,7 +292,7 @@ def _filter_video_profiles_by_resolution(video_profiles: dict, target_resolution
         for profile_id, (profile, playlist_url) in video_profiles.items()
         if profile.get("height", 0) > 0
     ]
-    
+
     if not profiles_list:
         logger.warning("No video profiles with valid height found, returning all profiles")
         return video_profiles
@@ -297,8 +311,10 @@ def _filter_video_profiles_by_resolution(video_profiles: dict, target_resolution
         selected = sorted_profiles[-1]
 
     profile_id, profile, playlist_url = selected
-    logger.info(f"Selected MPD video profile with resolution {profile['width']}x{profile['height']} for target {target_resolution}")
-    
+    logger.info(
+        f"Selected MPD video profile with resolution {profile['width']}x{profile['height']} for target {target_resolution}"
+    )
+
     return {profile_id: (profile, playlist_url)}
 
 
@@ -320,16 +336,16 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request, s
     added_segments = 0
     skipped_segments = 0
     is_live = mpd_dict.get("isLive", False)
-    
+
     # Initialize skip filter if skip_segments provided
     skip_filter = SkipSegmentFilter(skip_segments) if skip_segments else None
-    
+
     # Use EXT-X-MAP for live streams to avoid duplicate moov atoms
     use_map = is_live
 
     proxy_url = request.url_for("segment_endpoint")
     proxy_url = str(proxy_url.replace(scheme=get_original_scheme(request)))
-    
+
     # Get init endpoint URL for EXT-X-MAP
     init_proxy_url = request.url_for("init_endpoint")
     init_proxy_url = str(init_proxy_url.replace(scheme=get_original_scheme(request)))
@@ -405,7 +421,7 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request, s
             # Add api_password for authentication
             if query_params.get("api_password"):
                 init_query_params["api_password"] = query_params["api_password"]
-            
+
             init_map_url = encode_mediaflow_proxy_url(
                 init_proxy_url,
                 query_params=init_query_params,
@@ -416,7 +432,7 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request, s
         need_discontinuity = False
         for segment in trimmed_segments:
             duration = segment["extinf"]
-            
+
             # Check if this segment should be skipped
             if skip_filter:
                 if skip_filter.should_skip_segment(duration):
@@ -425,35 +441,35 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request, s
                     need_discontinuity = True
                     continue
                 skip_filter.advance_time(duration)
-            
+
             # Add discontinuity marker after skipped segments
             if need_discontinuity:
                 hls.append("#EXT-X-DISCONTINUITY")
                 need_discontinuity = False
-            
+
             program_date_time = segment.get("program_date_time")
             if program_date_time:
                 hls.append(f"#EXT-X-PROGRAM-DATE-TIME:{program_date_time}")
-            hls.append(f'#EXTINF:{duration:.3f},')
-            
+            hls.append(f"#EXTINF:{duration:.3f},")
+
             segment_query_params = {
                 "init_url": init_url,
                 "segment_url": segment["media"],
                 "mime_type": profile["mimeType"],
                 "is_live": "true" if is_live else "false",
             }
-            
+
             # Add use_map flag so segment endpoint knows not to include init
             if use_map:
                 segment_query_params["use_map"] = "true"
-            
+
             # Add byte range parameters for SegmentBase
             if init_range:
                 segment_query_params["init_range"] = init_range
             # Segment may also have its own range (for SegmentBase)
             if "initRange" in segment:
                 segment_query_params["init_range"] = segment["initRange"]
-            
+
             query_params.update(segment_query_params)
             hls.append(
                 encode_mediaflow_proxy_url(

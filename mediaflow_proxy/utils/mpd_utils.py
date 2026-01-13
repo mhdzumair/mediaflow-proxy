@@ -13,26 +13,26 @@ logger = logging.getLogger(__name__)
 def resolve_url(base_url: str, relative_url: str) -> str:
     """
     Resolve a relative URL against a base URL.
-    
+
     Handles three cases:
     1. Absolute URL (starts with http:// or https://) - return as-is
     2. Absolute path (starts with /) - resolve against origin (scheme + host)
     3. Relative path - resolve against base URL directory
-    
+
     Args:
         base_url: The base URL (typically the MPD URL)
         relative_url: The URL to resolve
-        
+
     Returns:
         The resolved absolute URL
     """
     if not relative_url:
         return base_url
-    
+
     # Already absolute URL
     if relative_url.startswith(("http://", "https://")):
         return relative_url
-    
+
     # Use urljoin which correctly handles:
     # - Absolute paths (starting with /) -> resolves against origin
     # - Relative paths -> resolves against base URL
@@ -96,7 +96,7 @@ def parse_mpd_dict(
         parsed_dict["PeriodStart"] = parse_duration(period.get("@start", "PT0S"))
         adaptation_sets = period["AdaptationSet"]
         adaptation_sets = adaptation_sets if isinstance(adaptation_sets, list) else [adaptation_sets]
-        
+
         for adaptation in adaptation_sets:
             representations = adaptation["Representation"]
             representations = representations if isinstance(representations, list) else [representations]
@@ -300,7 +300,7 @@ def parse_representation(
     if segment_base_data and "initUrl" not in profile:
         base_url = representation.get("BaseURL", "")
         profile["initUrl"] = resolve_url(mpd_url, base_url)
-        
+
         # Store initialization range if available
         if "Initialization" in segment_base_data:
             init_range = segment_base_data["Initialization"].get("@range")
@@ -326,7 +326,7 @@ def parse_representation(
     # Parse segments based on the addressing scheme used
     segment_template = adaptation.get("SegmentTemplate") or representation.get("SegmentTemplate")
     segment_list = adaptation.get("SegmentList") or representation.get("SegmentList")
-    
+
     # Get BaseURL from representation (can be relative path like "a/b/c/")
     base_url = representation.get("BaseURL", "")
 
@@ -357,7 +357,9 @@ def _get_key(adaptation: dict, representation: dict, key: str) -> Optional[str]:
     return representation.get(key, adaptation.get(key, None))
 
 
-def parse_segment_template(parsed_dict: dict, item: dict, profile: dict, mpd_url: str, base_url: str = "") -> List[Dict]:
+def parse_segment_template(
+    parsed_dict: dict, item: dict, profile: dict, mpd_url: str, base_url: str = ""
+) -> List[Dict]:
     """
     Parses a segment template and extracts segment information.
 
@@ -393,7 +395,9 @@ def parse_segment_template(parsed_dict: dict, item: dict, profile: dict, mpd_url
     return segments
 
 
-def parse_segment_timeline(parsed_dict: dict, item: dict, profile: dict, mpd_url: str, timescale: int, base_url: str = "") -> List[Dict]:
+def parse_segment_timeline(
+    parsed_dict: dict, item: dict, profile: dict, mpd_url: str, timescale: int, base_url: str = ""
+) -> List[Dict]:
     """
     Parses a segment timeline and extracts segment information.
 
@@ -467,7 +471,9 @@ def preprocess_timeline(
     return processed_data
 
 
-def parse_segment_duration(parsed_dict: dict, item: dict, profile: dict, mpd_url: str, timescale: int, base_url: str = "") -> List[Dict]:
+def parse_segment_duration(
+    parsed_dict: dict, item: dict, profile: dict, mpd_url: str, timescale: int, base_url: str = ""
+) -> List[Dict]:
     """
     Parses segment duration and extracts segment information.
     This is used for static or live MPD manifests.
@@ -551,7 +557,9 @@ def generate_vod_segments(profile: dict, duration: int, timescale: int, start_nu
     return [{"number": start_number + i, "duration": duration / timescale} for i in range(segment_count)]
 
 
-def create_segment_data(segment: Dict, item: dict, profile: dict, mpd_url: str, timescale: Optional[int] = None, base_url: str = "") -> Dict:
+def create_segment_data(
+    segment: Dict, item: dict, profile: dict, mpd_url: str, timescale: Optional[int] = None, base_url: str = ""
+) -> Dict:
     """
     Creates segment data based on the segment information. This includes the segment URL and metadata.
 
@@ -713,33 +721,33 @@ def parse_segment_base(representation: dict, profile: dict, mpd_url: str) -> Lis
     """
     segment = representation.get("SegmentBase", {})
     base_url = representation.get("BaseURL", "")
-    
+
     # Build the full media URL
     media_url = resolve_url(mpd_url, base_url)
-    
+
     # Set initUrl for SegmentBase - this is the URL with the initialization range
     # The initialization segment contains codec/track info needed before playing media
     profile["initUrl"] = media_url
-    
+
     # For SegmentBase, we need to specify byte ranges for init and media segments
     init_range = None
     if "Initialization" in segment:
         init_range = segment["Initialization"].get("@range")
-    
+
     # Store initialization range in profile for segment endpoint to use
     if init_range:
         profile["initRange"] = init_range
-    
+
     # Get the index range which points to SIDX box
     index_range = segment.get("@indexRange", "")
-    
+
     # Calculate total duration from profile's mediaPresentationDuration
     total_duration = profile.get("mediaPresentationDuration")
     if isinstance(total_duration, str):
         total_duration = parse_duration(total_duration)
     elif total_duration is None:
         total_duration = 0
-    
+
     # For SegmentBase, we return a single segment representing the entire media
     # The media URL is the same as initUrl but will be accessed with different byte ranges
     return [

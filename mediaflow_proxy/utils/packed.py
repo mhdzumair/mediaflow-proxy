@@ -1,5 +1,5 @@
-#Adapted for use in MediaFlowProxy from:
-#https://github.com/einars/js-beautify/blob/master/python/jsbeautifier/unpackers/packer.py
+# Adapted for use in MediaFlowProxy from:
+# https://github.com/einars/js-beautify/blob/master/python/jsbeautifier/unpackers/packer.py
 # Unpacker for Dean Edward's p.a.c.k.e.r, a part of javascript beautifier
 # by Einar Lielmanis <einar@beautifier.io>
 #
@@ -19,8 +19,6 @@ import logging
 
 
 logger = logging.getLogger(__name__)
-
-
 
 
 def detect(source):
@@ -71,9 +69,7 @@ def _filterargs(source):
                 raise UnpackingError("Corrupted p.a.c.k.e.r. data.")
 
     # could not find a satisfying regex
-    raise UnpackingError(
-        "Could not make sense of p.a.c.k.e.r data (unexpected code structure)"
-    )
+    raise UnpackingError("Could not make sense of p.a.c.k.e.r data (unexpected code structure)")
 
 
 def _replacestrings(source):
@@ -88,7 +84,7 @@ def _replacestrings(source):
         for index, value in enumerate(lookup):
             source = source.replace(variable % index, '"%s"' % value)
         return source[startpoint:]
-    return source 
+    return source
 
 
 class Unbaser(object):
@@ -97,10 +93,7 @@ class Unbaser(object):
 
     ALPHABET = {
         62: "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
-        95: (
-            " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-            "[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
-        ),
+        95: (" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"),
     }
 
     def __init__(self, base):
@@ -118,9 +111,7 @@ class Unbaser(object):
         else:
             # Build conversion dictionary cache
             try:
-                self.dictionary = dict(
-                    (cipher, index) for index, cipher in enumerate(self.ALPHABET[base])
-                )
+                self.dictionary = dict((cipher, index) for index, cipher in enumerate(self.ALPHABET[base]))
             except KeyError:
                 raise TypeError("Unsupported base encoding.")
 
@@ -135,6 +126,8 @@ class Unbaser(object):
         for index, cipher in enumerate(string[::-1]):
             ret += (self.base**index) * self.dictionary[cipher]
         return ret
+
+
 class UnpackingError(Exception):
     """Badly packed source or general error. Argument is a
     meaningful description."""
@@ -142,11 +135,10 @@ class UnpackingError(Exception):
     pass
 
 
-
 async def eval_solver(self, url: str, headers: dict[str, str] | None, patterns: list[str]) -> str:
     try:
         response = await self._make_request(url, headers=headers)
-        soup = BeautifulSoup(response.text, "lxml",parse_only=SoupStrainer("script"))
+        soup = BeautifulSoup(response.text, "lxml", parse_only=SoupStrainer("script"))
         script_all = soup.find_all("script")
         for i in script_all:
             if detect(i.text):

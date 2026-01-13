@@ -138,12 +138,12 @@ class Streamer:
     ) -> typing.AsyncGenerator[bytes, None]:
         """
         Stream content from the response, optionally applying a transformer.
-        
+
         Args:
             transformer: Optional StreamTransformer to apply host-specific
                         content manipulation (e.g., PNG stripping, TS detection).
                         If None, content is streamed directly without modification.
-        
+
         Yields:
             Bytes chunks from the upstream response.
         """
@@ -152,7 +152,7 @@ class Streamer:
 
         try:
             self.parse_content_range()
-            
+
             # Choose the chunk source based on whether we have a transformer
             if transformer:
                 chunk_source = transformer.transform(self.response.aiter_bytes())
@@ -204,12 +204,13 @@ class Streamer:
             # Handle network read errors gracefully - these occur when upstream connection drops
             logger.warning(f"ReadError while streaming: {e}")
             if self.bytes_transferred > 0:
-                logger.info(f"Partial content received ({self.bytes_transferred} bytes) before ReadError. Graceful termination.")
+                logger.info(
+                    f"Partial content received ({self.bytes_transferred} bytes) before ReadError. Graceful termination."
+                )
                 return
             else:
                 raise DownloadError(502, f"ReadError while streaming: {e}")
 
-            
     @staticmethod
     def format_bytes(size) -> str:
         power = 2**10
@@ -361,13 +362,16 @@ def encode_mediaflow_proxy_url(
     # Add propagate response headers (rp_ prefix - these propagate to segments)
     if propagate_response_headers:
         query_params.update(
-            {key if key.lower().startswith("rp_") else f"rp_{key}": value for key, value in propagate_response_headers.items()}
+            {
+                key if key.lower().startswith("rp_") else f"rp_{key}": value
+                for key, value in propagate_response_headers.items()
+            }
         )
-    
+
     # Add remove headers if provided (x_ prefix for "exclude")
     if remove_response_headers:
         query_params["x_headers"] = ",".join(remove_response_headers)
-    
+
     # Add stream transformer if provided
     if stream_transformer:
         query_params["transformer"] = stream_transformer
@@ -518,19 +522,21 @@ class ProxyRequestHeaders:
     propagate: dict  # response headers to propagate to segments (rp_ prefix)
 
 
-def apply_header_manipulation(base_headers: dict, proxy_headers: ProxyRequestHeaders, include_propagate: bool = True) -> dict:
+def apply_header_manipulation(
+    base_headers: dict, proxy_headers: ProxyRequestHeaders, include_propagate: bool = True
+) -> dict:
     """
     Apply response header additions and removals.
-    
+
     This function filters out headers specified in proxy_headers.remove,
     then merges in headers from proxy_headers.response and optionally proxy_headers.propagate.
-    
+
     Args:
         base_headers (dict): The base headers to start with.
         proxy_headers (ProxyRequestHeaders): The proxy headers containing response additions and removals.
-        include_propagate (bool): Whether to include propagate headers (rp_). 
+        include_propagate (bool): Whether to include propagate headers (rp_).
                                   Set to False for manifests, True for segments. Defaults to True.
-    
+
     Returns:
         dict: The manipulated headers.
     """
@@ -561,10 +567,10 @@ def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
     if "referrer" in request_headers:
         if "referer" not in request_headers:
             request_headers["referer"] = request_headers.pop("referrer")
-            
+
     dest = request.query_params.get("d", "")
     host = urlparse(dest).netloc.lower()
-            
+
     if "vidoza" in host or "videzz" in host:
         # Remove ALL empty headers
         for h in list(request_headers.keys()):
@@ -573,17 +579,19 @@ def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
                 request_headers.pop(h, None)
 
     # r_ prefix: response headers (manifest only, not propagated to segments)
-    response_headers = {k[2:].lower(): v for k, v in request.query_params.items() 
-                        if k.lower().startswith("r_") and not k.lower().startswith("rp_")}
-    
+    response_headers = {
+        k[2:].lower(): v
+        for k, v in request.query_params.items()
+        if k.lower().startswith("r_") and not k.lower().startswith("rp_")
+    }
+
     # rp_ prefix: response headers that propagate to segments
-    propagate_headers = {k[3:].lower(): v for k, v in request.query_params.items() 
-                         if k.lower().startswith("rp_")}
-    
+    propagate_headers = {k[3:].lower(): v for k, v in request.query_params.items() if k.lower().startswith("rp_")}
+
     # Parse headers to remove from response (x_headers parameter)
     x_headers_param = request.query_params.get("x_headers", "")
     remove_headers = [h.strip().lower() for h in x_headers_param.split(",") if h.strip()] if x_headers_param else []
-    
+
     return ProxyRequestHeaders(request_headers, response_headers, remove_headers, propagate_headers)
 
 
