@@ -44,7 +44,7 @@ mediaflow-proxy = "mediaflow_proxy.main:run"
 
 [dependency-groups]
 dev = [
-    "black",
+    "ruff>=0.14.11",
 ]
 
 [build-system]
@@ -57,5 +57,22 @@ include = ["mediaflow_proxy/**", "LICENSE", "README.md"]
 [tool.hatch.build.targets.wheel]
 packages = ["mediaflow_proxy"]
 
-[tool.black]
+[tool.ruff]
+target-version = "py312"
 line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

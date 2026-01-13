@@ -19,18 +19,11 @@ class StreamWishExtractor(BaseExtractor):
 
         headers = {"Referer": referer}
         response = await self._make_request(url, headers=headers)
-        
-        iframe_match = re.search(
-            r'<iframe[^>]+src=["\']([^"\']+)["\']',
-            response.text,
-            re.DOTALL
-        )
+
+        iframe_match = re.search(r'<iframe[^>]+src=["\']([^"\']+)["\']', response.text, re.DOTALL)
         iframe_url = urljoin(url, iframe_match.group(1)) if iframe_match else url
 
-        iframe_response = await self._make_request(
-            iframe_url,
-            headers=headers
-        )
+        iframe_response = await self._make_request(iframe_url, headers=headers)
         html = iframe_response.text
 
         final_url = self._extract_m3u8(html)
@@ -58,10 +51,12 @@ class StreamWishExtractor(BaseExtractor):
             final_url = urljoin(iframe_url, final_url)
 
         origin = f"{urlparse(referer).scheme}://{urlparse(referer).netloc}"
-        self.base_headers.update({
-            "Referer": referer,
-            "Origin": origin,
-        })
+        self.base_headers.update(
+            {
+                "Referer": referer,
+                "Origin": origin,
+            }
+        )
 
         return {
             "destination_url": final_url,
@@ -74,8 +69,5 @@ class StreamWishExtractor(BaseExtractor):
         """
         Extract first absolute m3u8 URL from text
         """
-        match = re.search(
-            r'https?://[^"\']+\.m3u8[^"\']*',
-            text
-        )
+        match = re.search(r'https?://[^"\']+\.m3u8[^"\']*', text)
         return match.group(0) if match else None

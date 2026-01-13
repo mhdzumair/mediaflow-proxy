@@ -15,8 +15,8 @@ class StreamtapeExtractor(BaseExtractor):
         if not matches:
             raise ExtractorError("Failed to extract URL components")
         i = 0
-        for  i in range(len(matches)):
-            if matches[i-1] == matches[i] and "ip=" in matches[i]:
+        for i in range(len(matches)):
+            if matches[i - 1] == matches[i] and "ip=" in matches[i]:
                 final_url = f"https://streamtape.com/get_video?{matches[i]}"
 
         self.base_headers["referer"] = url

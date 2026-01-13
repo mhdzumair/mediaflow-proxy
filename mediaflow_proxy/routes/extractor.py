@@ -20,7 +20,10 @@ from mediaflow_proxy.utils.base64_utils import process_potential_base64_url
 extractor_router = APIRouter()
 logger = logging.getLogger(__name__)
 
-async def refresh_extractor_cache(cache_key: str, extractor_params: ExtractorURLParams, proxy_headers: ProxyRequestHeaders):
+
+async def refresh_extractor_cache(
+    cache_key: str, extractor_params: ExtractorURLParams, proxy_headers: ProxyRequestHeaders
+):
     """Asynchronously refreshes the extractor cache in the background."""
     try:
         logger.info(f"Background cache refresh started for key: {cache_key}")
@@ -45,10 +48,10 @@ async def extract_url(
         # Process potential base64 encoded destination URL
         processed_destination = process_potential_base64_url(extractor_params.destination)
         extractor_params.destination = processed_destination
-        
+
         cache_key = f"{extractor_params.host}_{extractor_params.model_dump_json()}"
         response = await get_cached_extractor_result(cache_key)
-        
+
         if response:
             logger.info(f"Serving from cache for key: {cache_key}")
             # Schedule a background task to refresh the cache without blocking the user

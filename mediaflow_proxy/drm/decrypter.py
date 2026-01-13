@@ -167,7 +167,7 @@ class MP4Parser:
 class MP4Decrypter:
     """
     Class to handle the decryption of CENC encrypted MP4 segments.
-    
+
     Supports multi-track segments (e.g., video + audio) by properly handling
     data offsets and encryption info for each track.
 
@@ -205,7 +205,7 @@ class MP4Decrypter:
         self.encryption_scheme = b"cenc"  # Default to cenc (AES-CTR)
         # Pattern encryption parameters (for cbcs/cens) - default values
         self.crypt_byte_block = 1  # Default: encrypt 1 block
-        self.skip_byte_block = 9   # Default: skip 9 blocks
+        self.skip_byte_block = 9  # Default: skip 9 blocks
         # Constant IV for CBCS (when default_Per_Sample_IV_Size is 0)
         self.constant_iv: Optional[bytes] = None
         # Per-track encryption settings (track_id -> {crypt, skip, iv})
@@ -240,12 +240,12 @@ class MP4Decrypter:
         # Init atoms to skip when include_init is False
         # Note: styp is a segment type atom that should be kept in segments
         init_atoms = {b"ftyp", b"moov"}
-        
+
         for atom in atoms:
             # Skip init atoms if not including init
             if not include_init and atom.atom_type in init_atoms:
                 continue
-                
+
             if atom.atom_type in processed_atoms:
                 processed_atom = processed_atoms[atom.atom_type]
                 result.extend(processed_atom.pack())
@@ -343,10 +343,10 @@ class MP4Decrypter:
         """
         parser = MP4Parser(moof.data)
         atoms = parser.list_atoms()
-        
+
         # Reset track infos for this moof
         self.track_infos = []
-        
+
         # First pass: calculate total encryption overhead from all trafs
         self.total_encryption_overhead = 0
         for atom in atoms:
@@ -355,7 +355,7 @@ class MP4Decrypter:
                 traf_atoms = traf_parser.list_atoms()
                 traf_overhead = sum(a.size for a in traf_atoms if a.atom_type in {b"senc", b"saiz", b"saio"})
                 self.total_encryption_overhead += traf_overhead
-        
+
         # Second pass: process atoms
         new_moof_data = bytearray()
         for atom in atoms:
@@ -413,17 +413,19 @@ class MP4Decrypter:
             # Store track info for multi-track mdat decryption
             # Copy the sample sizes array since it gets overwritten for each track
             track_sample_sizes = array.array("I", self.trun_sample_sizes)
-            self.track_infos.append({
-                'data_offset': trun_data_offset,
-                'sample_sizes': track_sample_sizes,
-                'sample_info': sample_info,
-                'key': track_key,
-                'default_sample_size': track_default_sample_size,
-                'track_id': tfhd_track_id,
-                'crypt_byte_block': track_enc_settings.get('crypt_byte_block', self.crypt_byte_block),
-                'skip_byte_block': track_enc_settings.get('skip_byte_block', self.skip_byte_block),
-                'constant_iv': track_enc_settings.get('constant_iv', self.constant_iv),
-            })
+            self.track_infos.append(
+                {
+                    "data_offset": trun_data_offset,
+                    "sample_sizes": track_sample_sizes,
+                    "sample_info": sample_info,
+                    "key": track_key,
+                    "default_sample_size": track_default_sample_size,
+                    "track_id": tfhd_track_id,
+                    "crypt_byte_block": track_enc_settings.get("crypt_byte_block", self.crypt_byte_block),
+                    "skip_byte_block": track_enc_settings.get("skip_byte_block", self.skip_byte_block),
+                    "constant_iv": track_enc_settings.get("constant_iv", self.constant_iv),
+                }
+            )
             # Keep backward compatibility for single-track case
             self.current_key = track_key
             self.current_sample_info = sample_info
@@ -433,14 +435,14 @@ class MP4Decrypter:
     def _parse_tfhd(self, tfhd: MP4Atom) -> None:
         """
         Parses the 'tfhd' (Track Fragment Header) atom to extract default sample size.
-        
+
         Args:
             tfhd (MP4Atom): The 'tfhd' atom to parse.
         """
         data = tfhd.data
         flags = struct.unpack_from(">I", data, 0)[0] & 0xFFFFFF
         offset = 8  # Skip version_flags (4) + track_id (4)
-        
+
         # Skip optional fields based on flags
         if flags & 0x000001:  # base-data-offset-present
             offset += 8
@@ -467,11 +469,11 @@ class MP4Decrypter:
             MP4Atom: Decrypted 'mdat' atom with decrypted media data.
         """
         mdat_data = mdat.data
-        
+
         # Use multi-track decryption if we have track_infos
         if self.track_infos:
             return self._decrypt_mdat_multi_track(mdat)
-        
+
         # Fallback to single-track decryption for backward compatibility
         if not self.current_key or not self.current_sample_info:
             return mdat  # Return original mdat if we don't have decryption info
@@ -487,31 +489,31 @@ class MP4Decrypter:
             sample_size = 0
             if i < len(self.trun_sample_sizes):
                 sample_size = self.trun_sample_sizes[i]
-            
+
             # If sample size is 0 (not specified in trun), use default from tfhd
             if sample_size == 0:
                 sample_size = self.default_sample_size if self.default_sample_size > 0 else len(mdat_data) - position
-            
+
             sample = mdat_data[position : position + sample_size]
             position += sample_size
             decrypted_sample = self._decrypt_sample(sample, info, self.current_key)
             decrypted_samples.extend(decrypted_sample)
 
         return MP4Atom(b"mdat", len(decrypted_samples) + 8, decrypted_samples)
-    
+
     def _decrypt_mdat_multi_track(self, mdat: MP4Atom) -> MP4Atom:
         """
         Decrypts the 'mdat' atom with support for multiple tracks.
         Each track's samples are located at their respective data_offset positions.
-        
+
         The data_offset in trun is the byte offset from the start of the moof box
         to the first byte of sample data. Since mdat immediately follows moof,
         we can calculate the position within mdat as:
         position_in_mdat = data_offset - moof_size
-        
+
         But we don't have moof_size here directly. However, we know that the first
         track's data_offset minus 8 (mdat header) gives us the moof size.
-        
+
         For simplicity, we sort tracks by data_offset and process them in order,
         using the data_offset difference to determine where each track's samples start.
 
@@ -522,64 +524,64 @@ class MP4Decrypter:
             MP4Atom: Decrypted 'mdat' atom with decrypted media data from all tracks.
         """
         mdat_data = mdat.data
-        
+
         if not self.track_infos:
             return mdat
-        
+
         # Sort tracks by data_offset to process in order
-        sorted_tracks = sorted(self.track_infos, key=lambda x: x['data_offset'])
-        
+        sorted_tracks = sorted(self.track_infos, key=lambda x: x["data_offset"])
+
         # The first track's data_offset tells us where mdat data starts relative to moof
         # data_offset = moof_size + 8 (mdat header) for the first sample
         # So mdat_data_start_in_file = moof_start + first_data_offset
         # And position_in_mdat = data_offset - first_data_offset
-        first_data_offset = sorted_tracks[0]['data_offset']
-        
+        first_data_offset = sorted_tracks[0]["data_offset"]
+
         # Pre-allocate output buffer with original data (in case some parts aren't encrypted)
         decrypted_data = bytearray(mdat_data)
-        
+
         # Process each track's samples at their respective offsets
         for track_info in sorted_tracks:
-            data_offset = track_info['data_offset']
-            sample_sizes = track_info['sample_sizes']
-            sample_info = track_info['sample_info']
-            key = track_info['key']
-            default_sample_size = track_info['default_sample_size']
+            data_offset = track_info["data_offset"]
+            sample_sizes = track_info["sample_sizes"]
+            sample_info = track_info["sample_info"]
+            key = track_info["key"]
+            default_sample_size = track_info["default_sample_size"]
             # Get per-track encryption settings
-            track_crypt = track_info.get('crypt_byte_block', self.crypt_byte_block)
-            track_skip = track_info.get('skip_byte_block', self.skip_byte_block)
-            track_constant_iv = track_info.get('constant_iv', self.constant_iv)
-            
+            track_crypt = track_info.get("crypt_byte_block", self.crypt_byte_block)
+            track_skip = track_info.get("skip_byte_block", self.skip_byte_block)
+            track_constant_iv = track_info.get("constant_iv", self.constant_iv)
+
             if not key or not sample_info:
                 continue
-            
+
             # Calculate start position in mdat
             # position = data_offset - first_data_offset (relative to first track's start)
             mdat_position = data_offset - first_data_offset
-            
+
             for i, info in enumerate(sample_info):
                 sample_size = 0
                 if i < len(sample_sizes):
                     sample_size = sample_sizes[i]
-                
+
                 if sample_size == 0:
                     sample_size = default_sample_size if default_sample_size > 0 else 0
-                
+
                 if sample_size == 0:
                     continue
-                    
+
                 if mdat_position + sample_size > len(mdat_data):
                     break
-                
-                sample = mdat_data[mdat_position:mdat_position + sample_size]
+
+                sample = mdat_data[mdat_position : mdat_position + sample_size]
                 decrypted_sample = self._decrypt_sample_with_track_settings(
                     sample, info, key, track_crypt, track_skip, track_constant_iv
                 )
-                
+
                 # Write decrypted sample to output at the same position
-                decrypted_data[mdat_position:mdat_position + len(decrypted_sample)] = decrypted_sample
+                decrypted_data[mdat_position : mdat_position + len(decrypted_sample)] = decrypted_sample
                 mdat_position += sample_size
-        
+
         return MP4Atom(b"mdat", len(decrypted_data) + 8, bytes(decrypted_data))
 
     def _parse_senc(self, senc: MP4Atom, sample_count: int) -> list[CENCSampleAuxiliaryDataFormat]:
@@ -608,9 +610,9 @@ class MP4Decrypter:
 
         # Use the IV size from tenc box (8 or 16 bytes, or 0 for constant IV)
         iv_size = self.default_iv_size
-        
+
         # For CBCS with constant IV, use the IV from tenc instead of per-sample IVs
-        use_constant_iv = (self.encryption_scheme == b"cbcs" and self.constant_iv is not None)
+        use_constant_iv = self.encryption_scheme == b"cbcs" and self.constant_iv is not None
 
         sample_info = []
         for _ in range(sample_count):
@@ -704,7 +706,7 @@ class MP4Decrypter:
     ) -> Union[memoryview, bytearray, bytes]:
         """
         Processes and decrypts a sample using CBCS (AES-CBC with pattern encryption).
-        
+
         CBCS uses AES-CBC mode with a constant IV (no counter increment between blocks).
         Pattern encryption encrypts 'crypt_byte_block' 16-byte blocks, then leaves
         'skip_byte_block' 16-byte blocks in the clear, repeating this pattern.
@@ -732,11 +734,11 @@ class MP4Decrypter:
         offset = 0
         for clear_bytes, encrypted_bytes in sample_info.sub_samples:
             # Copy clear bytes as-is
-            result.extend(sample[offset:offset + clear_bytes])
+            result.extend(sample[offset : offset + clear_bytes])
             offset += clear_bytes
-            
+
             # Decrypt encrypted portion using pattern encryption
-            encrypted_part = bytes(sample[offset:offset + encrypted_bytes])
+            encrypted_part = bytes(sample[offset : offset + encrypted_bytes])
             decrypted = self._decrypt_cbcs_pattern(encrypted_part, key, iv)
             result.extend(decrypted)
             offset += encrypted_bytes
@@ -750,10 +752,10 @@ class MP4Decrypter:
     def _decrypt_cbcs_pattern(self, data: bytes, key: bytes, iv: bytes) -> bytes:
         """
         Decrypts data using CBCS pattern encryption (AES-CBC with crypt/skip pattern).
-        
+
         Pattern encryption decrypts 'crypt_byte_block' 16-byte blocks, then skips
         'skip_byte_block' 16-byte blocks (leaving them in clear), repeating.
-        
+
         Important: In CBCS, the CBC cipher state (previous ciphertext) carries over
         between encrypted blocks, even though clear blocks are skipped. This means
         we need to collect all encrypted blocks, decrypt them as a continuous CBC
@@ -773,11 +775,11 @@ class MP4Decrypter:
         block_size = 16
         crypt_blocks = self.crypt_byte_block
         skip_blocks = self.skip_byte_block
-        
+
         # If no pattern (crypt=0), no encryption
         if crypt_blocks == 0:
             return data
-        
+
         # If skip=0, it's full encryption (all blocks encrypted)
         if skip_blocks == 0:
             # Decrypt complete blocks only
@@ -789,19 +791,19 @@ class MP4Decrypter:
                     return decrypted + data[complete_blocks_size:]
                 return decrypted
             return data
-        
+
         crypt_bytes = crypt_blocks * block_size
         skip_bytes = skip_blocks * block_size
-        
+
         # Step 1: Collect all encrypted blocks
         encrypted_blocks = bytearray()
         block_positions = []  # Track where each encrypted block came from
         pos = 0
-        
+
         while pos < len(data):
             # Encrypted portion
             if pos + crypt_bytes <= len(data):
-                encrypted_blocks.extend(data[pos:pos + crypt_bytes])
+                encrypted_blocks.extend(data[pos : pos + crypt_bytes])
                 block_positions.append((pos, crypt_bytes))
                 pos += crypt_bytes
             else:
@@ -809,32 +811,32 @@ class MP4Decrypter:
                 remaining = len(data) - pos
                 complete = (remaining // block_size) * block_size
                 if complete > 0:
-                    encrypted_blocks.extend(data[pos:pos + complete])
+                    encrypted_blocks.extend(data[pos : pos + complete])
                     block_positions.append((pos, complete))
                     pos += complete
                 break
-            
+
             # Skip clear portion
             if pos + skip_bytes <= len(data):
                 pos += skip_bytes
             else:
                 break
-        
+
         # Step 2: Decrypt all encrypted blocks as a continuous CBC stream
         if encrypted_blocks:
             cipher = AES.new(key, AES.MODE_CBC, iv)
             decrypted_blocks = cipher.decrypt(bytes(encrypted_blocks))
         else:
-            decrypted_blocks = b''
-        
+            decrypted_blocks = b""
+
         # Step 3: Reconstruct the output with decrypted blocks and clear blocks
         result = bytearray(data)  # Start with original data
         decrypted_pos = 0
-        
+
         for orig_pos, length in block_positions:
-            result[orig_pos:orig_pos + length] = decrypted_blocks[decrypted_pos:decrypted_pos + length]
+            result[orig_pos : orig_pos + length] = decrypted_blocks[decrypted_pos : decrypted_pos + length]
             decrypted_pos += length
-        
+
         return bytes(result)
 
     def _process_sample_cbc1(
@@ -842,7 +844,7 @@ class MP4Decrypter:
     ) -> Union[memoryview, bytearray, bytes]:
         """
         Processes and decrypts a sample using CBC1 (full sample AES-CBC encryption).
-        
+
         Unlike CBCS, CBC1 encrypts the entire sample without pattern encryption.
 
         Args:
@@ -876,10 +878,10 @@ class MP4Decrypter:
         result = bytearray()
         offset = 0
         for clear_bytes, encrypted_bytes in sample_info.sub_samples:
-            result.extend(sample[offset:offset + clear_bytes])
+            result.extend(sample[offset : offset + clear_bytes])
             offset += clear_bytes
-            
-            encrypted_part = bytes(sample[offset:offset + encrypted_bytes])
+
+            encrypted_part = bytes(sample[offset : offset + encrypted_bytes])
             # Only decrypt complete blocks
             block_size = 16
             complete_blocks_size = (len(encrypted_part) // block_size) * block_size
@@ -920,13 +922,13 @@ class MP4Decrypter:
             return self._process_sample(sample, sample_info, key)
 
     def _decrypt_sample_with_track_settings(
-        self, 
-        sample: memoryview, 
-        sample_info: CENCSampleAuxiliaryDataFormat, 
+        self,
+        sample: memoryview,
+        sample_info: CENCSampleAuxiliaryDataFormat,
         key: bytes,
         crypt_byte_block: int,
         skip_byte_block: int,
-        constant_iv: Optional[bytes]
+        constant_iv: Optional[bytes],
     ) -> Union[memoryview, bytearray, bytes]:
         """
         Decrypts a sample using per-track encryption settings.
@@ -953,13 +955,13 @@ class MP4Decrypter:
             return self._process_sample(sample, sample_info, key)
 
     def _process_sample_cbcs_with_settings(
-        self, 
-        sample: memoryview, 
-        sample_info: CENCSampleAuxiliaryDataFormat, 
+        self,
+        sample: memoryview,
+        sample_info: CENCSampleAuxiliaryDataFormat,
         key: bytes,
         crypt_byte_block: int,
         skip_byte_block: int,
-        constant_iv: Optional[bytes]
+        constant_iv: Optional[bytes],
     ) -> Union[memoryview, bytearray, bytes]:
         """
         Processes and decrypts a sample using CBCS with per-track settings.
@@ -986,20 +988,18 @@ class MP4Decrypter:
 
         if not sample_info.sub_samples:
             # Full sample encryption with pattern
-            return self._decrypt_cbcs_pattern_with_settings(
-                bytes(sample), key, iv, crypt_byte_block, skip_byte_block
-            )
+            return self._decrypt_cbcs_pattern_with_settings(bytes(sample), key, iv, crypt_byte_block, skip_byte_block)
 
         # Subsample encryption
         result = bytearray()
         offset = 0
         for clear_bytes, encrypted_bytes in sample_info.sub_samples:
             # Copy clear bytes as-is
-            result.extend(sample[offset:offset + clear_bytes])
+            result.extend(sample[offset : offset + clear_bytes])
             offset += clear_bytes
-            
+
             # Decrypt encrypted portion using pattern encryption
-            encrypted_part = bytes(sample[offset:offset + encrypted_bytes])
+            encrypted_part = bytes(sample[offset : offset + encrypted_bytes])
             decrypted = self._decrypt_cbcs_pattern_with_settings(
                 encrypted_part, key, iv, crypt_byte_block, skip_byte_block
             )
@@ -1032,7 +1032,7 @@ class MP4Decrypter:
             return data
 
         block_size = 16
-        
+
         # If both crypt=0 and skip=0, it means full sample CBC encryption (no pattern)
         # This is common for audio tracks in CBCS
         if crypt_blocks == 0 and skip_blocks == 0:
@@ -1045,19 +1045,19 @@ class MP4Decrypter:
                     return decrypted + data[complete_blocks_size:]
                 return decrypted
             return data
-        
+
         crypt_bytes = crypt_blocks * block_size
         skip_bytes = skip_blocks * block_size
-        
+
         # Step 1: Collect all encrypted blocks
         encrypted_blocks = bytearray()
         block_positions = []  # Track where each encrypted block came from
         pos = 0
-        
+
         while pos < len(data):
             # Encrypted portion
             if pos + crypt_bytes <= len(data):
-                encrypted_blocks.extend(data[pos:pos + crypt_bytes])
+                encrypted_blocks.extend(data[pos : pos + crypt_bytes])
                 block_positions.append((pos, crypt_bytes))
                 pos += crypt_bytes
             else:
@@ -1065,32 +1065,32 @@ class MP4Decrypter:
                 remaining = len(data) - pos
                 complete = (remaining // block_size) * block_size
                 if complete > 0:
-                    encrypted_blocks.extend(data[pos:pos + complete])
+                    encrypted_blocks.extend(data[pos : pos + complete])
                     block_positions.append((pos, complete))
                     pos += complete
                 break
-            
+
             # Skip clear portion
             if pos + skip_bytes <= len(data):
                 pos += skip_bytes
             else:
                 break
-        
+
         # Step 2: Decrypt all encrypted blocks as a continuous CBC stream
         if encrypted_blocks:
             cipher = AES.new(key, AES.MODE_CBC, iv)
             decrypted_blocks = cipher.decrypt(bytes(encrypted_blocks))
         else:
-            decrypted_blocks = b''
-        
+            decrypted_blocks = b""
+
         # Step 3: Reconstruct the output with decrypted blocks and clear blocks
         result = bytearray(data)  # Start with original data
         decrypted_pos = 0
-        
+
         for orig_pos, length in block_positions:
-            result[orig_pos:orig_pos + length] = decrypted_blocks[decrypted_pos:decrypted_pos + length]
+            result[orig_pos : orig_pos + length] = decrypted_blocks[decrypted_pos : decrypted_pos + length]
             decrypted_pos += length
-        
+
         return bytes(result)
 
     def _process_trun(self, trun: MP4Atom) -> tuple[int, int]:
@@ -1102,12 +1102,12 @@ class MP4Decrypter:
             trun (MP4Atom): The 'trun' atom to process.
 
         Returns:
-            tuple[int, int]: (sample_count, data_offset_value) where data_offset_value is the offset 
+            tuple[int, int]: (sample_count, data_offset_value) where data_offset_value is the offset
                              into mdat where this track's samples start (0 if not present in trun).
         """
         trun_flags, sample_count = struct.unpack_from(">II", trun.data, 0)
         parse_offset = 8
-        
+
         # Extract data_offset if present (flag 0x000001)
         trun_data_offset = 0
         if trun_flags & 0x000001:
@@ -1377,7 +1377,7 @@ class MP4Decrypter:
     def _parse_schm(self, schm: MP4Atom) -> None:
         """
         Parses the 'schm' (Scheme Type) atom to detect the encryption scheme.
-        
+
         Args:
             schm (MP4Atom): The 'schm' atom to parse.
         """
@@ -1390,12 +1390,12 @@ class MP4Decrypter:
             scheme_type = bytes(data[4:8])
             if scheme_type in (b"cenc", b"cens", b"cbc1", b"cbcs"):
                 self.encryption_scheme = scheme_type
-    
+
     def _parse_tenc(self, tenc: MP4Atom) -> None:
         """
         Parses the 'tenc' (Track Encryption) atom to extract encryption parameters.
         Stores per-track encryption settings for multi-track support.
-        
+
         Args:
             tenc (MP4Atom): The 'tenc' atom to parse.
         """
@@ -1411,34 +1411,34 @@ class MP4Decrypter:
         data = tenc.data
         if len(data) >= 8:
             version = data[0]
-            
+
             # Initialize per-track settings
             track_settings = {
-                'crypt_byte_block': 1,  # Default
-                'skip_byte_block': 9,   # Default
-                'constant_iv': None,
-                'iv_size': 8,
+                "crypt_byte_block": 1,  # Default
+                "skip_byte_block": 9,  # Default
+                "constant_iv": None,
+                "iv_size": 8,
             }
-            
+
             # Extract pattern encryption parameters for version > 0 (used in cbcs)
             if version > 0 and len(data) >= 6:
                 # Byte 5 contains crypt_byte_block (upper 4 bits) and skip_byte_block (lower 4 bits)
                 pattern_byte = data[5]
-                track_settings['crypt_byte_block'] = (pattern_byte >> 4) & 0x0F
-                track_settings['skip_byte_block'] = pattern_byte & 0x0F
+                track_settings["crypt_byte_block"] = (pattern_byte >> 4) & 0x0F
+                track_settings["skip_byte_block"] = pattern_byte & 0x0F
                 # Also update global defaults (for backward compatibility)
-                self.crypt_byte_block = track_settings['crypt_byte_block']
-                self.skip_byte_block = track_settings['skip_byte_block']
-            
+                self.crypt_byte_block = track_settings["crypt_byte_block"]
+                self.skip_byte_block = track_settings["skip_byte_block"]
+
             # IV size is at offset 7 for both versions
             iv_size_offset = 7
             if len(data) > iv_size_offset:
                 iv_size = data[iv_size_offset]
                 if iv_size in (0, 8, 16):
                     # IV size of 0 means constant IV (used in cbcs)
-                    track_settings['iv_size'] = iv_size if iv_size > 0 else 16
-                    self.default_iv_size = track_settings['iv_size']
-                    
+                    track_settings["iv_size"] = iv_size if iv_size > 0 else 16
+                    self.default_iv_size = track_settings["iv_size"]
+
                     # If IV size is 0, extract constant IV from tenc (for CBCS)
                     if iv_size == 0:
                         # After KID (16 bytes at offset 8), there's constant_IV_size (1 byte) and constant_IV
@@ -1447,15 +1447,19 @@ class MP4Decrypter:
                             constant_iv_size = data[constant_iv_size_offset]
                             constant_iv_offset = constant_iv_size_offset + 1
                             if constant_iv_size > 0 and len(data) >= constant_iv_offset + constant_iv_size:
-                                track_settings['constant_iv'] = bytes(data[constant_iv_offset:constant_iv_offset + constant_iv_size])
-                                self.constant_iv = track_settings['constant_iv']
-            
+                                track_settings["constant_iv"] = bytes(
+                                    data[constant_iv_offset : constant_iv_offset + constant_iv_size]
+                                )
+                                self.constant_iv = track_settings["constant_iv"]
+
             # Store per-track settings
             if self.current_track_id > 0:
                 self.track_encryption_settings[self.current_track_id] = track_settings
 
 
-def decrypt_segment(init_segment: bytes, segment_content: bytes, key_id: str, key: str, include_init: bool = True) -> bytes:
+def decrypt_segment(
+    init_segment: bytes, segment_content: bytes, key_id: str, key: str, include_init: bool = True
+) -> bytes:
     """
     Decrypts a CENC encrypted MP4 segment.
 
@@ -1466,7 +1470,7 @@ def decrypt_segment(init_segment: bytes, segment_content: bytes, key_id: str, ke
         key (str): Key in hexadecimal format.
         include_init (bool): If True, include processed init segment in output.
             If False, only return decrypted media segment (for use with EXT-X-MAP).
-    
+
     Returns:
         bytes: Decrypted segment with processed init (moov/ftyp) + decrypted media (moof/mdat),
             or just decrypted media if include_init is False.
@@ -1486,7 +1490,7 @@ def process_drm_init_segment(init_segment: bytes, key_id: str, key: str) -> byte
         init_segment (bytes): Initialization segment data.
         key_id (str): Key ID in hexadecimal format.
         key (str): Key in hexadecimal format.
-    
+
     Returns:
         bytes: Processed init segment with encryption boxes removed.
     """

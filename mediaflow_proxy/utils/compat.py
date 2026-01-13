@@ -1,223 +1,114 @@
 # Author: Trevor Perrin
-# See the LICENSE file for legal information regarding use of this file.
+# See the LICENSE file for legal information regarding use of this file
 
-"""Miscellaneous functions to mask Python version differences."""
+"""Miscellaneous utility functions for Python 3.13+."""
 
-import sys
-import re
-import platform
 import binascii
-import traceback
+import re
 import time
 
 
-if sys.version_info >= (3,0):
+def compat26Str(x):
+    """Identity function for compatibility."""
+    return x
 
-    def compat26Str(x): return x
 
-    # Python 3.3 requires bytes instead of bytearrays for HMAC
-    # So, python 2.6 requires strings, python 3 requires 'bytes',
-    # and python 2.7 and 3.5 can handle bytearrays...
-    # pylint: disable=invalid-name
-    # we need to keep compatHMAC and `x` for API compatibility
-    if sys.version_info < (3, 4):
-        def compatHMAC(x):
-            """Convert bytes-like input to format acceptable for HMAC."""
-            return bytes(x)
-    else:
-        def compatHMAC(x):
-            """Convert bytes-like input to format acceptable for HMAC."""
-            return x
-    # pylint: enable=invalid-name
+def compatHMAC(x):
+    """Convert bytes-like input to format acceptable for HMAC."""
+    return x
 
-    def compatAscii2Bytes(val):
-        """Convert ASCII string to bytes."""
-        if isinstance(val, str):
-            return bytes(val, 'ascii')
-        return val
 
-    def compat_b2a(val):
-        """Convert an ASCII bytes string to string."""
-        return str(val, 'ascii')
+def compatAscii2Bytes(val):
+    """Convert ASCII string to bytes."""
+    if isinstance(val, str):
+        return bytes(val, "ascii")
+    return val
 
-    def raw_input(s):
-        return input(s)
-    
-    # So, the python3 binascii module deals with bytearrays, and python2
-    # deals with strings...  I would rather deal with the "a" part as
-    # strings, and the "b" part as bytearrays, regardless of python version,
-    # so...
-    def a2b_hex(s):
-        try:
-            b = bytearray(binascii.a2b_hex(bytearray(s, "ascii")))
-        except Exception as e:
-            raise SyntaxError("base16 error: %s" % e) 
-        return b  
 
-    def a2b_base64(s):
-        try:
-            if isinstance(s, str):
-                s = bytearray(s, "ascii")
-            b = bytearray(binascii.a2b_base64(s))
-        except Exception as e:
-            raise SyntaxError("base64 error: %s" % e)
-        return b
+def compat_b2a(val):
+    """Convert an ASCII bytes string to string."""
+    return str(val, "ascii")
 
-    def b2a_hex(b):
-        return binascii.b2a_hex(b).decode("ascii")    
-            
-    def b2a_base64(b):
-        return binascii.b2a_base64(b).decode("ascii") 
 
-    def readStdinBinary():
-        return sys.stdin.buffer.read()        
+def a2b_hex(s):
+    """Convert hex string to bytearray."""
+    try:
+        b = bytearray(binascii.a2b_hex(bytearray(s, "ascii")))
+    except Exception as e:
+        raise SyntaxError(f"base16 error: {e}") from e
+    return b
 
-    def compatLong(num):
-        return int(num)
 
-    int_types = tuple([int])
+def a2b_base64(s):
+    """Convert base64 string to bytearray."""
+    try:
+        if isinstance(s, str):
+            s = bytearray(s, "ascii")
+        b = bytearray(binascii.a2b_base64(s))
+    except Exception as e:
+        raise SyntaxError(f"base64 error: {e}") from e
+    return b
 
-    def formatExceptionTrace(e):
-        """Return exception information formatted as string"""
-        return str(e)
 
-    def time_stamp():
-        """Returns system time as a float"""
-        if sys.version_info >= (3, 3):
-            return time.perf_counter()
-        return time.clock()
+def b2a_hex(b):
+    """Convert bytes to hex string."""
+    return binascii.b2a_hex(b).decode("ascii")
 
-    def remove_whitespace(text):
-        """Removes all whitespace from passed in string"""
-        return re.sub(r"\s+", "", text, flags=re.UNICODE)
 
-    # pylint: disable=invalid-name
-    # pylint is stupid here and deson't notice it's a function, not
-    # constant
-    bytes_to_int = int.from_bytes
-    # pylint: enable=invalid-name
+def b2a_base64(b):
+    """Convert bytes to base64 string."""
+    return binascii.b2a_base64(b).decode("ascii")
 
-    def bit_length(val):
-        """Return number of bits necessary to represent an integer."""
-        return val.bit_length()
 
-    def int_to_bytes(val, length=None, byteorder="big"):
-        """Return number converted to bytes"""
-        if length is None:
-            if val:
-                length = byte_length(val)
-            else:
-                length = 1
-        # for gmpy we need to convert back to native int
-        if type(val) != int:
-            val = int(val)
-        return bytearray(val.to_bytes(length=length, byteorder=byteorder))
+def readStdinBinary():
+    """Read binary data from stdin."""
+    import sys
 
-else:
-    # Python 2.6 requires strings instead of bytearrays in a couple places,
-    # so we define this function so it does the conversion if needed.
-    # same thing with very old 2.7 versions
-    # or on Jython
-    if sys.version_info < (2, 7) or sys.version_info < (2, 7, 4) \
-            or platform.system() == 'Java':
-        def compat26Str(x): return str(x)
+    return sys.stdin.buffer.read()
 
-        def remove_whitespace(text):
-            """Removes all whitespace from passed in string"""
-            return re.sub(r"\s+", "", text)
 
-        def bit_length(val):
-            """Return number of bits necessary to represent an integer."""
-            if val == 0:
-                return 0
-            return len(bin(val))-2
-    else:
-        def compat26Str(x): return x
+def compatLong(num):
+    """Convert to int (compatibility function)."""
+    return int(num)
 
-        def remove_whitespace(text):
-            """Removes all whitespace from passed in string"""
-            return re.sub(r"\s+", "", text, flags=re.UNICODE)
 
-        def bit_length(val):
-            """Return number of bits necessary to represent an integer."""
-            return val.bit_length()
+int_types = (int,)
 
-    def compatAscii2Bytes(val):
-        """Convert ASCII string to bytes."""
-        return val
 
-    def compat_b2a(val):
-        """Convert an ASCII bytes string to string."""
-        return str(val)
+def formatExceptionTrace(e):
+    """Return exception information formatted as string."""
+    return str(e)
 
-    # So, python 2.6 requires strings, python 3 requires 'bytes',
-    # and python 2.7 can handle bytearrays...     
-    def compatHMAC(x): return compat26Str(x)
 
-    def a2b_hex(s):
-        try:
-            b = bytearray(binascii.a2b_hex(s))
-        except Exception as e:
-            raise SyntaxError("base16 error: %s" % e)
-        return b
+def time_stamp():
+    """Returns system time as a float."""
+    return time.perf_counter()
 
-    def a2b_base64(s):
-        try:
-            b = bytearray(binascii.a2b_base64(s))
-        except Exception as e:
-            raise SyntaxError("base64 error: %s" % e)
-        return b
-        
-    def b2a_hex(b):
-        return binascii.b2a_hex(compat26Str(b))
-        
-    def b2a_base64(b):
-        return binascii.b2a_base64(compat26Str(b))
 
-    def compatLong(num):
-        return long(num)
+def remove_whitespace(text):
+    """Removes all whitespace from passed in string."""
+    return re.sub(r"\s+", "", text, flags=re.UNICODE)
 
-    int_types = (int, long)
 
-    # pylint on Python3 goes nuts for the sys dereferences...
+bytes_to_int = int.from_bytes
 
-    #pylint: disable=no-member
-    def formatExceptionTrace(e):
-        """Return exception information formatted as string"""
-        newStr = "".join(traceback.format_exception(sys.exc_type,
-                                                    sys.exc_value,
-                                                    sys.exc_traceback))
-        return newStr
-    #pylint: enable=no-member
 
-    def time_stamp():
-        """Returns system time as a float"""
-        return time.clock()
+def bit_length(val):
+    """Return number of bits necessary to represent an integer."""
+    return val.bit_length()
 
-    def bytes_to_int(val, byteorder):
-        """Convert bytes to an int."""
-        if not val:
-            return 0
-        if byteorder == "big":
-            return int(b2a_hex(val), 16)
-        if byteorder == "little":
-            return int(b2a_hex(val[::-1]), 16)
-        raise ValueError("Only 'big' and 'little' endian supported")
 
-    def int_to_bytes(val, length=None, byteorder="big"):
-        """Return number converted to bytes"""
-        if length is None:
-            if val:
-                length = byte_length(val)
-            else:
-                length = 1
-        if byteorder == "big":
-            return bytearray((val >> i) & 0xff
-                             for i in reversed(range(0, length*8, 8)))
-        if byteorder == "little":
-            return bytearray((val >> i) & 0xff
-                             for i in range(0, length*8, 8))
-        raise ValueError("Only 'big' or 'little' endian supported")
+def int_to_bytes(val, length=None, byteorder="big"):
+    """Return number converted to bytes."""
+    if length is None:
+        if val:
+            length = byte_length(val)
+        else:
+            length = 1
+    # for gmpy we need to convert back to native int
+    if not isinstance(val, int):
+        val = int(val)
+    return bytearray(val.to_bytes(length=length, byteorder=byteorder))
 
 
 def byte_length(val):

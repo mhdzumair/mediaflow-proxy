@@ -15,7 +15,7 @@ class VoeExtractor(BaseExtractor):
         response = await self._make_request(url)
 
         # See https://github.com/Gujal00/ResolveURL/blob/master/script.module.resolveurl/lib/resolveurl/plugins/voesx.py
-        redirect_pattern = r'''window\.location\.href\s*=\s*'([^']+)'''
+        redirect_pattern = r"""window\.location\.href\s*=\s*'([^']+)"""
         redirect_match = re.search(redirect_pattern, response.text, re.DOTALL)
         if redirect_match:
             if redirected:
@@ -37,7 +37,7 @@ class VoeExtractor(BaseExtractor):
 
         data = self.voe_decode(code_and_script_match.group(1), luts_match.group(1))
 
-        final_url = data.get('source')
+        final_url = data.get("source")
         if not final_url:
             raise ExtractorError("VOE: failed to extract video URL")
 
@@ -51,8 +51,9 @@ class VoeExtractor(BaseExtractor):
     @staticmethod
     def voe_decode(ct: str, luts: str) -> Dict[str, Any]:
         import json
-        lut = [''.join([('\\' + x) if x in '.*+?^${}()|[]\\' else x for x in i]) for i in luts[2:-2].split("','")]
-        txt = ''
+
+        lut = ["".join([("\\" + x) if x in ".*+?^${}()|[]\\" else x for x in i]) for i in luts[2:-2].split("','")]
+        txt = ""
         for i in ct:
             x = ord(i)
             if 64 < x < 91:
@@ -61,8 +62,8 @@ class VoeExtractor(BaseExtractor):
                 x = (x - 84) % 26 + 97
             txt += chr(x)
         for i in lut:
-            txt = re.sub(i, '', txt)
-        ct = base64.b64decode(txt).decode('utf-8')
-        txt = ''.join([chr(ord(i) - 3) for i in ct])
-        txt = base64.b64decode(txt[::-1]).decode('utf-8')
+            txt = re.sub(i, "", txt)
+        ct = base64.b64decode(txt).decode("utf-8")
+        txt = "".join([chr(ord(i) - 3) for i in ct])
+        txt = base64.b64decode(txt[::-1]).decode("utf-8")
         return json.loads(txt)

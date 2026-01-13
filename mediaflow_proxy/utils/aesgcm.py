@@ -18,6 +18,7 @@ from . import python_aes
 from .constanttime import ct_compare_digest
 from .cryptomath import bytesToNumber, numberToByteArray
 
+
 class AESGCM(object):
     """
     AES-GCM implementation. Note: this implementation does not attempt
@@ -39,7 +40,7 @@ class AESGCM(object):
         self.key = key
 
         self._rawAesEncrypt = rawAesEncrypt
-        self._ctr = python_aes.new(self.key, 6, bytearray(b'\x00' * 16))
+        self._ctr = python_aes.new(self.key, 6, bytearray(b"\x00" * 16))
 
         # The GCM key is AES(0).
         h = bytesToNumber(self._rawAesEncrypt(bytearray(16)))
@@ -51,11 +52,8 @@ class AESGCM(object):
         self._productTable = [0] * 16
         self._productTable[self._reverseBits(1)] = h
         for i in range(2, 16, 2):
-            self._productTable[self._reverseBits(i)] = \
-                self._gcmShift(self._productTable[self._reverseBits(i//2)])
-            self._productTable[self._reverseBits(i+1)] = \
-                self._gcmAdd(self._productTable[self._reverseBits(i)], h)
-
+            self._productTable[self._reverseBits(i)] = self._gcmShift(self._productTable[self._reverseBits(i // 2)])
+            self._productTable[self._reverseBits(i + 1)] = self._gcmAdd(self._productTable[self._reverseBits(i)], h)
 
     def _auth(self, ciphertext, ad, tagMask):
         y = 0
@@ -68,7 +66,7 @@ class AESGCM(object):
 
     def _update(self, y, data):
         for i in range(0, len(data) // 16):
-            y ^= bytesToNumber(data[16*i:16*i+16])
+            y ^= bytesToNumber(data[16 * i : 16 * i + 16])
             y = self._mul(y)
         extra = len(data) % 16
         if extra != 0:
@@ -79,26 +77,26 @@ class AESGCM(object):
         return y
 
     def _mul(self, y):
-        """ Returns y*H, where H is the GCM key. """
+        """Returns y*H, where H is the GCM key."""
         ret = 0
         # Multiply H by y 4 bits at a time, starting with the highest power
         # terms.
         for i in range(0, 128, 4):
             # Multiply by x^4. The reduction for the top four terms is
             # precomputed.
-            retHigh = ret & 0xf
+            retHigh = ret & 0xF
             ret >>= 4
-            ret ^= (AESGCM._gcmReductionTable[retHigh] << (128-16))
+            ret ^= AESGCM._gcmReductionTable[retHigh] << (128 - 16)
 
             # Add in y' * H where y' are the next four terms of y, shifted down
             # to the x^0..x^4. This is one of the pre-computed multiples of
             # H. The multiplication by x^4 shifts them back into place.
-            ret ^= self._productTable[y & 0xf]
+            ret ^= self._productTable[y & 0xF]
             y >>= 4
         assert y == 0
         return ret
 
-    def seal(self, nonce, plaintext, data=''):
+    def seal(self, nonce, plaintext, data=""):
         """
         Encrypts and authenticates plaintext using nonce and data. Returns the
         ciphertext, consisting of the encrypted plaintext and tag concatenated.
@@ -123,7 +121,7 @@ class AESGCM(object):
 
         return ciphertext + tag
 
-    def open(self, nonce, ciphertext, data=''):
+    def open(self, nonce, ciphertext, data=""):
         """
         Decrypts and authenticates ciphertext using nonce and data. If the
         tag is valid, the plaintext is returned. If the tag is invalid,
@@ -156,8 +154,8 @@ class AESGCM(object):
     @staticmethod
     def _reverseBits(i):
         assert i < 16
-        i = ((i << 2) & 0xc) | ((i >> 2) & 0x3)
-        i = ((i << 1) & 0xa) | ((i >> 1) & 0x5)
+        i = ((i << 2) & 0xC) | ((i >> 2) & 0x3)
+        i = ((i << 1) & 0xA) | ((i >> 1) & 0x5)
         return i
 
     @staticmethod
@@ -173,12 +171,12 @@ class AESGCM(object):
             # The x^127 term was shifted up to x^128, so subtract a 1+x+x^2+x^7
             # term. This is 0b11100001 or 0xe1 when represented as an 8-bit
             # polynomial.
-            x ^= 0xe1 << (128-8)
+            x ^= 0xE1 << (128 - 8)
         return x
 
     @staticmethod
     def _inc32(counter):
-        for i in range(len(counter)-1, len(counter)-5, -1):
+        for i in range(len(counter) - 1, len(counter) - 5, -1):
             counter[i] = (counter[i] + 1) % 256
             if counter[i] != 0:
                 break
@@ -188,6 +186,20 @@ class AESGCM(object):
     # result is stored as a 16-bit polynomial. This is used in the reduction step to
     # multiply elements of GF(2^128) by x^4.
     _gcmReductionTable = [
-        0x0000, 0x1c20, 0x3840, 0x2460, 0x7080, 0x6ca0, 0x48c0, 0x54e0,
-        0xe100, 0xfd20, 0xd940, 0xc560, 0x9180, 0x8da0, 0xa9c0, 0xb5e0,
+        0x0000,
+        0x1C20,
+        0x3840,
+        0x2460,
+        0x7080,
+        0x6CA0,
+        0x48C0,
+        0x54E0,
+        0xE100,
+        0xFD20,
+        0xD940,
+        0xC560,
+        0x9180,
+        0x8DA0,
+        0xA9C0,
+        0xB5E0,
     ]

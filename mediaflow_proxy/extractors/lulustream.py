@@ -13,7 +13,7 @@ class LuluStreamExtractor(BaseExtractor):
         response = await self._make_request(url)
 
         # See https://github.com/Gujal00/ResolveURL/blob/master/script.module.resolveurl/lib/resolveurl/plugins/lulustream.py
-        pattern = r'''sources:\s*\[{file:\s*["'](?P<url>[^"']+)'''
+        pattern = r"""sources:\s*\[{file:\s*["'](?P<url>[^"']+)"""
         match = re.search(pattern, response.text, re.DOTALL)
         if not match:
             raise ExtractorError("Failed to extract source URL")

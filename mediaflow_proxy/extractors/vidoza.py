@@ -16,8 +16,7 @@ class VidozaExtractor(BaseExtractor):
 
         # Accept vidoza + videzz
         if not parsed.hostname or not (
-            parsed.hostname.endswith("vidoza.net")
-            or parsed.hostname.endswith("videzz.net")
+            parsed.hostname.endswith("vidoza.net") or parsed.hostname.endswith("videzz.net")
         ):
             raise ExtractorError("VIDOZA: Invalid domain")
 
@@ -56,7 +55,7 @@ class VidozaExtractor(BaseExtractor):
             raise ExtractorError("VIDOZA: Unable to extract video + label from JS")
 
         mp4_url = match.group("url")
-        label = match.group("label").strip()
+        # label = match.group("label").strip()  # available but not used
 
         # Fix URLs like //str38.vidoza.net/...
         if mp4_url.startswith("//"):

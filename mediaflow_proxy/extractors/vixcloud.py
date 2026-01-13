@@ -1,7 +1,6 @@
 import json
 import re
 from typing import Dict, Any
-from urllib.parse import urlparse, parse_qs
 
 from bs4 import BeautifulSoup, SoupStrainer
 
@@ -48,7 +47,7 @@ class VixCloudExtractor(BaseExtractor):
             response = await self._make_request(iframe, headers={"x-inertia": "true", "x-inertia-version": version})
         elif "movie" in url or "tv" in url:
             response = await self._make_request(url)
-        
+
         if response.status_code != 200:
             raise ExtractorError("Failed to extract URL components, Invalid Request")
         soup = BeautifulSoup(response.text, "lxml", parse_only=SoupStrainer("body"))
@@ -58,7 +57,7 @@ class VixCloudExtractor(BaseExtractor):
             expires = re.search(r"'expires':\s*'(\d+)'", script).group(1)
             server_url = re.search(r"url:\s*'([^']+)'", script).group(1)
             if "?b=1" in server_url:
-                final_url = f'{server_url}&token={token}&expires={expires}'
+                final_url = f"{server_url}&token={token}&expires={expires}"
             else:
                 final_url = f"{server_url}?token={token}&expires={expires}"
             if "window.canPlayFHD = true" in script:

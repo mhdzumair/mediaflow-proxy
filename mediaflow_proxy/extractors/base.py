@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 class ExtractorError(Exception):
     """Base exception for all extractors."""
+
     pass
 
 
@@ -94,7 +95,9 @@ class BaseExtractor(ABC):
                                 e.response.status_code,
                                 body_preview,
                             )
-                            raise DownloadError(e.response.status_code, f"HTTP error {e.response.status_code} while requesting {url}")
+                            raise DownloadError(
+                                e.response.status_code, f"HTTP error {e.response.status_code} while requesting {url}"
+                            )
                     return response
 
             except DownloadError:
@@ -105,8 +108,14 @@ class BaseExtractor(ABC):
                 last_exc = e
                 attempt += 1
                 sleep_for = backoff_factor * (2 ** (attempt - 1))
-                logger.warning("Transient network error (attempt %s/%s) for %s: %s — retrying in %.1fs",
-                               attempt, retries, url, e, sleep_for)
+                logger.warning(
+                    "Transient network error (attempt %s/%s) for %s: %s — retrying in %.1fs",
+                    attempt,
+                    retries,
+                    url,
+                    e,
+                    sleep_for,
+                )
                 await asyncio.sleep(sleep_for)
                 continue
             except Exception as e:
