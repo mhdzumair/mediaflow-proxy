@@ -43,6 +43,7 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 - HLS Key URL modifications for bypassing stream restrictions
 - **Base64 URL Support** - Automatic detection and processing of base64 encoded URLs
 - **Segment Skipping** - Skip specific time ranges in HLS and DASH streams (intro/outro skipping, ad removal)
+- **Stream Transformers** - Handle host-specific stream obfuscation (e.g., PNG-wrapped MPEG-TS segments)
 
 ### DASH/MPD Support Status
 
@@ -878,6 +879,21 @@ Remove specific headers from the proxied response.
 - **Use Case:** Useful when upstream servers send incorrect headers (e.g., wrong `Content-Length`) that cause playback issues.  
 - **Example:** `&x_headers=content-length` removes the Content-Length header, allowing chunked transfer encoding.
 
+**`&transformer=ts_stream`**  
+Apply stream content transformations for specific hosting providers.  
+- **Usage:** Add `&transformer=transformer_id` to the proxy URL  
+- **Effect:** Processes stream chunks through a transformer that handles host-specific obfuscation or encoding.  
+- **Available Transformers:**
+  - `ts_stream` - Handles MPEG-TS streams wrapped in fake PNG containers with 0xFF padding (used by TurboVidPlay, StreamWish, FileMoon, etc.)
+- **How it works:** Some video hosts disguise their TS segments as PNG images to evade detection. The `ts_stream` transformer:
+  1. Detects and strips the fake PNG header (89 50 4E 47...)
+  2. Finds and removes the PNG IEND marker
+  3. Skips any 0xFF padding bytes
+  4. Locates the actual MPEG-TS sync byte (0x47) with packet alignment verification
+  5. Outputs clean, playable MPEG-TS data
+- **Example:** `&transformer=ts_stream&x_headers=content-length,content-range` for streams with PNG wrappers.
+- **Note:** This parameter is automatically set when using extractors for supported hosts.
+
 **`&rp_content-type=video/mp2t`**  
 Set response headers that propagate to HLS/DASH segments.  
 - **Usage:** Add `&rp_header-name=value` to the proxy URL (rp_ prefix)  
@@ -961,6 +977,16 @@ mpv "http://localhost:8888/proxy/hls/manifest.m3u8?d=https://example.com/playlis
 ```bash
 # Remove content-length header for streams with incorrect content-length
 mpv "http://localhost:8888/proxy/stream?d=https://example.com/video.mp4&x_headers=content-length&api_password=your_password"
+```
+
+#### Stream with PNG-Wrapped TS Segments (Stream Transformer)
+
+```bash
+# Handle streams where TS segments are disguised as PNG files (TurboVidPlay, StreamWish, FileMoon, etc.)
+mpv "http://localhost:8888/proxy/hls/manifest.m3u8?d=https://example.com/playlist.m3u8&transformer=ts_stream&x_headers=content-length,content-range&api_password=your_password"
+
+# The transformer strips fake PNG headers and 0xFF padding to extract the actual MPEG-TS data
+# Note: When using extractors, the transformer is automatically applied for supported hosts
 ```
 
 #### Live DASH Stream (Non-DRM Protected)
