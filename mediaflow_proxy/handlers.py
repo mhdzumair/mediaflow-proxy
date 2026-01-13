@@ -206,7 +206,7 @@ async def handle_stream_request(
     Returns:
         Union[Response, EnhancedStreamingResponse]: Either a HEAD response with headers or a streaming response.
     """
-    client, streamer = await setup_client_and_streamer()
+    _, streamer = await setup_client_and_streamer()
 
     try:
         # Auto-detect and resolve Vavoo links

@@ -28,6 +28,12 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 - Support for expired or self-signed SSL certificates
 - Public IP address retrieval for Debrid services integration
 
+### Xtream Codes (XC) API Proxy
+- **Stateless XC API proxy** for IPTV players
+- Support for live streams, VOD, series, and **catch-up/timeshift**
+- Compatible with any XC-compatible IPTV player (TiviMate, IPTV Smarters, etc.)
+- Automatic URL rewriting for seamless proxying
+
 ### Security
 - API password protection against unauthorized access & Network bandwidth abuse prevention
 - Parameter encryption to hide sensitive information
@@ -843,6 +849,95 @@ Ideal for users who want a reliable, plug-and-play solution without the technica
 8. `/playlist/builder`: Build and customize playlists from multiple sources
 
 Once the server is running, for more details on the available endpoints and their parameters, visit the Swagger UI at `http://localhost:8888/docs`.
+
+### Xtream Codes (XC) API Proxy
+
+MediaFlow Proxy can act as a stateless pass-through proxy for Xtream Codes API, allowing you to proxy streams from XC-compatible IPTV providers through MediaFlow. This is particularly useful for:
+
+- Proxying streams from providers with **Catch Up/Timeshift** support
+- Using MediaFlow's features (headers, DRM, etc.) with XC streams
+- Routing XC streams through a specific network path
+
+#### Configuration
+
+Configure your IPTV player with the following settings:
+
+| Setting | Value |
+|---------|-------|
+| **Server URL** | `http://your-mediaflow-server:8888` |
+| **Username** | `{base64_upstream}:{actual_username}:{api_password}` |
+| **Password** | Your XC provider password |
+
+Where:
+- `base64_upstream`: Base64-encoded URL of your XC provider (e.g., `http://provider.com:8080` → `aHR0cDovL3Byb3ZpZGVyLmNvbTo4MDgw`)
+- `actual_username`: Your actual XC username from the provider
+- `api_password`: Your MediaFlow API password (omit if not configured)
+
+#### Username Format Examples
+
+**With MediaFlow API password:**
+```
+aHR0cDovL3Byb3ZpZGVyLmNvbTo4MDgw:myusername:my_mediaflow_password
+```
+
+**Without MediaFlow API password:**
+```
+aHR0cDovL3Byb3ZpZGVyLmNvbTo4MDgw:myusername:
+```
+
+#### Generating Base64 Upstream URL
+
+You can encode your XC provider URL using the URL Generator tool at `http://your-mediaflow-server:8888/url-generator` or manually:
+
+**Using command line:**
+```bash
+echo -n "http://provider.com:8080" | base64
+# Output: aHR0cDovL3Byb3ZpZGVyLmNvbTo4MDgw
+```
+
+**Using Python:**
+```python
+import base64
+url = "http://provider.com:8080"
+encoded = base64.urlsafe_b64encode(url.encode()).decode().rstrip('=')
+print(encoded)
+```
+
+#### Supported XC API Endpoints
+
+MediaFlow proxies all standard XC API endpoints:
+
+| Endpoint | Description |
+|----------|-------------|
+| `/player_api.php` | Main API for categories, streams, VOD, series |
+| `/xmltv.php` | EPG/TV Guide data |
+| `/get.php` | M3U playlist generation |
+| `/panel_api.php` | Panel API (if supported by provider) |
+| `/live/{user}/{pass}/{id}.{ext}` | Live stream playback |
+| `/movie/{user}/{pass}/{id}.{ext}` | VOD/Movie playback |
+| `/series/{user}/{pass}/{id}.{ext}` | Series episode playback |
+| `/timeshift/{user}/{pass}/{duration}/{start}/{id}.{ext}` | Catch-up/Timeshift playback |
+
+#### Player Configuration Examples
+
+**TiviMate:**
+1. Add Playlist → Xtream Codes Login
+2. Server: `http://your-mediaflow-server:8888`
+3. Username: `{base64_upstream}:{actual_username}:{api_password}`
+4. Password: Your XC password
+
+**IPTV Smarters:**
+1. Add User → Xtream Codes API
+2. Any Name: Your choice
+3. Username: `{base64_upstream}:{actual_username}:{api_password}`
+4. Password: Your XC password
+5. URL: `http://your-mediaflow-server:8888`
+
+**OTT Navigator:**
+1. Add Provider → Xtream
+2. Portal URL: `http://your-mediaflow-server:8888`
+3. Login: `{base64_upstream}:{actual_username}:{api_password}`
+4. Password: Your XC password
 
 ### URL Parameters
 
