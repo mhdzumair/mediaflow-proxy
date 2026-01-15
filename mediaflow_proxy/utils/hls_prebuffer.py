@@ -22,7 +22,6 @@ from urllib.parse import urljoin
 
 from mediaflow_proxy.utils.base_prebuffer import BasePrebuffer
 from mediaflow_proxy.utils.cache_utils import get_cached_segment
-from mediaflow_proxy.utils.http_utils import create_httpx_client
 from mediaflow_proxy.configs import settings
 
 logger = logging.getLogger(__name__)
@@ -300,8 +299,6 @@ class HLSPreBuffer(BasePrebuffer):
         self._cleanup_task: Optional[asyncio.Task] = None
         self._cleanup_interval = 30  # Check every 30 seconds
 
-        self.client = create_httpx_client()
-
     def log_stats(self) -> None:
         """Log current prebuffer statistics with HLS-specific info."""
         stats = self.stats.to_dict()
@@ -475,7 +472,6 @@ class HLSPreBuffer(BasePrebuffer):
         self.clear_cache()
         if self._cleanup_task:
             self._cleanup_task.cancel()
-        await self.client.aclose()
 
 
 # Global HLS pre-buffer instance

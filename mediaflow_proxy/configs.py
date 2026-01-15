@@ -1,6 +1,5 @@
-from typing import Dict, Literal, Optional, Union
+from typing import Dict, Literal, Optional
 
-import httpx
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
@@ -28,42 +27,6 @@ class TransportConfig(BaseSettings):
     )
     timeout: int = Field(60, description="Timeout for HTTP requests in seconds")
 
-    def get_mounts(
-        self, async_http: bool = True
-    ) -> Dict[str, Optional[Union[httpx.HTTPTransport, httpx.AsyncHTTPTransport]]]:
-        """
-        Get a dictionary of httpx mount points to transport instances.
-        """
-        mounts = {}
-        transport_cls = httpx.AsyncHTTPTransport if async_http else httpx.HTTPTransport
-        global_verify = not self.disable_ssl_verification_globally
-
-        # Configure specific routes
-        for pattern, route in self.transport_routes.items():
-            mounts[pattern] = transport_cls(
-                verify=route.verify_ssl if global_verify else False,
-                proxy=route.proxy_url or self.proxy_url if route.proxy else None,
-            )
-
-        # Hardcoded configuration for jxoplay.xyz domain - SSL verification disabled
-        mounts["all://jxoplay.xyz"] = transport_cls(verify=False, proxy=self.proxy_url if self.all_proxy else None)
-
-        mounts["all://dlhd.dad"] = transport_cls(verify=False, proxy=self.proxy_url if self.all_proxy else None)
-
-        mounts["all://*.newkso.ru"] = transport_cls(verify=False, proxy=self.proxy_url if self.all_proxy else None)
-
-        # Apply global settings for proxy and SSL
-        default_proxy_url = self.proxy_url if self.all_proxy else None
-        if default_proxy_url or not global_verify:
-            mounts["all://"] = transport_cls(proxy=default_proxy_url, verify=global_verify)
-
-        # Set default proxy for all routes if enabled
-        # This part is now handled above to combine proxy and SSL settings
-        # if self.all_proxy:
-        #     mounts["all://"] = transport_cls(proxy=self.proxy_url)
-
-        return mounts
-
     class Config:
         env_file = ".env"
         extra = "ignore"
@@ -72,7 +35,7 @@ class TransportConfig(BaseSettings):
 class Settings(BaseSettings):
     api_password: str | None = None  # The password for protecting the API endpoints.
     log_level: str = "INFO"  # The logging level to use.
-    transport_config: TransportConfig = Field(default_factory=TransportConfig)  # Configuration for httpx transport.
+    transport_config: TransportConfig = Field(default_factory=TransportConfig)  # Configuration for HTTP transport.
     enable_streaming_progress: bool = False  # Whether to enable streaming progress tracking.
     disable_home_page: bool = False  # Whether to disable the home page UI.
     disable_docs: bool = False  # Whether to disable the API documentation (Swagger UI).

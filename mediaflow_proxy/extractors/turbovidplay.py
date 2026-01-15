@@ -35,7 +35,7 @@ class TurboVidPlayExtractor(BaseExtractor):
         if media_url.startswith("//"):
             media_url = "https:" + media_url
         elif media_url.startswith("/"):
-            media_url = response.url.origin + media_url
+            media_url = response.get_origin() + media_url
 
         #
         # 3. Fetch the intermediate playlist
@@ -55,11 +55,9 @@ class TurboVidPlayExtractor(BaseExtractor):
         #
         # 5. Final headers
         #
-        self.base_headers["referer"] = url
+        self.base_headers.update({"referer": url, "origin": response.get_origin()})
 
-        #
-        # 6. Always return master proxy (your MediaFlow only supports this)
-        #
+
         return {
             "destination_url": real_m3u8,
             "request_headers": self.base_headers,

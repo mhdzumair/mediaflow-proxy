@@ -26,10 +26,10 @@ class AllDebridSpeedTest(BaseSpeedTestProvider):
             params={"agent": "service", "version": "1.0-363869a7", "apikey": self.api_key},
         )
 
-        if response.status_code != 200:
+        if response.status != 200:
             raise SpeedTestError("Failed to fetch AllDebrid servers")
 
-        data = response.json()
+        data = await response.json()
         if data["status"] != "success":
             raise SpeedTestError("AllDebrid API returned error")
 

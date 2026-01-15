@@ -11,7 +11,13 @@ from starlette.staticfiles import StaticFiles
 
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.middleware import UIAccessControlMiddleware
-from mediaflow_proxy.routes import proxy_router, extractor_router, speedtest_router, playlist_builder_router, xtream_root_router
+from mediaflow_proxy.routes import (
+    proxy_router,
+    extractor_router,
+    speedtest_router,
+    playlist_builder_router,
+    xtream_root_router,
+)
 from mediaflow_proxy.schemas import GenerateUrlRequest, GenerateMultiUrlRequest, MultiUrlRequestItem
 from mediaflow_proxy.utils.cache_utils import EXTRACTOR_CACHE
 from mediaflow_proxy.utils.crypto_utils import EncryptionHandler, EncryptionMiddleware

@@ -1,9 +1,10 @@
+import asyncio
 import logging
 import re
 from typing import Annotated
 from urllib.parse import quote, unquote
 
-import httpx
+import aiohttp
 from fastapi import Request, Depends, APIRouter, Query, HTTPException, Response
 from fastapi.datastructures import QueryParams
 
@@ -34,9 +35,9 @@ from mediaflow_proxy.utils.hls_utils import parse_hls_playlist, find_stream_by_r
 from mediaflow_proxy.utils.http_utils import (
     get_proxy_headers,
     ProxyRequestHeaders,
-    create_httpx_client,
     apply_header_manipulation,
 )
+from mediaflow_proxy.utils.http_client import create_aiohttp_session
 from mediaflow_proxy.utils.m3u8_processor import M3U8Processor
 from mediaflow_proxy.utils.stream_transformers import apply_transformer_to_bytes
 
@@ -235,25 +236,26 @@ async def _handle_hls_with_dlhd_retry(
     """
     # Check if resolution selection is needed (either max_res or specific resolution)
     if hls_params.max_res or hls_params.resolution:
-        async with create_httpx_client(
-            headers=proxy_headers.request,
-            follow_redirects=True,
-        ) as client:
+        async with create_aiohttp_session(hls_params.destination) as (session, proxy_url):
             try:
-                response = await client.get(hls_params.destination)
+                response = await session.get(
+                    hls_params.destination,
+                    headers=proxy_headers.request,
+                    proxy=proxy_url,
+                )
                 response.raise_for_status()
-                playlist_content = response.text
-            except httpx.HTTPStatusError as e:
+                playlist_content = await response.text()
+            except aiohttp.ClientResponseError as e:
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Failed to fetch HLS manifest from origin: {e.response.status_code} {e.response.reason_phrase}",
+                    detail=f"Failed to fetch HLS manifest from origin: {e.status}",
                 ) from e
-            except httpx.TimeoutException as e:
+            except asyncio.TimeoutError as e:
                 raise HTTPException(
                     status_code=504,
                     detail=f"Timeout while fetching HLS manifest: {e}",
                 ) from e
-            except httpx.RequestError as e:
+            except aiohttp.ClientError as e:
                 raise HTTPException(status_code=502, detail=f"Network error fetching HLS manifest: {e}") from e
 
         streams = parse_hls_playlist(playlist_content, base_url=hls_params.destination)
@@ -359,12 +361,12 @@ async def hls_key_proxy(
 
 # Map file extensions to MIME types for HLS segments
 HLS_SEGMENT_MIME_TYPES = {
-    "ts": "video/mp2t",      # MPEG-TS (traditional HLS)
-    "m4s": "video/mp4",      # fMP4 segment (modern HLS/CMAF)
-    "mp4": "video/mp4",      # fMP4 segment (alternative extension)
-    "m4a": "audio/mp4",      # Audio-only fMP4 segment
-    "m4v": "video/mp4",      # Video fMP4 segment (alternative)
-    "aac": "audio/aac",      # AAC audio segment
+    "ts": "video/mp2t",  # MPEG-TS (traditional HLS)
+    "m4s": "video/mp4",  # fMP4 segment (modern HLS/CMAF)
+    "mp4": "video/mp4",  # fMP4 segment (alternative extension)
+    "m4a": "audio/mp4",  # Audio-only fMP4 segment
+    "m4v": "video/mp4",  # Video fMP4 segment (alternative)
+    "aac": "audio/aac",  # AAC audio segment
 }
 
 

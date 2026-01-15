@@ -4,11 +4,10 @@ import logging
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
+import aiohttp
 
-import httpx
-
-
-from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
+from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError, HttpResponse
+from mediaflow_proxy.utils.http_client import create_aiohttp_session
 
 
 logger = logging.getLogger(__name__)
@@ -33,22 +32,37 @@ class DLHDExtractor(BaseExtractor):
         self.mediaflow_endpoint = "hls_manifest_proxy"
         self._iframe_context: Optional[str] = None
 
-    async def _make_request(self, url: str, method: str = "GET", headers: Optional[Dict] = None, **kwargs) -> Any:
-        """Override to disable SSL verification for this extractor and use fetch_with_retry if available."""
-        from mediaflow_proxy.utils.http_utils import create_httpx_client, fetch_with_retry
-
+    async def _make_request(
+        self, url: str, method: str = "GET", headers: Optional[Dict] = None, **kwargs
+    ) -> HttpResponse:
+        """Override to disable SSL verification for this extractor."""
         timeout = kwargs.pop("timeout", 15)
         kwargs.pop("retries", 3)  # consumed but not used directly
         kwargs.pop("backoff_factor", 0.5)  # consumed but not used directly
 
-        async with create_httpx_client(verify=False, timeout=httpx.Timeout(timeout)) as client:
-            try:
-                return await fetch_with_retry(client, method, url, headers or {}, timeout=timeout)
-            except Exception:
-                logger.debug("fetch_with_retry failed or unavailable; falling back to direct request for %s", url)
-                response = await client.request(method, url, headers=headers or {}, timeout=timeout)
-                response.raise_for_status()
-                return response
+        # Merge headers
+        request_headers = self.base_headers.copy()
+        if headers:
+            request_headers.update(headers)
+
+        # Use create_aiohttp_session with verify=False for SSL bypass
+        async with create_aiohttp_session(url, timeout=timeout, verify=False) as (session, proxy_url):
+            async with session.request(method, url, headers=request_headers, proxy=proxy_url, **kwargs) as response:
+                content = await response.read()
+                final_url = str(response.url)
+                status = response.status
+                resp_headers = dict(response.headers)
+
+                if status >= 400:
+                    raise ExtractorError(f"HTTP error {status} while requesting {url}")
+
+                return HttpResponse(
+                    status=status,
+                    headers=resp_headers,
+                    text=content.decode("utf-8", errors="replace"),
+                    content=content,
+                    url=final_url,
+                )
 
     async def _extract_lovecdn_stream(self, iframe_url: str, iframe_content: str, headers: dict) -> Dict[str, Any]:
         """
@@ -142,15 +156,6 @@ class DLHDExtractor(BaseExtractor):
 
         # 1. Initial Auth POST
         auth_url = "https://security.newkso.ru/auth2.php"
-        # Use files parameter to force multipart/form-data which is required by the server
-        # (None, value) tells httpx to send it as a form field, not a file upload
-        multipart_data = {
-            "channelKey": (None, params["channel_key"]),
-            "country": (None, params["auth_country"]),
-            "timestamp": (None, params["auth_ts"]),
-            "expiry": (None, params["auth_expiry"]),
-            "token": (None, params["auth_token"]),
-        }
 
         iframe_origin = f"https://{urlparse(iframe_url).netloc}"
         auth_headers = headers.copy()
@@ -167,30 +172,46 @@ class DLHDExtractor(BaseExtractor):
             }
         )
 
-        from mediaflow_proxy.utils.http_utils import create_httpx_client
+        # Build form data for multipart/form-data
+        form_data = aiohttp.FormData()
+        form_data.add_field("channelKey", params["channel_key"])
+        form_data.add_field("country", params["auth_country"])
+        form_data.add_field("timestamp", params["auth_ts"])
+        form_data.add_field("expiry", params["auth_expiry"])
+        form_data.add_field("token", params["auth_token"])
 
         try:
-            async with create_httpx_client(verify=False) as client:
-                # Note: using 'files' instead of 'data' to ensure multipart/form-data Content-Type
-                auth_resp = await client.post(auth_url, files=multipart_data, headers=auth_headers, timeout=12)
-                auth_resp.raise_for_status()
-                auth_data = auth_resp.json()
-                if not (auth_data.get("valid") or auth_data.get("success")):
-                    raise ExtractorError(f"Initial auth failed with response: {auth_data}")
+            async with create_aiohttp_session(auth_url, timeout=12, verify=False) as (session, proxy_url):
+                async with session.post(
+                    auth_url,
+                    headers=auth_headers,
+                    data=form_data,
+                    proxy=proxy_url,
+                ) as response:
+                    content = await response.read()
+                    response.raise_for_status()
+                    import json
+                    auth_data = json.loads(content.decode("utf-8"))
+                    if not (auth_data.get("valid") or auth_data.get("success")):
+                        raise ExtractorError(f"Initial auth failed with response: {auth_data}")
             logger.info("New auth flow: Initial auth successful.")
+        except ExtractorError:
+            raise
         except Exception as e:
             raise ExtractorError(f"New auth flow failed during initial auth POST: {e}")
 
         # 2. Server Lookup
         server_lookup_url = f"https://{urlparse(iframe_url).netloc}/server_lookup.js?channel_id={params['channel_key']}"
         try:
-            # Use _make_request as it handles retries and expects JSON
+            # Use _make_request as it handles retries
             lookup_resp = await self._make_request(server_lookup_url, headers=headers, timeout=10)
             server_data = lookup_resp.json()
             server_key = server_data.get("server_key")
             if not server_key:
                 raise ExtractorError(f"No server_key in lookup response: {server_data}")
             logger.info(f"New auth flow: Server lookup successful - Server key: {server_key}")
+        except ExtractorError:
+            raise
         except Exception as e:
             raise ExtractorError(f"New auth flow failed during server lookup: {e}")
 
@@ -239,7 +260,8 @@ class DLHDExtractor(BaseExtractor):
 
             # 1. Request initial page
             resp1 = await self._make_request(initial_url, headers=daddylive_headers, timeout=15)
-            player_links = re.findall(r'<button[^>]*data-url="([^"]+)"[^>]*>Player\s*\d+</button>', resp1.text)
+            resp1_text = resp1.text
+            player_links = re.findall(r'<button[^>]*data-url="([^"]+)"[^>]*>Player\s*\d+</button>', resp1_text)
             if not player_links:
                 raise ExtractorError("No player links found on the page.")
 
@@ -255,7 +277,8 @@ class DLHDExtractor(BaseExtractor):
                     daddylive_headers["Referer"] = player_url
                     daddylive_headers["Origin"] = player_url
                     resp2 = await self._make_request(player_url, headers=daddylive_headers, timeout=12)
-                    iframes2 = re.findall(r'<iframe.*?src="([^"]*)"', resp2.text)
+                    resp2_text = resp2.text
+                    iframes2 = re.findall(r'<iframe.*?src="([^"]*)"', resp2_text)
 
                     # Raccogli tutti gli iframe trovati
                     for iframe in iframes2:

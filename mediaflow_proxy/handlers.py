@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
-import httpx
+import aiohttp
 import tenacity
 from fastapi import Request, Response, HTTPException
 from starlette.background import BackgroundTask
@@ -21,7 +21,7 @@ from .utils.http_utils import (
     request_with_retry,
     EnhancedStreamingResponse,
     ProxyRequestHeaders,
-    create_httpx_client,
+    create_streamer,
     apply_header_manipulation,
 )
 from .utils.m3u8_processor import M3U8Processor
@@ -30,17 +30,6 @@ from .utils.stream_transformers import StreamTransformer, get_transformer
 from .configs import settings
 
 logger = logging.getLogger(__name__)
-
-
-async def setup_client_and_streamer() -> tuple[httpx.AsyncClient, Streamer]:
-    """
-    Set up an HTTP client and a streamer.
-
-    Returns:
-        tuple: An httpx.AsyncClient instance and a Streamer instance.
-    """
-    client = create_httpx_client()
-    return client, Streamer(client)
 
 
 def handle_exceptions(exception: Exception) -> Response:
@@ -53,19 +42,23 @@ def handle_exceptions(exception: Exception) -> Response:
     Returns:
         Response: An HTTP response corresponding to the exception type.
     """
-    if isinstance(exception, httpx.HTTPStatusError):
-        # 404 errors are common for live HLS streams with expiring tokens
-        # Log at debug level to reduce noise
-        if exception.response.status_code == 404:
-            logger.debug(f"Upstream 404 (likely expired segment): {exception.request.url}")
+    if isinstance(exception, aiohttp.ClientResponseError):
+        if exception.status == 404:
+            logger.debug(f"Upstream 404: {exception.request_info.url if exception.request_info else 'unknown'}")
         else:
             logger.error(f"Upstream service error while handling request: {exception}")
-        return Response(status_code=exception.response.status_code, content=f"Upstream service error: {exception}")
+        return Response(status_code=exception.status, content=f"Upstream service error: {exception}")
     elif isinstance(exception, DownloadError):
         logger.error(f"Error downloading content: {exception}")
         return Response(status_code=exception.status_code, content=str(exception))
     elif isinstance(exception, tenacity.RetryError):
         return Response(status_code=502, content="Max retries exceeded while downloading content")
+    elif isinstance(exception, asyncio.TimeoutError):
+        logger.error(f"Timeout error: {exception}")
+        return Response(status_code=504, content="Gateway timeout")
+    elif isinstance(exception, aiohttp.ClientError):
+        logger.error(f"Client error: {exception}")
+        return Response(status_code=502, content=f"Upstream connection error: {exception}")
     else:
         logger.exception(f"Internal server error while handling request: {exception}")
         return Response(status_code=502, content=f"Internal server error: {exception}")
@@ -91,7 +84,7 @@ async def handle_hls_stream_proxy(
     Returns:
         Union[Response, EnhancedStreamingResponse]: Either a processed m3u8 playlist or a streaming response.
     """
-    _, streamer = await setup_client_and_streamer()
+    streamer = await create_streamer()
     # Handle range requests
     content_range = proxy_headers.request.get("range", "bytes=0-")
     if "nan" in content_range.casefold():
@@ -176,7 +169,7 @@ async def handle_hls_stream_proxy(
 
         # If we're removing content-range but upstream returned 206, change to 200
         # (206 Partial Content requires Content-Range header per HTTP spec)
-        status_code = streamer.response.status_code
+        status_code = streamer.response.status
         if status_code == 206 and "content-range" in [h.lower() for h in proxy_headers.remove]:
             status_code = 200
 
@@ -211,7 +204,7 @@ async def handle_stream_request(
     Returns:
         Union[Response, EnhancedStreamingResponse]: Either a HEAD response with headers or a streaming response.
     """
-    _, streamer = await setup_client_and_streamer()
+    streamer = await create_streamer()
 
     try:
         # Auto-detect and resolve Vavoo links
@@ -234,7 +227,7 @@ async def handle_stream_request(
         await streamer.create_streaming_response(video_url, proxy_headers.request)
 
         # Debug: log upstream response headers
-        logger.debug(f"Upstream response status: {streamer.response.status_code}")
+        logger.debug(f"Upstream response status: {streamer.response.status}")
         logger.debug(f"Upstream response headers: {dict(streamer.response.headers)}")
 
         response_headers = prepare_response_headers(
@@ -244,7 +237,7 @@ async def handle_stream_request(
 
         # If we're removing content-range but upstream returned 206, change to 200
         # (206 Partial Content requires Content-Range header per HTTP spec)
-        status_code = streamer.response.status_code
+        status_code = streamer.response.status
         if status_code == 206 and "content-range" in [h.lower() for h in proxy_headers.remove]:
             status_code = 200
 
@@ -278,7 +271,7 @@ def prepare_response_headers(
     and merges them with the proxy response headers.
 
     Args:
-        original_headers (httpx.Headers): The original headers from the upstream response.
+        original_headers: The original headers from the upstream response (aiohttp CIMultiDictProxy).
         proxy_response_headers (dict): Additional headers to be included in the proxy response.
         remove_headers (list, optional): List of header names to remove from the response. Defaults to None.
         propagate_headers (dict, optional): Headers that propagate to segments (rp_ prefix). Defaults to None.
@@ -286,11 +279,15 @@ def prepare_response_headers(
     Returns:
         dict: The prepared headers for the proxy response.
     """
-    # Note: httpx.Headers.multi_items() returns lowercase keys, and SUPPORTED_RESPONSE_HEADERS is lowercase
     remove_set = set(h.lower() for h in (remove_headers or []))
-    response_headers = {
-        k: v for k, v in original_headers.multi_items() if k in SUPPORTED_RESPONSE_HEADERS and k not in remove_set
-    }
+    response_headers = {}
+
+    # Handle aiohttp CIMultiDictProxy
+    for k, v in original_headers.items():
+        k_lower = k.lower()
+        if k_lower in SUPPORTED_RESPONSE_HEADERS and k_lower not in remove_set:
+            response_headers[k_lower] = v
+
     # Apply propagate headers first (for segments), then response headers (response takes precedence)
     if propagate_headers:
         response_headers.update(propagate_headers)
@@ -544,9 +541,7 @@ async def get_segment(
         # - Starting new download if needed
         # - Caching the result
         if settings.enable_dash_prebuffer:
-            segment_content = await dash_prebuffer.get_or_download(
-                segment_url, proxy_headers.request
-            )
+            segment_content = await dash_prebuffer.get_or_download(segment_url, proxy_headers.request)
         else:
             # Prebuffer disabled - check cache then download directly
             segment_content = await get_cached_segment(segment_url)
@@ -653,7 +648,10 @@ async def get_public_ip():
     for service in IP_LOOKUP_SERVICES:
         try:
             response = await request_with_retry("GET", service["url"], {})
-            data = response.json()
+            content = await response.text()
+            import json
+
+            data = json.loads(content)
             ip = data.get(service["key"])
             if ip:
                 return {"ip": ip.strip()}

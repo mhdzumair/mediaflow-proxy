@@ -20,7 +20,8 @@ classifiers = [
 requires-python = ">=3.9"
 dependencies = [
     "fastapi",
-    "httpx[socks,zstd]",
+    "aiohttp>=3.9.0",
+    "aiohttp-socks>=0.8.0",
     "tenacity",
     "xmltodict",
     "pydantic-settings",

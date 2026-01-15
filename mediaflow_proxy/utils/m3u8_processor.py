@@ -209,7 +209,9 @@ class M3U8Processor:
                         if key.startswith("h_"):
                             headers[key[2:]] = value
 
-                    logger.info(f"[M3U8Processor] Registering playlist ({len(segment_urls)} segments): {self.playlist_url}")
+                    logger.info(
+                        f"[M3U8Processor] Registering playlist ({len(segment_urls)} segments): {self.playlist_url}"
+                    )
                     asyncio.create_task(
                         hls_prebuffer.register_playlist(
                             self.playlist_url,
@@ -379,7 +381,9 @@ class M3U8Processor:
                         if key.startswith("h_"):
                             headers[key[2:]] = value
 
-                    logger.info(f"[M3U8Processor] Registering playlist ({len(segment_urls)} segments): {self.playlist_url}")
+                    logger.info(
+                        f"[M3U8Processor] Registering playlist ({len(segment_urls)} segments): {self.playlist_url}"
+                    )
                     asyncio.create_task(
                         hls_prebuffer.register_playlist(
                             self.playlist_url,

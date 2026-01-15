@@ -1,13 +1,14 @@
+import asyncio
 import logging
 import typing
 from dataclasses import dataclass
 from functools import partial
 from urllib import parse
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode
 
+import aiohttp
+from aiohttp import ClientSession, ClientTimeout, ClientResponse
 import anyio
-import h11
-import httpx
 import tenacity
 from fastapi import Response
 from starlette.background import BackgroundTask
@@ -21,6 +22,12 @@ from mediaflow_proxy.configs import settings
 from mediaflow_proxy.const import SUPPORTED_REQUEST_HEADERS
 from mediaflow_proxy.utils.crypto_utils import EncryptionHandler
 from mediaflow_proxy.utils.stream_transformers import StreamTransformer
+from mediaflow_proxy.utils.http_client import (
+    create_aiohttp_session,
+    get_routing_config,
+    _ensure_routing_initialized,
+    _create_connector,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,67 +39,71 @@ class DownloadError(Exception):
         super().__init__(message)
 
 
-def create_httpx_client(follow_redirects: bool = True, **kwargs) -> httpx.AsyncClient:
-    """Creates an HTTPX client with configured proxy routing"""
-    mounts = settings.transport_config.get_mounts()
-    kwargs.setdefault("timeout", settings.transport_config.timeout)
-    client = httpx.AsyncClient(mounts=mounts, follow_redirects=follow_redirects, **kwargs)
-    return client
-
-
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
     retry=retry_if_exception_type(DownloadError),
 )
-async def fetch_with_retry(client, method, url, headers, follow_redirects=True, **kwargs):
+async def fetch_with_retry(
+    session: ClientSession,
+    method: str,
+    url: str,
+    headers: dict,
+    proxy: typing.Optional[str] = None,
+    **kwargs,
+) -> ClientResponse:
     """
-    Fetches a URL with retry logic.
+    Fetches a URL with retry logic using native aiohttp.
 
     Args:
-        client (httpx.AsyncClient): The HTTP client to use for the request.
-        method (str): The HTTP method to use (e.g., GET, POST).
-        url (str): The URL to fetch.
-        headers (dict): The headers to include in the request.
-        follow_redirects (bool, optional): Whether to follow redirects. Defaults to True.
+        session: The aiohttp ClientSession to use for the request.
+        method: The HTTP method to use (e.g., GET, POST).
+        url: The URL to fetch.
+        headers: The headers to include in the request.
+        proxy: Optional proxy URL for HTTP proxies.
         **kwargs: Additional arguments to pass to the request.
 
     Returns:
-        httpx.Response: The HTTP response.
+        ClientResponse: The HTTP response.
 
     Raises:
         DownloadError: If the request fails after retries.
     """
     try:
-        response = await client.request(method, url, headers=headers, follow_redirects=follow_redirects, **kwargs)
+        response = await session.request(method, url, headers=headers, proxy=proxy, **kwargs)
         response.raise_for_status()
         return response
-    except httpx.TimeoutException:
+    except asyncio.TimeoutError:
         logger.warning(f"Timeout while downloading {url}")
         raise DownloadError(409, f"Timeout while downloading {url}")
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            # 404 for segments is common with live HLS streams (token expiration)
-            # Log at debug level to reduce noise
+    except aiohttp.ClientResponseError as e:
+        if e.status == 404:
             logger.debug(f"Segment not found (404): {url}")
-            raise e
-        logger.error(f"HTTP error {e.response.status_code} while downloading {url}")
-        raise DownloadError(e.response.status_code, f"HTTP error {e.response.status_code} while downloading {url}")
+            raise
+        logger.error(f"HTTP error {e.status} while downloading {url}")
+        raise DownloadError(e.status, f"HTTP error {e.status} while downloading {url}")
+    except aiohttp.ClientError as e:
+        logger.error(f"Client error downloading {url}: {e}")
+        raise DownloadError(502, f"Client error downloading {url}: {e}")
     except Exception as e:
         logger.error(f"Error downloading {url}: {e}")
         raise
 
 
 class Streamer:
-    def __init__(self, client):
+    """Handles streaming HTTP responses using aiohttp."""
+
+    def __init__(self, session: ClientSession, proxy_url: typing.Optional[str] = None):
         """
-        Initializes the Streamer with an HTTP client.
+        Initializes the Streamer with an aiohttp session.
 
         Args:
-            client (httpx.AsyncClient): The HTTP client to use for streaming.
+            session: The aiohttp ClientSession to use for streaming.
+            proxy_url: Optional proxy URL for HTTP proxies.
         """
-        self.client = client
-        self.response = None
+        self.session = session
+        self.proxy_url = proxy_url
+        self.response: typing.Optional[ClientResponse] = None
         self.progress_bar = None
         self.bytes_transferred = 0
         self.start_byte = 0
@@ -109,28 +120,22 @@ class Streamer:
         Creates and sends a streaming request.
 
         Args:
-            url (str): The URL to stream from.
-            headers (dict): The headers to include in the request.
-
+            url: The URL to stream from.
+            headers: The headers to include in the request.
         """
         try:
-            request = self.client.build_request("GET", url, headers=headers)
-            self.response = await self.client.send(request, stream=True, follow_redirects=True)
+            self.response = await self.session.get(url, headers=headers, proxy=self.proxy_url)
             self.response.raise_for_status()
-        except httpx.TimeoutException:
+        except asyncio.TimeoutError:
             logger.warning("Timeout while creating streaming response")
             raise DownloadError(409, "Timeout while creating streaming response")
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                # 404 for segments is common with live HLS streams (token expiration)
-                # Log at debug level to reduce noise
+        except aiohttp.ClientResponseError as e:
+            if e.status == 404:
                 logger.debug(f"Segment not found (404): {url}")
-                raise e
-            logger.error(f"HTTP error {e.response.status_code} while creating streaming response")
-            raise DownloadError(
-                e.response.status_code, f"HTTP error {e.response.status_code} while creating streaming response"
-            )
-        except httpx.RequestError as e:
+                raise
+            logger.error(f"HTTP error {e.status} while creating streaming response")
+            raise DownloadError(e.status, f"HTTP error {e.status} while creating streaming response")
+        except aiohttp.ClientError as e:
             logger.error(f"Error creating streaming response: {e}")
             raise DownloadError(502, f"Error creating streaming response: {e}")
         except Exception as e:
@@ -157,11 +162,16 @@ class Streamer:
         try:
             self.parse_content_range()
 
+            # Create async generator from response content
+            async def raw_chunks():
+                async for chunk in self.response.content.iter_any():
+                    yield chunk
+
             # Choose the chunk source based on whether we have a transformer
             if transformer:
-                chunk_source = transformer.transform(self.response.aiter_bytes())
+                chunk_source = transformer.transform(raw_chunks())
             else:
-                chunk_source = self.response.aiter_bytes()
+                chunk_source = raw_chunks()
 
             if settings.enable_streaming_progress:
                 with tqdm_asyncio(
@@ -183,37 +193,40 @@ class Streamer:
                     yield chunk
                     self.bytes_transferred += len(chunk)
 
-        except httpx.TimeoutException:
+        except asyncio.TimeoutError:
             logger.warning("Timeout while streaming")
             raise DownloadError(409, "Timeout while streaming")
-        except httpx.RemoteProtocolError as e:
+        except aiohttp.ServerDisconnectedError as e:
             # Special handling for connection closed errors
-            if "peer closed connection without sending complete message body" in str(e):
-                logger.warning(f"Remote server closed connection prematurely: {e}")
-                # If we've received some data, just log the warning and return normally
-                if self.bytes_transferred > 0:
-                    logger.info(
-                        f"Partial content received ({self.bytes_transferred} bytes). Continuing with available data."
-                    )
-                    return
-                else:
-                    # If we haven't received any data, raise an error
-                    raise DownloadError(502, f"Remote server closed connection without sending any data: {e}")
-            else:
-                logger.error(f"Protocol error while streaming: {e}")
-                raise DownloadError(502, f"Protocol error while streaming: {e}")
-        except GeneratorExit:
-            logger.info("Streaming session stopped by the user")
-        except httpx.ReadError as e:
-            # Handle network read errors gracefully - these occur when upstream connection drops
-            logger.warning(f"ReadError while streaming: {e}")
+            logger.warning(f"Remote server closed connection prematurely: {e}")
             if self.bytes_transferred > 0:
                 logger.info(
-                    f"Partial content received ({self.bytes_transferred} bytes) before ReadError. Graceful termination."
+                    f"Partial content received ({self.bytes_transferred} bytes). Continuing with available data."
                 )
                 return
             else:
-                raise DownloadError(502, f"ReadError while streaming: {e}")
+                raise DownloadError(502, f"Remote server closed connection without sending any data: {e}")
+        except GeneratorExit:
+            logger.info("Streaming session stopped by the user")
+        except aiohttp.ClientPayloadError as e:
+            # Handle network read errors gracefully
+            logger.warning(f"ClientPayloadError while streaming: {e}")
+            if self.bytes_transferred > 0:
+                logger.info(
+                    f"Partial content received ({self.bytes_transferred} bytes) before error. Graceful termination."
+                )
+                return
+            else:
+                raise DownloadError(502, f"ClientPayloadError while streaming: {e}")
+        except aiohttp.ClientError as e:
+            logger.warning(f"ClientError while streaming: {e}")
+            if self.bytes_transferred > 0:
+                logger.info(
+                    f"Partial content received ({self.bytes_transferred} bytes) before error. Graceful termination."
+                )
+                return
+            else:
+                raise DownloadError(502, f"ClientError while streaming: {e}")
 
     @staticmethod
     def format_bytes(size) -> str:
@@ -235,41 +248,41 @@ class Streamer:
             self.total_size = int(self.response.headers.get("Content-Length", 0))
             self.end_byte = self.total_size - 1 if self.total_size > 0 else 0
 
-    async def get_text(self, url: str, headers: dict):
+    async def get_text(self, url: str, headers: dict) -> str:
         """
         Sends a GET request to a URL and returns the response text.
 
         Args:
-            url (str): The URL to send the GET request to.
-            headers (dict): The headers to include in the request.
+            url: The URL to send the GET request to.
+            headers: The headers to include in the request.
 
         Returns:
             str: The response text.
         """
         try:
-            self.response = await fetch_with_retry(self.client, "GET", url, headers)
+            self.response = await fetch_with_retry(self.session, "GET", url, headers, proxy=self.proxy_url)
+            return await self.response.text()
         except tenacity.RetryError as e:
             raise e.last_attempt.result()
-        return self.response.text
 
     async def close(self):
         """
-        Closes the HTTP client and response.
+        Closes the HTTP response and session.
         """
         if self.response:
-            await self.response.aclose()
+            self.response.close()
         if self.progress_bar:
             self.progress_bar.close()
-        await self.client.aclose()
+        await self.session.close()
 
 
-async def download_file_with_retry(url: str, headers: dict):
+async def download_file_with_retry(url: str, headers: dict) -> bytes:
     """
     Downloads a file with retry logic.
 
     Args:
-        url (str): The URL of the file to download.
-        headers (dict): The headers to include in the request.
+        url: The URL of the file to download.
+        headers: The headers to include in the request.
 
     Returns:
         bytes: The downloaded file content.
@@ -277,10 +290,10 @@ async def download_file_with_retry(url: str, headers: dict):
     Raises:
         DownloadError: If the download fails after retries.
     """
-    async with create_httpx_client() as client:
+    async with create_aiohttp_session(url) as (session, proxy_url):
         try:
-            response = await fetch_with_retry(client, "GET", url, headers)
-            return response.content
+            response = await fetch_with_retry(session, "GET", url, headers, proxy=proxy_url)
+            return await response.read()
         except DownloadError as e:
             logger.error(f"Failed to download file: {e}")
             raise e
@@ -288,29 +301,73 @@ async def download_file_with_retry(url: str, headers: dict):
             raise DownloadError(502, f"Failed to download file: {e.last_attempt.result()}")
 
 
-async def request_with_retry(method: str, url: str, headers: dict, **kwargs) -> httpx.Response:
+async def request_with_retry(method: str, url: str, headers: dict, **kwargs) -> ClientResponse:
     """
     Sends an HTTP request with retry logic.
 
     Args:
-        method (str): The HTTP method to use (e.g., GET, POST).
-        url (str): The URL to send the request to.
-        headers (dict): The headers to include in the request.
+        method: The HTTP method to use (e.g., GET, POST).
+        url: The URL to send the request to.
+        headers: The headers to include in the request.
         **kwargs: Additional arguments to pass to the request.
 
     Returns:
-        httpx.Response: The HTTP response.
+        ClientResponse: The HTTP response.
 
     Raises:
         DownloadError: If the request fails after retries.
     """
-    async with create_httpx_client() as client:
+    async with create_aiohttp_session(url) as (session, proxy_url):
         try:
-            response = await fetch_with_retry(client, method, url, headers, **kwargs)
+            response = await fetch_with_retry(session, method, url, headers, proxy=proxy_url, **kwargs)
+            # Read the content so it's available after session closes
+            await response.read()
             return response
         except DownloadError as e:
-            logger.error(f"Failed to download file: {e}")
+            logger.error(f"Failed to make request: {e}")
             raise
+
+
+async def create_streamer(url: str = None) -> Streamer:
+    """
+    Create a Streamer configured for the given URL.
+
+    The Streamer manages its own session lifecycle. Call streamer.close()
+    when done to release resources.
+
+    Args:
+        url: Optional URL for routing configuration (SSL/proxy settings).
+
+    Returns:
+        Streamer: A configured Streamer instance.
+    """
+    _ensure_routing_initialized()
+
+    routing_config = get_routing_config()
+    route_match = routing_config.match_url(url)
+
+    timeout_config = ClientTimeout(total=settings.transport_config.timeout)
+    connector, proxy_url = _create_connector(route_match.proxy_url, route_match.verify_ssl)
+
+    session = ClientSession(connector=connector, timeout=timeout_config)
+    return Streamer(session, proxy_url)
+
+
+# Keep setup_streamer as alias for backward compatibility during transition
+async def setup_streamer(url: str = None) -> typing.Tuple[ClientSession, str, Streamer]:
+    """
+    Set up an aiohttp session and streamer.
+
+    DEPRECATED: Use create_streamer() instead which returns only the Streamer.
+
+    Args:
+        url: Optional URL for routing configuration.
+
+    Returns:
+        Tuple of (session, proxy_url, streamer)
+    """
+    streamer = await create_streamer(url)
+    return streamer.session, streamer.proxy_url, streamer
 
 
 def encode_mediaflow_proxy_url(
@@ -332,19 +389,19 @@ def encode_mediaflow_proxy_url(
     Encodes & Encrypt (Optional) a MediaFlow proxy URL with query parameters and headers.
 
     Args:
-        mediaflow_proxy_url (str): The base MediaFlow proxy URL.
-        endpoint (str, optional): The endpoint to append to the base URL. Defaults to None.
-        destination_url (str, optional): The destination URL to include in the query parameters. Defaults to None.
-        query_params (dict, optional): Additional query parameters to include. Defaults to None.
-        request_headers (dict, optional): Headers to include as query parameters. Defaults to None.
-        response_headers (dict, optional): Headers to include as query parameters (r_ prefix). Defaults to None.
-        propagate_response_headers (dict, optional): Response headers that propagate to segments (rp_ prefix). Defaults to None.
-        remove_response_headers (list[str], optional): List of response header names to remove. Defaults to None.
-        encryption_handler (EncryptionHandler, optional): The encryption handler to use. Defaults to None.
-        expiration (int, optional): The expiration time for the encrypted token. Defaults to None.
-        ip (str, optional): The public IP address to include in the query parameters. Defaults to None.
-        filename (str, optional): Filename to be preserved for media players like Infuse. Defaults to None.
-        stream_transformer (str, optional): ID of the stream transformer to apply. Defaults to None.
+        mediaflow_proxy_url: The base MediaFlow proxy URL.
+        endpoint: The endpoint to append to the base URL. Defaults to None.
+        destination_url: The destination URL to include in the query parameters. Defaults to None.
+        query_params: Additional query parameters to include. Defaults to None.
+        request_headers: Headers to include as query parameters. Defaults to None.
+        response_headers: Headers to include as query parameters (r_ prefix). Defaults to None.
+        propagate_response_headers: Response headers that propagate to segments (rp_ prefix). Defaults to None.
+        remove_response_headers: List of response header names to remove. Defaults to None.
+        encryption_handler: The encryption handler to use. Defaults to None.
+        expiration: The expiration time for the encrypted token. Defaults to None.
+        ip: The public IP address to include in the query parameters. Defaults to None.
+        filename: Filename to be preserved for media players like Infuse. Defaults to None.
+        stream_transformer: ID of the stream transformer to apply. Defaults to None.
 
     Returns:
         str: The encoded MediaFlow proxy URL.
@@ -355,13 +412,22 @@ def encode_mediaflow_proxy_url(
         query_params["d"] = destination_url
 
     # Add headers if provided (always use lowercase prefix for consistency)
+    # Filter out empty values to avoid URLs like &h_if-range=&h_referer=...
     if request_headers:
         query_params.update(
-            {key if key.lower().startswith("h_") else f"h_{key}": value for key, value in request_headers.items()}
+            {
+                key if key.lower().startswith("h_") else f"h_{key}": value
+                for key, value in request_headers.items()
+                if value  # Skip empty/None values
+            }
         )
     if response_headers:
         query_params.update(
-            {key if key.lower().startswith("r_") else f"r_{key}": value for key, value in response_headers.items()}
+            {
+                key if key.lower().startswith("r_") else f"r_{key}": value
+                for key, value in response_headers.items()
+                if value  # Skip empty/None values
+            }
         )
     # Add propagate response headers (rp_ prefix - these propagate to segments)
     if propagate_response_headers:
@@ -369,6 +435,7 @@ def encode_mediaflow_proxy_url(
             {
                 key if key.lower().startswith("rp_") else f"rp_{key}": value
                 for key, value in propagate_response_headers.items()
+                if value  # Skip empty/None values
             }
         )
 
@@ -435,10 +502,10 @@ def encode_stremio_proxy_url(
     Format: http://127.0.0.1:11470/proxy/d=<encoded_origin>&h=<headers>&r=<response_headers>/<path><query>
 
     Args:
-        stremio_proxy_url (str): The base Stremio proxy URL.
-        destination_url (str): The destination URL to proxy.
-        request_headers (dict, optional): Headers to include as query parameters. Defaults to None.
-        response_headers (dict, optional): Response headers to include as query parameters. Defaults to None.
+        stremio_proxy_url: The base Stremio proxy URL.
+        destination_url: The destination URL to proxy.
+        request_headers: Headers to include as query parameters. Defaults to None.
+        response_headers: Response headers to include as query parameters. Defaults to None.
 
     Returns:
         str: The encoded Stremio proxy URL.
@@ -492,7 +559,7 @@ def get_original_scheme(request: Request) -> str:
     Determines the original scheme (http or https) of the request.
 
     Args:
-        request (Request): The incoming HTTP request.
+        request: The incoming HTTP request.
 
     Returns:
         str: The original scheme ('http' or 'https')
@@ -536,10 +603,10 @@ def apply_header_manipulation(
     then merges in headers from proxy_headers.response and optionally proxy_headers.propagate.
 
     Args:
-        base_headers (dict): The base headers to start with.
-        proxy_headers (ProxyRequestHeaders): The proxy headers containing response additions and removals.
-        include_propagate (bool): Whether to include propagate headers (rp_).
-                                  Set to False for manifests, True for segments. Defaults to True.
+        base_headers: The base headers to start with.
+        proxy_headers: The proxy headers containing response additions and removals.
+        include_propagate: Whether to include propagate headers (rp_).
+                          Set to False for manifests, True for segments. Defaults to True.
 
     Returns:
         dict: The manipulated headers.
@@ -558,13 +625,18 @@ def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
     Extracts proxy headers from the request query parameters.
 
     Args:
-        request (Request): The incoming HTTP request.
+        request: The incoming HTTP request.
 
     Returns:
         ProxyRequest: A named tuple containing the request headers, response headers, and headers to remove.
     """
-    request_headers = {k: v for k, v in request.headers.items() if k in SUPPORTED_REQUEST_HEADERS}
-    request_headers.update({k[2:].lower(): v for k, v in request.query_params.items() if k.lower().startswith("h_")})
+    request_headers = {k: v for k, v in request.headers.items() if k in SUPPORTED_REQUEST_HEADERS and v}
+
+    # Extract h_ prefixed headers from query params, filtering out empty values
+    for k, v in request.query_params.items():
+        if k.lower().startswith("h_") and v:  # Skip empty values
+            request_headers[k[2:].lower()] = v
+
     request_headers.setdefault("user-agent", settings.user_agent)
 
     # Handle common misspelling of referer
@@ -572,25 +644,21 @@ def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
         if "referer" not in request_headers:
             request_headers["referer"] = request_headers.pop("referrer")
 
-    dest = request.query_params.get("d", "")
-    host = urlparse(dest).netloc.lower()
-
-    if "vidoza" in host or "videzz" in host:
-        # Remove ALL empty headers
-        for h in list(request_headers.keys()):
-            v = request_headers[h]
-            if v is None or v.strip() == "":
-                request_headers.pop(h, None)
-
     # r_ prefix: response headers (manifest only, not propagated to segments)
+    # Filter out empty values
     response_headers = {
         k[2:].lower(): v
         for k, v in request.query_params.items()
-        if k.lower().startswith("r_") and not k.lower().startswith("rp_")
+        if k.lower().startswith("r_") and not k.lower().startswith("rp_") and v
     }
 
     # rp_ prefix: response headers that propagate to segments
-    propagate_headers = {k[3:].lower(): v for k, v in request.query_params.items() if k.lower().startswith("rp_")}
+    # Filter out empty values
+    propagate_headers = {
+        k[3:].lower(): v
+        for k, v in request.query_params.items()
+        if k.lower().startswith("rp_") and v
+    }
 
     # Parse headers to remove from response (x_headers parameter)
     x_headers_param = request.query_params.get("x_headers", "")
@@ -668,7 +736,7 @@ class EnhancedStreamingResponse(Response):
                 # Successfully streamed all content
                 await send({"type": "http.response.body", "body": b"", "more_body": False})
                 finalization_sent = True
-            except (httpx.RemoteProtocolError, httpx.ReadError, h11._util.LocalProtocolError) as e:
+            except (aiohttp.ServerDisconnectedError, aiohttp.ClientPayloadError, aiohttp.ClientError) as e:
                 # Handle connection closed / read errors gracefully
                 if data_sent:
                     # We've sent some data to the client, so try to complete the response

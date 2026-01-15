@@ -24,17 +24,14 @@ from typing import Annotated
 from urllib.parse import urljoin, urlencode, urlparse
 
 from fastapi.responses import RedirectResponse
-import httpx
+import aiohttp
 from fastapi import APIRouter, Request, Depends, Query, Response, HTTPException
 
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.handlers import proxy_stream
 from mediaflow_proxy.utils.base64_utils import decode_base64_url
-from mediaflow_proxy.utils.http_utils import (
-    ProxyRequestHeaders,
-    get_proxy_headers,
-    create_httpx_client,
-)
+from mediaflow_proxy.utils.http_utils import ProxyRequestHeaders, get_proxy_headers
+from mediaflow_proxy.utils.http_client import create_aiohttp_session
 
 logger = logging.getLogger(__name__)
 xtream_root_router = APIRouter()
@@ -200,30 +197,30 @@ async def forward_api_request(
     """
     mediaflow_base = get_mediaflow_base_url(request)
 
-    async with create_httpx_client(follow_redirects=True) as client:
+    async with create_aiohttp_session(upstream_url) as (session, proxy_url):
         try:
-            response = await client.get(upstream_url)
-            response.raise_for_status()
+            async with session.get(upstream_url, proxy=proxy_url, allow_redirects=True) as response:
+                response.raise_for_status()
 
-            content = response.text
-            content_type = response.headers.get("content-type", "application/json")
+                content = await response.text()
+                content_type = response.headers.get("content-type", "application/json")
 
-            # Rewrite URLs in JSON responses
-            if "json" in content_type.lower():
-                content = rewrite_urls_for_api(content, upstream_base, mediaflow_base)
+                # Rewrite URLs in JSON responses
+                if "json" in content_type.lower():
+                    content = rewrite_urls_for_api(content, upstream_base, mediaflow_base)
 
-            return Response(
-                content=content,
-                status_code=response.status_code,
-                media_type=content_type,
-            )
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Upstream XC API error: {e.response.status_code}")
+                return Response(
+                    content=content,
+                    status_code=response.status,
+                    media_type=content_type,
+                )
+        except aiohttp.ClientResponseError as e:
+            logger.error(f"Upstream XC API error: {e.status}")
             raise HTTPException(
-                status_code=e.response.status_code,
-                detail=f"Upstream XC server error: {e.response.status_code}",
+                status_code=e.status,
+                detail=f"Upstream XC server error: {e.status}",
             )
-        except httpx.RequestError as e:
+        except aiohttp.ClientError as e:
             logger.error(f"Failed to connect to upstream XC server: {e}")
             raise HTTPException(
                 status_code=502,
@@ -307,19 +304,19 @@ async def xmltv_api(
 
     logger.info(f"XC xmltv.php: upstream={upstream_base}")
 
-    async with create_httpx_client(follow_redirects=True, timeout=httpx.Timeout(60.0)) as client:
+    async with create_aiohttp_session(upstream_url, timeout=60) as (session, proxy_url):
         try:
-            response = await client.get(upstream_url)
-            response.raise_for_status()
+            async with session.get(upstream_url, proxy=proxy_url, allow_redirects=True) as response:
+                response.raise_for_status()
 
-            return Response(
-                content=response.content,
-                status_code=response.status_code,
-                media_type=response.headers.get("content-type", "application/xml"),
-            )
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(status_code=e.response.status_code, detail=f"Upstream error: {e.response.status_code}")
-        except httpx.RequestError as e:
+                return Response(
+                    content=await response.read(),
+                    status_code=response.status,
+                    media_type=response.headers.get("content-type", "application/xml"),
+                )
+        except aiohttp.ClientResponseError as e:
+            raise HTTPException(status_code=e.status, detail=f"Upstream error: {e.status}")
+        except aiohttp.ClientError as e:
             raise HTTPException(status_code=502, detail=f"Failed to connect: {str(e)}")
 
 

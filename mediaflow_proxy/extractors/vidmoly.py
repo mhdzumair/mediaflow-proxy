@@ -45,8 +45,8 @@ class VidmolyExtractor(BaseExtractor):
                 raise ExtractorError("VIDMOLY: Request timed out")
             raise
 
-        if test.status_code >= 400:
-            raise ExtractorError(f"VIDMOLY: Stream unavailable ({test.status_code})")
+        if test.status >= 400:
+            raise ExtractorError(f"VIDMOLY: Stream unavailable ({test.status})")
 
         # Return MASTER playlist, not variant
         # Let MediaFlow Proxy handle variants
