@@ -654,11 +654,7 @@ def get_proxy_headers(request: Request) -> ProxyRequestHeaders:
 
     # rp_ prefix: response headers that propagate to segments
     # Filter out empty values
-    propagate_headers = {
-        k[3:].lower(): v
-        for k, v in request.query_params.items()
-        if k.lower().startswith("rp_") and v
-    }
+    propagate_headers = {k[3:].lower(): v for k, v in request.query_params.items() if k.lower().startswith("rp_") and v}
 
     # Parse headers to remove from response (x_headers parameter)
     x_headers_param = request.query_params.get("x_headers", "")

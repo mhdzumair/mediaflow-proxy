@@ -209,6 +209,7 @@ def _ensure_routing_initialized():
     global _routing_initialized
     if not _routing_initialized:
         from mediaflow_proxy.configs import settings
+
         initialize_routing_from_config(settings.transport_config)
 
 
@@ -339,6 +340,7 @@ async def create_aiohttp_session(
     # Create timeout
     if timeout is None:
         from mediaflow_proxy.configs import settings
+
         timeout_config = ClientTimeout(total=settings.transport_config.timeout)
     elif isinstance(timeout, (int, float)):
         timeout_config = ClientTimeout(total=timeout)

@@ -191,6 +191,7 @@ class DLHDExtractor(BaseExtractor):
                     content = await response.read()
                     response.raise_for_status()
                     import json
+
                     auth_data = json.loads(content.decode("utf-8"))
                     if not (auth_data.get("valid") or auth_data.get("success")):
                         raise ExtractorError(f"Initial auth failed with response: {auth_data}")
