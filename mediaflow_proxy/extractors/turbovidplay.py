@@ -57,7 +57,6 @@ class TurboVidPlayExtractor(BaseExtractor):
         #
         self.base_headers.update({"referer": url, "origin": response.get_origin()})
 
-
         return {
             "destination_url": real_m3u8,
             "request_headers": self.base_headers,
