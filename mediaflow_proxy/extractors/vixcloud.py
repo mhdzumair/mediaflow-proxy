@@ -24,7 +24,7 @@ class VixCloudExtractor(BaseExtractor):
                 "Origin": f"{site_url}",
             },
         )
-        if response.status_code != 200:
+        if response.status != 200:
             raise ExtractorError("Outdated Url")
         # Soup the response
         soup = BeautifulSoup(response.text, "lxml", parse_only=SoupStrainer("div", {"id": "app"}))
@@ -48,7 +48,7 @@ class VixCloudExtractor(BaseExtractor):
         elif "movie" in url or "tv" in url:
             response = await self._make_request(url)
 
-        if response.status_code != 200:
+        if response.status != 200:
             raise ExtractorError("Failed to extract URL components, Invalid Request")
         soup = BeautifulSoup(response.text, "lxml", parse_only=SoupStrainer("body"))
         if soup:

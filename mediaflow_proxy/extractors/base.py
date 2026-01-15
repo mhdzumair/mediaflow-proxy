@@ -1,12 +1,16 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Dict, Optional, Any
+from urllib.parse import urlparse
 
 import asyncio
-import httpx
+import aiohttp
+import json
 import logging
 
 from mediaflow_proxy.configs import settings
-from mediaflow_proxy.utils.http_utils import create_httpx_client, DownloadError
+from mediaflow_proxy.utils.http_client import create_aiohttp_session
+from mediaflow_proxy.utils.http_utils import DownloadError
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +19,33 @@ class ExtractorError(Exception):
     """Base exception for all extractors."""
 
     pass
+
+
+@dataclass
+class HttpResponse:
+    """
+    Simple response container for extractor HTTP requests.
+
+    Uses aiohttp-style naming conventions:
+    - status (not status_code)
+    - text (pre-loaded content as string)
+    - content (pre-loaded content as bytes)
+    """
+
+    status: int
+    headers: Dict[str, str]
+    text: str
+    content: bytes
+    url: str
+
+    def json(self) -> Any:
+        """Parse response content as JSON."""
+        return json.loads(self.text)
+
+    def get_origin(self) -> str:
+        """Get the origin (scheme + host) from the response URL."""
+        parsed = urlparse(self.url)
+        return f"{parsed.scheme}://{parsed.netloc}"
 
 
 class BaseExtractor(ABC):
@@ -44,66 +75,83 @@ class BaseExtractor(ABC):
         backoff_factor: float = 0.5,
         raise_on_status: bool = True,
         **kwargs,
-    ) -> httpx.Response:
+    ) -> HttpResponse:
         """
-        Make HTTP request with retry and timeout support.
+        Make HTTP request with retry and timeout support using aiohttp.
 
         Parameters
         ----------
+        url : str
+            The URL to request.
+        method : str
+            HTTP method (GET, POST, etc.). Defaults to GET.
+        headers : dict | None
+            Additional headers to merge with base headers.
         timeout : float | None
-            Seconds to wait for the request (applied to httpx.Timeout). Defaults to 15s.
+            Seconds to wait for the request. Defaults to 15s.
         retries : int
             Number of attempts for transient errors.
         backoff_factor : float
             Base for exponential backoff between retries.
         raise_on_status : bool
-            If True, HTTP non-2xx raises DownloadError (preserves status code).
+            If True, HTTP non-2xx raises DownloadError.
+        **kwargs
+            Additional arguments passed to aiohttp request (e.g., data, json).
+
+        Returns
+        -------
+        HttpResponse
+            Response object with pre-loaded content.
         """
         attempt = 0
         last_exc = None
 
-        # build request headers merging base and per-request
+        # Build request headers merging base and per-request
         request_headers = self.base_headers.copy()
         if headers:
             request_headers.update(headers)
 
-        timeout_cfg = httpx.Timeout(timeout or 15.0)
+        timeout_val = timeout or 15.0
 
         while attempt < retries:
             try:
-                async with create_httpx_client(timeout=timeout_cfg) as client:
-                    response = await client.request(
+                async with create_aiohttp_session(url, timeout=timeout_val) as (session, proxy_url):
+                    async with session.request(
                         method,
                         url,
                         headers=request_headers,
+                        proxy=proxy_url,
                         **kwargs,
-                    )
+                    ) as response:
+                        # Read content while session is still open
+                        content = await response.read()
+                        text = content.decode("utf-8", errors="replace")
+                        final_url = str(response.url)
+                        status = response.status
+                        resp_headers = dict(response.headers)
 
-                    if raise_on_status:
-                        try:
-                            response.raise_for_status()
-                        except httpx.HTTPStatusError as e:
-                            # Provide a short body preview for debugging
-                            body_preview = ""
-                            try:
-                                body_preview = e.response.text[:500]
-                            except Exception:
-                                body_preview = "<unreadable body>"
+                        if raise_on_status and status >= 400:
+                            body_preview = text[:500]
                             logger.debug(
-                                "HTTPStatusError for %s (status=%s) -- body preview: %s",
+                                "HTTP error for %s (status=%s) -- body preview: %s",
                                 url,
-                                e.response.status_code,
+                                status,
                                 body_preview,
                             )
-                            raise DownloadError(
-                                e.response.status_code, f"HTTP error {e.response.status_code} while requesting {url}"
-                            )
-                    return response
+                            raise DownloadError(status, f"HTTP error {status} while requesting {url}")
+
+                        return HttpResponse(
+                            status=status,
+                            headers=resp_headers,
+                            text=text,
+                            content=content,
+                            url=final_url,
+                        )
 
             except DownloadError:
                 # Do not retry on explicit HTTP status errors (they are intentional)
                 raise
-            except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.NetworkError, httpx.TransportError) as e:
+            except (asyncio.TimeoutError, aiohttp.ClientError) as e:
                 # Transient network error — retry with backoff
                 last_exc = e
                 attempt += 1

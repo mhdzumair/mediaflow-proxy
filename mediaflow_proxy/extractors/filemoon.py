@@ -40,7 +40,7 @@ class FileMoonExtractor(BaseExtractor):
         )
 
         test_resp = await self._make_request(final_url, headers=headers)
-        if test_resp.status_code == 404:
+        if test_resp.status == 404:
             raise ExtractorError("Stream not found (404)")
 
         self.base_headers["referer"] = url

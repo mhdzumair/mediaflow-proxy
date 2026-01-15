@@ -11,7 +11,6 @@ import time
 from typing import Dict, Optional, List
 
 from mediaflow_proxy.utils.base_prebuffer import BasePrebuffer
-from mediaflow_proxy.utils.http_utils import create_httpx_client
 from mediaflow_proxy.utils.cache_utils import (
     get_cached_mpd,
     get_cached_init_segment,
@@ -64,8 +63,6 @@ class DASHPreBuffer(BasePrebuffer):
 
         # Additional stats for DASH
         self.init_segments_prebuffered = 0
-
-        self.client = create_httpx_client()
 
         # Cleanup task
         self._cleanup_task: Optional[asyncio.Task] = None
@@ -132,8 +129,7 @@ class DASHPreBuffer(BasePrebuffer):
             self._ensure_cleanup_task_running()
 
             logger.info(
-                f"Pre-buffered DASH manifest: {mpd_url} "
-                f"(live={is_live}, profiles={len(profiles_with_segments)})"
+                f"Pre-buffered DASH manifest: {mpd_url} (live={is_live}, profiles={len(profiles_with_segments)})"
             )
 
         except Exception as e:
@@ -177,9 +173,9 @@ class DASHPreBuffer(BasePrebuffer):
 
             # For live streams, prebuffer from the END (most recent)
             if is_live:
-                segments_to_buffer = segments[-self.prebuffer_segment_count:]
+                segments_to_buffer = segments[-self.prebuffer_segment_count :]
             else:
-                segments_to_buffer = segments[:self.prebuffer_segment_count]
+                segments_to_buffer = segments[: self.prebuffer_segment_count]
 
             for segment in segments_to_buffer:
                 segment_url = segment.get("media")
@@ -285,14 +281,9 @@ class DASHPreBuffer(BasePrebuffer):
                         segment_urls.append(segment_url)
 
                 if segment_urls:
-                    logger.debug(
-                        f"Prefetching {len(segment_urls)} upcoming segments "
-                        f"from index {current_index + 1}"
-                    )
+                    logger.debug(f"Prefetching {len(segment_urls)} upcoming segments from index {current_index + 1}")
                     # Run prefetch in background
-                    asyncio.create_task(
-                        self.prebuffer_segments_batch(segment_urls, headers, max_concurrent=3)
-                    )
+                    asyncio.create_task(self.prebuffer_segments_batch(segment_urls, headers, max_concurrent=3))
 
         except Exception as e:
             logger.warning(f"Failed to prefetch upcoming segments: {e}")
@@ -319,7 +310,7 @@ class DASHPreBuffer(BasePrebuffer):
                 continue
 
             # For live, prefetch the last N segments (most recent)
-            segments_to_prefetch = segments[-self.prebuffer_segment_count:]
+            segments_to_prefetch = segments[-self.prebuffer_segment_count :]
 
             for segment in segments_to_prefetch:
                 segment_url = segment.get("media")
@@ -331,9 +322,7 @@ class DASHPreBuffer(BasePrebuffer):
 
         if segment_urls:
             logger.debug(f"Live playlist prefetch: {len(segment_urls)} segments")
-            asyncio.create_task(
-                self.prebuffer_segments_batch(segment_urls, headers, max_concurrent=3)
-            )
+            asyncio.create_task(self.prebuffer_segments_batch(segment_urls, headers, max_concurrent=3))
 
     def _ensure_cleanup_task_running(self) -> None:
         """Ensure the cleanup task is running."""
@@ -364,10 +353,7 @@ class DASHPreBuffer(BasePrebuffer):
 
                     if time_since_access > self.inactivity_timeout:
                         streams_to_remove.append(mpd_url)
-                        logger.info(
-                            f"Cleaning up inactive DASH stream "
-                            f"({time_since_access:.0f}s idle)"
-                        )
+                        logger.info(f"Cleaning up inactive DASH stream ({time_since_access:.0f}s idle)")
 
                 # Remove inactive streams
                 for mpd_url in streams_to_remove:
@@ -410,7 +396,6 @@ class DASHPreBuffer(BasePrebuffer):
     async def close(self) -> None:
         """Close the pre-buffer system."""
         self.clear_cache()
-        await self.client.aclose()
 
 
 # Global DASH pre-buffer instance

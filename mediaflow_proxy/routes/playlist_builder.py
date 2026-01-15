@@ -5,9 +5,10 @@ from typing import Iterator, Dict, Optional
 from fastapi import APIRouter, Request, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from starlette.responses import RedirectResponse
-import httpx
+
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.utils.http_utils import get_original_scheme
+from mediaflow_proxy.utils.http_client import create_aiohttp_session
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -191,15 +192,13 @@ async def async_download_m3u_playlist(url: str) -> list[str]:
     }
     lines = []
     try:
-        async with httpx.AsyncClient(verify=True, timeout=30, follow_redirects=True) as client:
-            async with client.stream("GET", url, headers=headers) as response:
-                response.raise_for_status()
-                async for line_bytes in response.aiter_lines():
-                    if isinstance(line_bytes, bytes):
-                        decoded_line = line_bytes.decode("utf-8", errors="replace")
-                    else:
-                        decoded_line = str(line_bytes)
-                    lines.append(decoded_line + "\n" if decoded_line else "")
+        async with create_aiohttp_session(url, timeout=30) as (session, proxy_url):
+            response = await session.get(url, headers=headers, proxy=proxy_url)
+            response.raise_for_status()
+            content = await response.text()
+            # Split content into lines
+            for line in content.splitlines():
+                lines.append(line + "\n" if line else "")
     except Exception as e:
         logger.error(f"Error downloading playlist (async): {str(e)}")
         raise

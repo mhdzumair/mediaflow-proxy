@@ -83,7 +83,7 @@ class VavooExtractor(BaseExtractor):
             try:
                 result = resp.json()
             except Exception:
-                logger.warning("Vavoo ping returned non-json response (status=%s).", resp.status_code)
+                logger.warning("Vavoo ping returned non-json response (status=%s).", resp.status)
                 return None
 
             addon_sig = result.get("addonSig") if isinstance(result, dict) else None
@@ -147,7 +147,7 @@ class VavooExtractor(BaseExtractor):
             except Exception:
                 logger.warning(
                     "Vavoo resolve returned non-json response (status=%s). Body preview: %s",
-                    resp.status_code,
+                    resp.status,
                     getattr(resp, "text", "")[:500],
                 )
                 return None
