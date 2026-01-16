@@ -16,7 +16,6 @@ class DoodStreamExtractor(BaseExtractor):
         self.base_url = "https://myvidplay.com"
 
     async def extract(self, url: str, **kwargs):
-        
         parsed = urlparse(url)
         video_id = parsed.path.rstrip("/").split("/")[-1]
         if not video_id:
@@ -52,7 +51,7 @@ class DoodStreamExtractor(BaseExtractor):
             f"?token={token}"
             f"&expiry={int(time.time())}"
         )
-        
+
         return {
             "destination_url": final_url,
             "request_headers": headers,
