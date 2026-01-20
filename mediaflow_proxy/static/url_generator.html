@@ -166,6 +166,9 @@
             <button onclick="switchTab('xc')" id="tab-xc" class="tab-btn px-6 py-3 rounded-xl font-semibold text-sm bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 shadow-md">
                 📺 XC Proxy
             </button>
+            <button onclick="switchTab('acestream')" id="tab-acestream" class="tab-btn px-6 py-3 rounded-xl font-semibold text-sm bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 shadow-md">
+                🌐 Acestream
+            </button>
         </div>
 
         <!-- Proxy URL Generator Tab -->
@@ -957,6 +960,116 @@
                 </div>
             </div>
         </div>
+
+        <!-- Acestream Tab -->
+        <div id="panel-acestream" class="tab-panel hidden animate-fade-in">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-gray-200 dark:border-gray-700">
+                <h2 class="text-xl font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-teal-500 to-cyan-600 flex items-center justify-center text-white text-sm">🌐</span>
+                    Acestream Proxy URL Generator
+                </h2>
+                <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">Generate URLs to proxy Acestream P2P content through MediaFlow. Supports both HLS manifest and MPEG-TS stream output.</p>
+
+                <div class="space-y-4">
+                    <!-- Stream Type Selection -->
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Output Format</label>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <button onclick="selectAcestreamType('ts')" id="acestream-type-ts" class="acestream-type-btn active-acestream-type px-4 py-3 rounded-xl border-2 border-teal-500 bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 font-medium text-sm transition-all">
+                                📡 MPEG-TS Stream (Recommended)
+                            </button>
+                            <button onclick="selectAcestreamType('hls')" id="acestream-type-hls" class="acestream-type-btn px-4 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-700 dark:text-gray-300 font-medium text-sm transition-all hover:border-teal-300">
+                                📺 HLS Manifest
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Content ID Type Selection -->
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Content Identifier Type</label>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <button onclick="selectAcestreamIdType('content_id')" id="acestream-id-type-content_id" class="acestream-id-type-btn active-acestream-id-type px-4 py-3 rounded-xl border-2 border-cyan-500 bg-cyan-50 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300 font-medium text-sm transition-all">
+                                🔑 Content ID
+                            </button>
+                            <button onclick="selectAcestreamIdType('infohash')" id="acestream-id-type-infohash" class="acestream-id-type-btn px-4 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-700 dark:text-gray-300 font-medium text-sm transition-all hover:border-cyan-300">
+                                🧲 Infohash (Magnet)
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Content ID Input -->
+                    <div id="acestream-content-id-input">
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Content ID <span class="text-red-500">*</span></label>
+                        <input type="text" id="acestream-content-id" placeholder="Enter Acestream content ID"
+                            class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-teal-500 font-mono text-sm">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">The content ID from acestream:// links</p>
+                    </div>
+
+                    <!-- Infohash Input (hidden by default) -->
+                    <div id="acestream-infohash-input" class="hidden">
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Infohash <span class="text-red-500">*</span></label>
+                        <input type="text" id="acestream-infohash" placeholder="Enter 40-character infohash"
+                            class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-teal-500 font-mono text-sm">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">40-character hex string from magnet links (e.g., b04372b9543d763bd2dbd2a1842d9723fd080076)</p>
+                    </div>
+
+                    <!-- Info Box -->
+                    <div class="bg-teal-50 dark:bg-teal-900/20 rounded-xl p-4 border border-teal-200 dark:border-teal-800">
+                        <div class="flex items-start gap-3">
+                            <svg class="w-5 h-5 text-teal-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                            <div class="text-sm text-teal-800 dark:text-teal-200">
+                                <p class="font-semibold mb-1">Requirements</p>
+                                <p>Acestream proxy requires a running Acestream engine accessible from the MediaFlow server. Make sure <code class="bg-teal-100 dark:bg-teal-800 px-1 rounded">ENABLE_ACESTREAM=true</code> is set in your MediaFlow configuration.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Generate Button -->
+                <div class="mt-6">
+                    <button onclick="generateAcestreamUrl()" class="w-full py-3.5 rounded-xl text-white font-semibold text-sm bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-600 hover:to-cyan-600 transition-all shadow-lg hover:shadow-xl">
+                        Generate Acestream URL
+                    </button>
+                </div>
+
+                <!-- Output -->
+                <div id="acestream-output" class="mt-6 hidden">
+                    <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Generated URL</label>
+                    <div class="url-output rounded-xl p-4 text-green-400 text-sm break-all overflow-x-auto">
+                        <code id="acestream-generated-url"></code>
+                    </div>
+                    <button onclick="copyUrl('acestream-generated-url', event)" class="copy-btn mt-3 px-6 py-2.5 rounded-xl text-white font-semibold text-sm">
+                        📋 Copy to Clipboard
+                    </button>
+
+                    <!-- Usage Examples -->
+                    <div class="mt-4 bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Usage Examples</h4>
+                        <div class="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                            <p><strong>VLC:</strong> Media → Open Network Stream → Paste the URL</p>
+                            <p><strong>mpv:</strong> <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">mpv "YOUR_URL"</code></p>
+                            <p><strong>Kodi:</strong> Add as a network source or use with Stremio addon</p>
+                            <p><strong>Web Player:</strong> Use with any HLS-compatible web player (hls.js, video.js)</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Supported Features -->
+                <div class="mt-6 bg-green-50 dark:bg-green-900/20 rounded-xl p-4 border border-green-200 dark:border-green-800">
+                    <h4 class="text-sm font-semibold text-green-800 dark:text-green-200 mb-2">✅ Features</h4>
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm text-green-700 dark:text-green-300">
+                        <span>• HLS Output</span>
+                        <span>• MPEG-TS Output</span>
+                        <span>• Live Streams</span>
+                        <span>• Session Management</span>
+                        <span>• Cross-process Sync</span>
+                        <span>• Auto Keepalive</span>
+                    </div>
+                </div>
+            </div>
+        </div>
     </main>
 
     <script>
@@ -1684,13 +1797,96 @@
             icon.classList.toggle('rotate-180');
         }
 
-        // Check for hash on page load to switch to XC tab
+        // Acestream type switching (HLS/TS)
+        function selectAcestreamType(type) {
+            document.querySelectorAll('.acestream-type-btn').forEach(btn => {
+                btn.classList.remove('active-acestream-type', 'border-teal-500', 'bg-teal-50', 'dark:bg-teal-900/30', 'text-teal-700', 'dark:text-teal-300');
+                btn.classList.add('border-gray-200', 'dark:border-gray-600', 'bg-gray-50', 'dark:bg-gray-700/50', 'text-gray-700', 'dark:text-gray-300');
+            });
+            
+            const activeBtn = document.getElementById(`acestream-type-${type}`);
+            activeBtn.classList.add('active-acestream-type', 'border-teal-500', 'bg-teal-50', 'dark:bg-teal-900/30', 'text-teal-700', 'dark:text-teal-300');
+            activeBtn.classList.remove('border-gray-200', 'dark:border-gray-600', 'bg-gray-50', 'dark:bg-gray-700/50', 'text-gray-700', 'dark:text-gray-300');
+        }
+
+        // Acestream ID type switching (content_id/infohash)
+        function selectAcestreamIdType(type) {
+            document.querySelectorAll('.acestream-id-type-btn').forEach(btn => {
+                btn.classList.remove('active-acestream-id-type', 'border-cyan-500', 'bg-cyan-50', 'dark:bg-cyan-900/30', 'text-cyan-700', 'dark:text-cyan-300');
+                btn.classList.add('border-gray-200', 'dark:border-gray-600', 'bg-gray-50', 'dark:bg-gray-700/50', 'text-gray-700', 'dark:text-gray-300');
+            });
+            
+            const activeBtn = document.getElementById(`acestream-id-type-${type}`);
+            activeBtn.classList.add('active-acestream-id-type', 'border-cyan-500', 'bg-cyan-50', 'dark:bg-cyan-900/30', 'text-cyan-700', 'dark:text-cyan-300');
+            activeBtn.classList.remove('border-gray-200', 'dark:border-gray-600', 'bg-gray-50', 'dark:bg-gray-700/50', 'text-gray-700', 'dark:text-gray-300');
+
+            // Toggle input fields
+            if (type === 'content_id') {
+                document.getElementById('acestream-content-id-input').classList.remove('hidden');
+                document.getElementById('acestream-infohash-input').classList.add('hidden');
+            } else {
+                document.getElementById('acestream-content-id-input').classList.add('hidden');
+                document.getElementById('acestream-infohash-input').classList.remove('hidden');
+            }
+        }
+
+        // Generate Acestream URL
+        function generateAcestreamUrl() {
+            const baseUrl = window.location.origin;
+            const apiPassword = document.getElementById('globalApiPassword').value.trim();
+            
+            // Determine output type (TS or HLS)
+            const isTs = document.getElementById('acestream-type-ts').classList.contains('active-acestream-type');
+            const endpoint = isTs ? '/proxy/acestream/stream' : '/proxy/acestream/manifest.m3u8';
+            
+            // Determine ID type and get value
+            const isContentId = document.getElementById('acestream-id-type-content_id').classList.contains('active-acestream-id-type');
+            
+            let idParam, idValue;
+            if (isContentId) {
+                idValue = document.getElementById('acestream-content-id').value.trim();
+                idParam = 'id';
+                if (!idValue) {
+                    alert('Please enter a Content ID');
+                    return;
+                }
+            } else {
+                idValue = document.getElementById('acestream-infohash').value.trim();
+                idParam = 'infohash';
+                if (!idValue) {
+                    alert('Please enter an Infohash');
+                    return;
+                }
+                // Validate infohash format (40 hex characters)
+                if (!/^[a-fA-F0-9]{40}$/.test(idValue)) {
+                    alert('Infohash must be exactly 40 hexadecimal characters');
+                    return;
+                }
+            }
+            
+            // Build URL
+            const params = new URLSearchParams();
+            params.append(idParam, idValue);
+            
+            if (apiPassword) {
+                params.append('api_password', apiPassword);
+            }
+            
+            const finalUrl = `${baseUrl}${endpoint}?${params.toString()}`;
+            
+            document.getElementById('acestream-generated-url').textContent = finalUrl;
+            document.getElementById('acestream-output').classList.remove('hidden');
+        }
+
+        // Check for hash on page load to switch to XC or Acestream tab
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('encoded-proxy-url').value = window.location.origin;
             
-            // Check if URL has #xc hash
+            // Check if URL has hash
             if (window.location.hash === '#xc') {
                 switchTab('xc');
+            } else if (window.location.hash === '#acestream') {
+                switchTab('acestream');
             }
         });
     </script>

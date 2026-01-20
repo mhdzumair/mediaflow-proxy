@@ -34,6 +34,14 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 - Compatible with any XC-compatible IPTV player (TiviMate, IPTV Smarters, etc.)
 - Automatic URL rewriting for seamless proxying
 
+### Acestream Proxy
+- **Acestream P2P stream proxy** - Proxy Acestream content through MediaFlow (inspired by [Acexy](https://github.com/Javinator9889/acexy))
+- Support for both **HLS manifest** and **MPEG-TS stream** output formats
+- **Stream multiplexing** - Multiple clients can watch the same stream simultaneously
+- Automatic **session management** with cross-process coordination
+- Works with content IDs (`acestream://...`) and infohashes (magnet links)
+- Compatible with any media player that supports HLS or MPEG-TS
+
 ### Security
 - API password protection against unauthorized access & Network bandwidth abuse prevention
 - Parameter encryption to hide sensitive information
@@ -159,6 +167,65 @@ Set the following environment variables:
 - `DASH_PREBUFFER_INACTIVITY_TIMEOUT`: Optional. Seconds of inactivity before cleaning up DASH stream state. Default: `60`. Helps clean up resources when streams are stopped.
 - `DASH_SEGMENT_CACHE_TTL`: Optional. TTL in seconds for cached DASH segments. Default: `60`. Longer values help with slow network playback.
 - `FORWARDED_ALLOW_IPS`: Optional. Controls which IP addresses are trusted to provide forwarded headers (X-Forwarded-For, X-Forwarded-Proto, etc.) when MediaFlow Proxy is deployed behind reverse proxies or load balancers. Default: `127.0.0.1`. See [Forwarded Headers Configuration](#forwarded-headers-configuration) for detailed usage.
+
+### Acestream Configuration
+
+MediaFlow Proxy can act as a proxy for Acestream P2P streams, converting them to HLS or MPEG-TS format that any media player can consume.
+
+**Requirements**: You need a running Acestream engine accessible from MediaFlow Proxy.
+
+- `ENABLE_ACESTREAM`: Optional. Enable Acestream proxy support. Default: `false`.
+- `ACESTREAM_HOST`: Optional. Acestream engine host. Default: `localhost`.
+- `ACESTREAM_PORT`: Optional. Acestream engine port. Default: `6878`.
+- `ACESTREAM_SESSION_TIMEOUT`: Optional. Session timeout (seconds) for cleanup of inactive sessions. Default: `60`.
+- `ACESTREAM_KEEPALIVE_INTERVAL`: Optional. Interval (seconds) for session keepalive polling. Default: `15`.
+
+#### Acestream Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `/proxy/acestream/stream` | MPEG-TS stream proxy (recommended) |
+| `/proxy/acestream/manifest.m3u8` | HLS manifest proxy |
+| `/proxy/acestream/status` | Get session status |
+
+#### Acestream URL Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `id` | Acestream content ID (alternative to infohash) |
+| `infohash` | Acestream infohash (40-char hex from magnet link) |
+
+**Example URLs:**
+```
+# MPEG-TS stream (recommended)
+https://your-mediaflow/proxy/acestream/stream?id=YOUR_CONTENT_ID&api_password=your_password
+
+# MPEG-TS stream (infohash from magnet)
+https://your-mediaflow/proxy/acestream/stream?infohash=b04372b9543d763bd2dbd2a1842d9723fd080076&api_password=your_password
+
+# HLS manifest (alternative)
+https://your-mediaflow/proxy/acestream/manifest.m3u8?id=YOUR_CONTENT_ID&api_password=your_password
+```
+
+#### Docker Compose Example with Acestream
+
+```yaml
+services:
+  mediaflow-proxy:
+    image: mhdzumair/mediaflow-proxy:latest
+    ports:
+      - "8888:8888"
+    environment:
+      - API_PASSWORD=your_password
+      - ENABLE_ACESTREAM=true
+      - ACESTREAM_HOST=acestream
+      - ACESTREAM_PORT=6878
+
+  acestream:
+    image: ghcr.io/martinbjeldbak/acestream-http-proxy:latest # or build it from https://github.com/sergiomarquezdev/acestream-docker-home
+    ports:
+      - "6878:6878"
+```
 
 ### Transport Configuration
 
@@ -1456,6 +1523,7 @@ MediaFlow Proxy was developed with inspiration from various projects and resourc
 
 - [Stremio Server](https://github.com/Stremio/stremio-server) for HLS Proxify implementation, which inspired our HLS M3u8 Manifest parsing and redirection proxify support.
 - [Comet Debrid proxy](https://github.com/g0ldyy/comet) for the idea of proxifying HTTPS video streams.
+- [Acexy](https://github.com/Javinator9889/acexy) for the Acestream proxy implementation inspiration, particularly the stream multiplexing and session management concepts.
 - [Bento4 mp4decrypt](https://www.bento4.com/developers/dash/encryption_and_drm/), [GPAC mp4box](https://wiki.gpac.io/xmlformats/Common-Encryption/), [Shaka Packager](https://github.com/shaka-project/shaka-packager), and [devine](https://github.com/devine-dl/devine) for insights on parsing MPD and decrypting CENC/ClearKey DRM protected content across all encryption modes (cenc, cens, cbc1, cbcs).
 - Test URLs were sourced from:
   - [OTTVerse MPEG-DASH MPD Examples](https://ottverse.com/free-mpeg-dash-mpd-manifest-example-test-urls/)
