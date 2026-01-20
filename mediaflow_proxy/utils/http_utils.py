@@ -328,7 +328,7 @@ async def request_with_retry(method: str, url: str, headers: dict, **kwargs) -> 
             raise
 
 
-async def create_streamer(url: str = None) -> Streamer:
+async def create_streamer(url: str = None, live_stream: bool = False) -> Streamer:
     """
     Create a Streamer configured for the given URL.
 
@@ -337,6 +337,10 @@ async def create_streamer(url: str = None) -> Streamer:
 
     Args:
         url: Optional URL for routing configuration (SSL/proxy settings).
+        live_stream: If True, use sock_read timeout instead of total timeout.
+                     This allows indefinite streaming with per-read timeout for
+                     detecting dead connections. Suitable for live streams like
+                     acestream where the total duration is unknown.
 
     Returns:
         Streamer: A configured Streamer instance.
@@ -346,7 +350,16 @@ async def create_streamer(url: str = None) -> Streamer:
     routing_config = get_routing_config()
     route_match = routing_config.match_url(url)
 
-    timeout_config = ClientTimeout(total=settings.transport_config.timeout)
+    if live_stream:
+        # For live streams: no total timeout, but timeout if no data received
+        # for sock_read seconds (detects dead connections without killing live streams)
+        timeout_config = ClientTimeout(
+            total=None,
+            sock_read=settings.transport_config.timeout,
+        )
+    else:
+        timeout_config = ClientTimeout(total=settings.transport_config.timeout)
+
     connector, proxy_url = _create_connector(route_match.proxy_url, route_match.verify_ssl)
 
     session = ClientSession(connector=connector, timeout=timeout_config)

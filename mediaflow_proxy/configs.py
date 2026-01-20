@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     mpd_live_init_cache_ttl: int = 60  # TTL (seconds) for live init segment cache; 0 disables caching.
     mpd_live_playlist_depth: int = 8  # Number of recent segments to expose per live playlist variant.
 
+    # Acestream settings
+    enable_acestream: bool = False  # Whether to enable Acestream proxy support.
+    acestream_host: str = "localhost"  # Acestream engine host.
+    acestream_port: int = 6878  # Acestream engine port.
+    acestream_buffer_size: int = 4 * 1024 * 1024  # Buffer size for MPEG-TS streaming (4MB default, like acexy).
+    acestream_empty_timeout: int = 30  # Timeout (seconds) when no data is received from upstream.
+    acestream_session_timeout: int = 60  # Session timeout (seconds) for cleanup of inactive sessions.
+    acestream_keepalive_interval: int = 15  # Interval (seconds) for session keepalive polling.
+
     user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"  # The user agent to use for HTTP requests.
 
     class Config:

@@ -27,6 +27,7 @@ share/python-wheels/
 MANIFEST
 
 .env
+.venv/
 .idea/
 *.service
 
