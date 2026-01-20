@@ -159,9 +159,7 @@ async def acestream_hls_manifest(
         except asyncio.TimeoutError:
             last_error = "Timeout fetching manifest"
             if attempt < max_retries - 1:
-                logger.warning(
-                    f"[acestream_hls_manifest] Timeout fetching manifest, retrying: {infohash[:16]}..."
-                )
+                logger.warning(f"[acestream_hls_manifest] Timeout fetching manifest, retrying: {infohash[:16]}...")
                 await asyncio.sleep(1)  # Brief delay before retry
                 continue
             logger.error(f"[acestream_hls_manifest] Timeout after {max_retries} attempts")
@@ -216,7 +214,9 @@ async def acestream_hls_manifest(
         }
         response_headers = apply_header_manipulation(base_headers, proxy_headers, include_propagate=False)
 
-        return Response(content=processed_manifest, media_type="application/vnd.apple.mpegurl", headers=response_headers)
+        return Response(
+            content=processed_manifest, media_type="application/vnd.apple.mpegurl", headers=response_headers
+        )
 
     except HTTPException:
         raise
