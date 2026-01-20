@@ -8,22 +8,23 @@ from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 class VidozaExtractor(BaseExtractor):
     def __init__(self, request_headers: dict):
         super().__init__(request_headers)
-        # if your base doesn’t set this, keep it; otherwise you can remove:
         self.mediaflow_endpoint = "proxy_stream_endpoint"
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
         parsed = urlparse(url)
 
-        # Accept vidoza + videzz
         if not parsed.hostname or not (
             parsed.hostname.endswith("vidoza.net") or parsed.hostname.endswith("videzz.net")
         ):
             raise ExtractorError("VIDOZA: Invalid domain")
 
+        # Use the correct referer for clones
+        referer = f"https://{parsed.hostname}/"
+
         headers = self.base_headers.copy()
         headers.update(
             {
-                "referer": "https://vidoza.net/",
+                "referer": referer,
                 "user-agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -34,39 +35,34 @@ class VidozaExtractor(BaseExtractor):
             }
         )
 
-        # 1) Fetch the embed page (or whatever URL you pass in)
+        # 1) Fetch embed page
         response = await self._make_request(url, headers=headers)
         html = response.text or ""
 
         if not html:
-            raise ExtractorError("VIDOZA: Empty HTML from Vidoza")
+            raise ExtractorError("VIDOZA: Empty HTML")
 
-        cookies = response.cookies or {}
-
-        # 2) Extract final link with REGEX
+        # 2) Extract video URL
         pattern = re.compile(
-            r"""["']?\s*(?:file|src)\s*["']?\s*[:=,]?\s*["'](?P<url>[^"']+)"""
-            r"""(?:[^}>\]]+)["']?\s*res\s*["']?\s*[:=]\s*["']?(?P<label>[^"',]+)""",
-            re.IGNORECASE,
+            r"""
+            (?:file|src)\s*[:=]\s*["']
+            (?P<url>https?:\/\/[^"']+|\/\/[^"']+)
+            """,
+            re.IGNORECASE | re.VERBOSE,
         )
 
         match = pattern.search(html)
         if not match:
-            raise ExtractorError("VIDOZA: Unable to extract video + label from JS")
+            raise ExtractorError("VIDOZA: Video URL not found")
 
-        mp4_url = match.group("url")
-        # label = match.group("label").strip()  # available but not used
+        video_url = match.group("url")
 
-        # Fix URLs like //str38.vidoza.net/...
-        if mp4_url.startswith("//"):
-            mp4_url = "https:" + mp4_url
-
-        # 3) Attach cookies (token may depend on these)
-        if cookies:
-            headers["cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        if video_url.startswith("//"):
+            video_url = "https:" + video_url
 
         return {
-            "destination_url": mp4_url,
+            "destination_url": video_url,
             "request_headers": headers,
+            "remove_response_headers": ["content-length", "content-range"],
             "mediaflow_endpoint": self.mediaflow_endpoint,
         }
