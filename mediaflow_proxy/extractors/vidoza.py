@@ -14,8 +14,7 @@ class VidozaExtractor(BaseExtractor):
         parsed = urlparse(url)
 
         if not parsed.hostname or not (
-            parsed.hostname.endswith("vidoza.net")
-            or parsed.hostname.endswith("videzz.net")
+            parsed.hostname.endswith("vidoza.net") or parsed.hostname.endswith("videzz.net")
         ):
             raise ExtractorError("VIDOZA: Invalid domain")
 
