@@ -35,9 +35,7 @@ class DoodStreamExtractor(BaseExtractor):
 
         pass_url = urljoin(self.base_url, match.group(1))
 
-        base_stream = (
-            await self._make_request(pass_url, headers=headers)
-        ).text.strip()
+        base_stream = (await self._make_request(pass_url, headers=headers)).text.strip()
 
         token_match = re.search(r"token=([^&]+)", html)
         if not token_match:
@@ -45,16 +43,10 @@ class DoodStreamExtractor(BaseExtractor):
 
         token = token_match.group(1)
 
-        final_url = (
-            f"{base_stream}"
-            f"123456789"
-            f"?token={token}"
-            f"&expiry={int(time.time())}"
-        )
+        final_url = f"{base_stream}123456789?token={token}&expiry={int(time.time())}"
 
         return {
             "destination_url": final_url,
             "request_headers": headers,
             "mediaflow_endpoint": "proxy_stream_endpoint",
         }
-        
