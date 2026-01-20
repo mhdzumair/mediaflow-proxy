@@ -9,8 +9,8 @@ Provides endpoints for proxying acestream content:
 
 import asyncio
 import logging
-from typing import Annotated, Optional
-from urllib.parse import urlencode, urlparse, parse_qs
+from typing import Annotated
+from urllib.parse import urlencode, urlparse
 
 import aiohttp
 from fastapi import APIRouter, Query, Request, HTTPException, Response, Depends
@@ -286,7 +286,7 @@ async def acestream_segment_proxy(
             response_headers = apply_header_manipulation(base_headers, proxy_headers)
             return Response(content=segment_data, media_type=mime_type, headers=response_headers)
 
-        logger.warning(f"[acestream_segment_proxy] Prebuffer miss, using direct streaming")
+        logger.warning("[acestream_segment_proxy] Prebuffer miss, using direct streaming")
 
     # Fallback to direct streaming
     streamer = await create_streamer(segment_url)
@@ -392,7 +392,7 @@ async def acestream_ts_stream(
                 background=BackgroundTask(release_on_complete),
             )
 
-        except Exception as e:
+        except Exception:
             await streamer.close()
             await acestream_manager.release_session(infohash)
             raise
