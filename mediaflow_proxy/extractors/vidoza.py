@@ -1,5 +1,5 @@
 import re
-from typing import Dict, Any
+from typing import Any, Dict
 from urllib.parse import urlparse
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
