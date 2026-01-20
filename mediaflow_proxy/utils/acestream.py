@@ -221,9 +221,7 @@ class AcestreamSessionManager:
         self._sessions: Dict[str, AcestreamSession] = {}
 
         # Cross-process lock for session coordination
-        self._lock = CrossProcessLock(
-            lock_dir=os.path.join(tempfile.gettempdir(), "mediaflow_acestream_locks")
-        )
+        self._lock = CrossProcessLock(lock_dir=os.path.join(tempfile.gettempdir(), "mediaflow_acestream_locks"))
 
         # Session registry directory
         self._registry_dir = Path(tempfile.gettempdir()) / "mediaflow_acestream" / "sessions"
@@ -246,9 +244,7 @@ class AcestreamSessionManager:
     async def _get_http_session(self) -> aiohttp.ClientSession:
         """Get or create HTTP client session."""
         if self._http_session is None or self._http_session.closed:
-            self._http_session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=30)
-            )
+            self._http_session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
         return self._http_session
 
     async def _read_registry(self, infohash: str) -> Optional[Dict[str, Any]]:
@@ -390,9 +386,7 @@ class AcestreamSessionManager:
             if registry_data:
                 # Validate session is still alive by checking stat_url
                 if await self._validate_session(registry_data.get("stat_url", "")):
-                    logger.info(
-                        f"[AcestreamSessionManager] Using existing session from registry: {infohash[:16]}..."
-                    )
+                    logger.info(f"[AcestreamSessionManager] Using existing session from registry: {infohash[:16]}...")
                     session = AcestreamSession.from_dict(registry_data)
                     session.client_count = 1 if increment_client else 0
                     self._sessions[infohash] = session
@@ -551,9 +545,7 @@ class AcestreamSessionManager:
                 for infohash, session in list(self._sessions.items()):
                     # Only keepalive sessions with active clients
                     if session.client_count <= 0:
-                        logger.debug(
-                            f"[AcestreamSessionManager] Skipping keepalive (no clients): {infohash[:16]}..."
-                        )
+                        logger.debug(f"[AcestreamSessionManager] Skipping keepalive (no clients): {infohash[:16]}...")
                         continue
 
                     if session.stat_url:
@@ -577,9 +569,7 @@ class AcestreamSessionManager:
                                         f"(status: {response.status})"
                                     )
                         except Exception as e:
-                            logger.warning(
-                                f"[AcestreamSessionManager] Keepalive error: {infohash[:16]}... - {e}"
-                            )
+                            logger.warning(f"[AcestreamSessionManager] Keepalive error: {infohash[:16]}... - {e}")
 
             except asyncio.CancelledError:
                 return
@@ -639,9 +629,7 @@ class AcestreamSessionManager:
                         # Check if session is still alive
                         if not await self._validate_session(data.get("stat_url", "")):
                             await aiofiles.os.remove(registry_file)
-                            logger.info(
-                                f"[AcestreamSessionManager] Removed stale registry: {registry_file.name}"
-                            )
+                            logger.info(f"[AcestreamSessionManager] Removed stale registry: {registry_file.name}")
                 except Exception as e:
                     logger.debug(f"[AcestreamSessionManager] Error processing registry file: {e}")
 
