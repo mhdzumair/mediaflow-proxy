@@ -933,43 +933,74 @@ Configure your IPTV player with the following settings:
 | Setting | Value |
 |---------|-------|
 | **Server URL** | `http://your-mediaflow-server:8888` |
-| **Username** | `{base64_upstream}:{actual_username}:{api_password}` |
+| **Username** | Base64-encoded string (see below) |
 | **Password** | Your XC provider password |
 
-Where:
-- `base64_upstream`: Base64-encoded URL of your XC provider (e.g., `http://provider.com:8080` → `aHR0cDovL3Byb3ZpZGVyLmNvbTo4MDgw`)
-- `actual_username`: Your actual XC username from the provider
-- `api_password`: Your MediaFlow API password (omit if not configured)
+#### Username Format (Recommended)
 
-#### Username Format Examples
+The username should be a **base64-encoded string** containing your provider URL, XC username, and MediaFlow API password. This format is compatible with all IPTV players (TiviMate, IPTV Smarters, OTT Navigator, etc.).
 
-**With MediaFlow API password:**
+**Format before encoding:**
 ```
-aHR0cDovL3Byb3ZpZGVyLmNvbTo4MDgw:myusername:my_mediaflow_password
+{provider_url}:{xc_username}:{api_password}
+```
+
+**Example:**
+```
+http://provider.com:8080:myusername:my_mediaflow_password
+```
+
+After base64 encoding, this becomes a single string like:
+```
+aHR0cDovL3Byb3ZpZGVyLmNvbTo4MDgwOm15dXNlcm5hbWU6bXlfbWVkaWFmbG93X3Bhc3N3b3Jk
 ```
 
 **Without MediaFlow API password:**
 ```
-aHR0cDovL3Byb3ZpZGVyLmNvbTo4MDgw:myusername:
+http://provider.com:8080:myusername
 ```
 
-#### Generating Base64 Upstream URL
+Encoded:
+```
+aHR0cDovL3Byb3ZpZGVyLmNvbTo4MDgwOm15dXNlcm5hbWU
+```
 
-You can encode your XC provider URL using the URL Generator tool at `http://your-mediaflow-server:8888/url-generator` or manually:
+#### Generating the Username
+
+Use the **URL Generator tool** at `http://your-mediaflow-server:8888/url-generator` (recommended) or manually:
 
 **Using command line:**
 ```bash
-echo -n "http://provider.com:8080" | base64
-# Output: aHR0cDovL3Byb3ZpZGVyLmNvbTo4MDgw
+# With API password
+echo -n "http://provider.com:8080:myusername:my_api_password" | base64
+
+# Without API password
+echo -n "http://provider.com:8080:myusername" | base64
 ```
 
 **Using Python:**
 ```python
 import base64
-url = "http://provider.com:8080"
-encoded = base64.urlsafe_b64encode(url.encode()).decode().rstrip('=')
+
+# With API password
+combined = "http://provider.com:8080:myusername:my_api_password"
+encoded = base64.urlsafe_b64encode(combined.encode()).decode().rstrip('=')
+print(encoded)
+
+# Without API password
+combined = "http://provider.com:8080:myusername"
+encoded = base64.urlsafe_b64encode(combined.encode()).decode().rstrip('=')
 print(encoded)
 ```
+
+#### Legacy Format (Still Supported)
+
+The legacy colon-separated format is still supported for backward compatibility:
+```
+{base64_upstream}:{actual_username}:{api_password}
+```
+
+However, some IPTV apps may not handle colons in the username field correctly. The new base64-encoded format is recommended.
 
 #### Supported XC API Endpoints
 
@@ -991,20 +1022,20 @@ MediaFlow proxies all standard XC API endpoints:
 **TiviMate:**
 1. Add Playlist → Xtream Codes Login
 2. Server: `http://your-mediaflow-server:8888`
-3. Username: `{base64_upstream}:{actual_username}:{api_password}`
+3. Username: Paste the base64-encoded username from the URL Generator
 4. Password: Your XC password
 
 **IPTV Smarters:**
 1. Add User → Xtream Codes API
 2. Any Name: Your choice
-3. Username: `{base64_upstream}:{actual_username}:{api_password}`
+3. Username: Paste the base64-encoded username from the URL Generator
 4. Password: Your XC password
 5. URL: `http://your-mediaflow-server:8888`
 
 **OTT Navigator:**
 1. Add Provider → Xtream
 2. Portal URL: `http://your-mediaflow-server:8888`
-3. Login: `{base64_upstream}:{actual_username}:{api_password}`
+3. Login: Paste the base64-encoded username from the URL Generator
 4. Password: Your XC password
 
 ### URL Parameters

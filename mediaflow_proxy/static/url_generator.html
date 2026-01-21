@@ -855,7 +855,7 @@
                                         📋
                                     </button>
                                 </div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Format: {base64_provider}:{xc_username}:{api_password}</p>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Base64-encoded string (compatible with all IPTV apps)</p>
                             </div>
 
                             <!-- Password -->
@@ -1797,11 +1797,17 @@
                 return;
             }
 
-            // Encode the provider URL
-            const encodedProvider = base64UrlEncode(providerUrl);
+            // Build the combined string: {provider_url}:{xc_username}:{api_password}
+            // Then base64 encode the entire string
+            let combinedString;
+            if (apiPassword) {
+                combinedString = `${providerUrl}:${xcUsername}:${apiPassword}`;
+            } else {
+                combinedString = `${providerUrl}:${xcUsername}`;
+            }
 
-            // Build the MediaFlow username: {base64_provider}:{xc_username}:{api_password}
-            const mediaflowUsername = `${encodedProvider}:${xcUsername}:${apiPassword}`;
+            // Base64 encode the entire combined string
+            const mediaflowUsername = base64UrlEncode(combinedString);
 
             // Server URL is the current MediaFlow instance
             const serverUrl = window.location.origin;
