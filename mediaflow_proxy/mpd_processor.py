@@ -348,7 +348,9 @@ def build_hls_playlist(
 
     # Inject EXT-X-START for live streams (enables prebuffering by starting behind live edge)
     # User-provided start_offset always takes precedence; otherwise use default for live streams only
-    effective_start_offset = start_offset if start_offset is not None else (settings.livestream_start_offset if is_live else None)
+    effective_start_offset = (
+        start_offset if start_offset is not None else (settings.livestream_start_offset if is_live else None)
+    )
     if effective_start_offset is not None:
         hls.append(f"#EXT-X-START:TIME-OFFSET={effective_start_offset:.1f},PRECISE=YES")
 

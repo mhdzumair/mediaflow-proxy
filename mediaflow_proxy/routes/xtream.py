@@ -19,7 +19,9 @@ Configuration:
     The api_password part can be omitted if MediaFlow doesn't require authentication.
 """
 
+import base64
 import logging
+import re
 from typing import Annotated
 from urllib.parse import urljoin, urlencode, urlparse
 
@@ -62,12 +64,50 @@ def decode_upstream_url(upstream_encoded: str) -> str:
     return decoded
 
 
+def decode_base64_username(encoded: str) -> str | None:
+    """
+    Try to decode a base64-encoded username string.
+
+    Args:
+        encoded: The potentially base64-encoded string.
+
+    Returns:
+        The decoded string if successful, None otherwise.
+    """
+    try:
+        # Handle URL-safe base64 encoding (replace - with + and _ with /)
+        url_safe_encoded = encoded.replace("-", "+").replace("_", "/")
+
+        # Add padding if necessary
+        missing_padding = len(url_safe_encoded) % 4
+        if missing_padding:
+            url_safe_encoded += "=" * (4 - missing_padding)
+
+        # Decode the base64 string
+        decoded_bytes = base64.b64decode(url_safe_encoded)
+        decoded = decoded_bytes.decode("utf-8")
+
+        # Check if it looks like our format (contains colons and starts with http)
+        if ":" in decoded:
+            return decoded
+
+        return None
+    except (base64.binascii.Error, UnicodeDecodeError, ValueError):
+        return None
+
+
 def parse_username_with_upstream(username: str) -> tuple[str, str, str | None]:
     """
     Parse username that contains encoded upstream URL and optional API password.
 
-    Username format: {base64_upstream}:{actual_username}:{api_password}
-    Or without API password: {base64_upstream}:{actual_username}
+    Supports two formats:
+    1. Base64-encoded format (NEW - recommended for IPTV apps):
+       Username is base64({upstream_url}:{actual_username}:{api_password})
+       Or base64({upstream_url}:{actual_username})
+
+    2. Legacy colon-separated format:
+       {base64_upstream}:{actual_username}:{api_password}
+       Or {base64_upstream}:{actual_username}
 
     Args:
         username: The username field which contains upstream URL and optionally API password.
@@ -78,10 +118,83 @@ def parse_username_with_upstream(username: str) -> tuple[str, str, str | None]:
     Raises:
         HTTPException: If format is invalid.
     """
+    # First, try to decode the entire username as base64
+    # This is the new format where the whole string is base64-encoded
+    decoded_username = decode_base64_username(username)
+
+    if decoded_username:
+        # Successfully decoded base64, now parse the decoded string
+        parts = decoded_username.split(":")
+        logger.debug(f"Decoded base64 username, found {len(parts)} parts")
+
+        # The decoded format is: {upstream_url}:{actual_username}:{api_password}
+        # or {upstream_url}:{actual_username}
+        # Note: upstream_url contains "://" so we need to handle that
+
+        # Find the protocol separator
+        if "://" not in decoded_username:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid username format. Decoded base64 doesn't contain valid upstream URL.",
+            )
+
+        # Split on :// first to get protocol
+        proto_split = decoded_username.split("://", 1)
+        if len(proto_split) != 2:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid username format. Could not parse upstream URL protocol.",
+            )
+
+        protocol = proto_split[0]
+        rest = proto_split[1]
+
+        # Now split the rest by colons
+        rest_parts = rest.split(":")
+
+        if len(rest_parts) == 2:
+            # Format: protocol://host:actual_username (no api_password, no port in URL)
+            host, actual_username = rest_parts
+            upstream_url = f"{protocol}://{host}"
+            api_password = None
+        elif len(rest_parts) == 3:
+            # Could be:
+            # - protocol://host:port:actual_username (no api_password)
+            # - protocol://host:actual_username:api_password (no port in URL)
+            # We need to determine which case by checking if the second part looks like a port
+            if rest_parts[1].isdigit() and len(rest_parts[1]) <= 5:
+                # Looks like a port: protocol://host:port:actual_username
+                host, port, actual_username = rest_parts
+                upstream_url = f"{protocol}://{host}:{port}"
+                api_password = None
+            else:
+                # No port: protocol://host:actual_username:api_password
+                host, actual_username, api_password = rest_parts
+                upstream_url = f"{protocol}://{host}"
+                api_password = api_password if api_password else None
+        elif len(rest_parts) == 4:
+            # Format: protocol://host:port:actual_username:api_password
+            host, port, actual_username, api_password = rest_parts
+            upstream_url = f"{protocol}://{host}:{port}"
+            api_password = api_password if api_password else None
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid username format. Could not parse base64-decoded username.",
+            )
+
+        # Ensure trailing slash for URL joining
+        if not upstream_url.endswith("/"):
+            upstream_url += "/"
+
+        logger.info(f"Parsed base64 username: upstream={upstream_url}, user={actual_username}")
+        return upstream_url, actual_username, api_password
+
+    # Legacy format: {base64_upstream}:{actual_username}:{api_password}
     if ":" not in username:
         raise HTTPException(
             status_code=400,
-            detail="Invalid username format. Expected: {base64_upstream}:{actual_username} or {base64_upstream}:{actual_username}:{api_password}",
+            detail="Invalid username format. Expected base64-encoded username or legacy format: {base64_upstream}:{actual_username}:{api_password}",
         )
 
     parts = username.split(":")
@@ -93,14 +206,16 @@ def parse_username_with_upstream(username: str) -> tuple[str, str, str | None]:
     elif len(parts) == 3:
         # Format: {base64_upstream}:{actual_username}:{api_password}
         upstream_encoded, actual_username, api_password = parts
+        api_password = api_password if api_password else None
     else:
         raise HTTPException(
             status_code=400,
-            detail="Invalid username format. Expected: {base64_upstream}:{actual_username} or {base64_upstream}:{actual_username}:{api_password}",
+            detail="Invalid username format. Expected base64-encoded username or legacy format: {base64_upstream}:{actual_username}:{api_password}",
         )
 
     upstream_base = decode_upstream_url(upstream_encoded)
 
+    logger.info(f"Parsed legacy username: upstream={upstream_base}, user={actual_username}")
     return upstream_base, actual_username, api_password
 
 
@@ -148,33 +263,139 @@ def get_mediaflow_base_url(request: Request) -> str:
     return f"{scheme}://{host}"
 
 
+def encode_username_for_rewrite(upstream_base: str, actual_username: str, api_password: str | None) -> str:
+    """
+    Create a base64-encoded username token for URL rewriting.
+
+    Args:
+        upstream_base: The upstream XC server base URL.
+        actual_username: The actual XC username.
+        api_password: The MediaFlow API password (if any).
+
+    Returns:
+        A base64-encoded username string.
+    """
+    # Remove trailing slash from upstream for cleaner encoding
+    upstream_clean = upstream_base.rstrip("/")
+
+    # Build the combined string
+    if api_password:
+        combined = f"{upstream_clean}:{actual_username}:{api_password}"
+    else:
+        combined = f"{upstream_clean}:{actual_username}"
+
+    # Base64 encode (URL-safe)
+    encoded = base64.urlsafe_b64encode(combined.encode()).decode().rstrip("=")
+    return encoded
+
+
 def rewrite_urls_for_api(
     content: str,
     upstream_base: str,
     mediaflow_base: str,
+    actual_username: str,
+    api_password: str | None,
 ) -> str:
     """
     Rewrite stream URLs in API responses to route through MediaFlow.
+
+    This function replaces the upstream username in stream URLs with a base64-encoded
+    token containing upstream URL + username + api_password, so MediaFlow can properly
+    route the requests.
 
     Args:
         content: The API response content.
         upstream_base: The upstream XC server base URL.
         mediaflow_base: The MediaFlow base URL.
+        actual_username: The actual XC username (to be replaced in URLs).
+        api_password: The MediaFlow API password (if any).
 
     Returns:
         The content with rewritten URLs.
     """
+
     # Parse the upstream URL to get the origin for replacement
     parsed = urlparse(upstream_base)
     upstream_origin = f"{parsed.scheme}://{parsed.netloc}"
 
-    # Replace upstream URLs with MediaFlow URLs
-    content = content.replace(upstream_origin, mediaflow_base)
+    # Create the encoded username token for MediaFlow
+    encoded_username = encode_username_for_rewrite(upstream_base, actual_username, api_password)
 
-    # Also handle escaped URLs in JSON
-    escaped_origin = upstream_origin.replace("/", "\\/")
-    escaped_mediaflow = mediaflow_base.replace("/", "\\/")
-    content = content.replace(escaped_origin, escaped_mediaflow)
+    # Pattern to match stream URLs with username in path
+    # Matches: http(s)://host(:port)/path/{username}/password/...
+    # We need to replace {username} with {encoded_username}
+
+    # First, handle the common XC stream URL patterns where username appears in the path
+    # Pattern: /{prefix}/{username}/{password}/ where prefix is live, movie, series, etc.
+    # or /{username}/{password}/ for short format
+
+    # Escape special regex characters in the origin and username
+    escaped_origin = re.escape(upstream_origin)
+    escaped_username = re.escape(actual_username)
+
+    # Pattern for URLs like: https://upstream/live/{username}/{password}/...
+    # or https://upstream/{username}/{password}/...
+    # We want to replace the upstream origin AND the username in one go
+
+    def replace_stream_url(match):
+        """Replace upstream origin with mediaflow and username with encoded token."""
+        full_url = match.group(0)
+        # Replace the upstream origin with mediaflow base
+        new_url = full_url.replace(upstream_origin, mediaflow_base, 1)
+        # Replace the username in the path with encoded username
+        # The username appears after a / and before another /
+        new_url = re.sub(
+            r"(/(live|movie|series|timeshift|hlsr|hls)?/)" + escaped_username + r"/",
+            r"\1" + encoded_username + "/",
+            new_url,
+        )
+        # Also handle short format: /{username}/{password}/
+        new_url = re.sub(
+            r"^(" + re.escape(mediaflow_base) + ")/" + escaped_username + r"/([^/]+/\d+\.)",
+            r"\1/" + encoded_username + r"/\2",
+            new_url,
+        )
+        return new_url
+
+    # Find and replace all URLs that contain the upstream origin
+    # Match URLs that start with the upstream origin and contain the username
+    url_pattern = escaped_origin + r'[^"\s\\]*' + escaped_username + r'[^"\s\\]*'
+    content = re.sub(url_pattern, replace_stream_url, content)
+
+    # Handle escaped URLs in JSON (where / is escaped as \/)
+    escaped_upstream_json = upstream_origin.replace("/", "\\/")
+    escaped_mediaflow_json = mediaflow_base.replace("/", "\\/")
+    escaped_username_json = actual_username.replace("/", "\\/")
+
+    def replace_escaped_stream_url(match):
+        """Replace escaped upstream origin with mediaflow and username with encoded token."""
+        full_url = match.group(0)
+        new_url = full_url.replace(escaped_upstream_json, escaped_mediaflow_json, 1)
+        # Replace username (handling escaped slashes)
+        new_url = re.sub(
+            r"(\\/(?:live|movie|series|timeshift|hlsr|hls)?\\/)" + re.escape(escaped_username_json) + r"\\/",
+            r"\1" + encoded_username + "\\/",
+            new_url,
+        )
+        # Short format
+        new_url = re.sub(
+            r"^("
+            + re.escape(escaped_mediaflow_json)
+            + ")\\/"
+            + re.escape(escaped_username_json)
+            + r"\\/([^\\/]+\\/\d+\.)",
+            r"\1\\/" + encoded_username + r"\\/\2",
+            new_url,
+        )
+        return new_url
+
+    escaped_url_pattern = re.escape(escaped_upstream_json) + r'[^"\s]*' + re.escape(escaped_username_json) + r'[^"\s]*'
+    content = re.sub(escaped_url_pattern, replace_escaped_stream_url, content)
+
+    # Also do a simple domain replacement for any remaining URLs that don't have username in path
+    # (like server_info URLs)
+    content = content.replace(upstream_origin, mediaflow_base)
+    content = content.replace(escaped_upstream_json, escaped_mediaflow_json)
 
     return content
 
@@ -183,6 +404,8 @@ async def forward_api_request(
     upstream_url: str,
     request: Request,
     upstream_base: str,
+    actual_username: str,
+    api_password: str | None,
 ) -> Response:
     """
     Forward an API request to upstream XC server.
@@ -191,6 +414,8 @@ async def forward_api_request(
         upstream_url: The full upstream URL.
         request: The incoming FastAPI request.
         upstream_base: The decoded upstream base URL.
+        actual_username: The actual XC username (for URL rewriting).
+        api_password: The MediaFlow API password (for URL rewriting).
 
     Returns:
         The response from upstream with URLs rewritten.
@@ -207,7 +432,9 @@ async def forward_api_request(
 
                 # Rewrite URLs in JSON responses
                 if "json" in content_type.lower():
-                    content = rewrite_urls_for_api(content, upstream_base, mediaflow_base)
+                    content = rewrite_urls_for_api(
+                        content, upstream_base, mediaflow_base, actual_username, api_password
+                    )
 
                 return Response(
                     content=content,
@@ -271,7 +498,7 @@ async def player_api(
 
     logger.info(f"XC player_api.php: action={action}, upstream={upstream_base}, user={actual_username}")
 
-    return await forward_api_request(upstream_url, request, upstream_base)
+    return await forward_api_request(upstream_url, request, upstream_base, actual_username, api_password)
 
 
 @xtream_root_router.get("/xmltv.php")
@@ -348,7 +575,7 @@ async def panel_api(
     upstream_url = f"{upstream_base}panel_api.php?{urlencode(query_params)}"
 
     logger.info(f"XC panel_api.php: upstream={upstream_base}")
-    return await forward_api_request(upstream_url, request, upstream_base)
+    return await forward_api_request(upstream_url, request, upstream_base, actual_username, api_password)
 
 
 # =============================================================================
