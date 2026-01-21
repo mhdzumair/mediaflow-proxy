@@ -388,10 +388,7 @@ async def acestream_ts_stream(
 
         logger.info(f"[acestream_ts_stream] Streaming from: {ts_url}")
 
-        # Create streaming response with live_stream=True for indefinite streaming
-        # This uses sock_read timeout instead of total timeout, allowing the stream
-        # to run indefinitely while still detecting dead connections
-        streamer = await create_streamer(ts_url, live_stream=True)
+        streamer = await create_streamer(ts_url)
         try:
             await streamer.create_streaming_response(ts_url, proxy_headers.request)
 
