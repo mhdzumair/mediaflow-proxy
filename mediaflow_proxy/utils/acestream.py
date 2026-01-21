@@ -65,11 +65,22 @@ class AcestreamSession:
     is_live: bool
     created_at: float = field(default_factory=time.time)
     last_access: float = field(default_factory=time.time)
+    last_segment_request: float = field(default_factory=time.time)
     client_count: int = 0
 
     def touch(self) -> None:
         """Update last access time."""
         self.last_access = time.time()
+
+    def touch_segment(self) -> None:
+        """Update last segment request time (indicates active playback)."""
+        now = time.time()
+        self.last_access = now
+        self.last_segment_request = now
+
+    def is_actively_streaming(self, timeout: float = 30.0) -> bool:
+        """Check if this session has recent segment activity."""
+        return (time.time() - self.last_segment_request) < timeout
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert session to dictionary for file-based registry."""
@@ -83,6 +94,7 @@ class AcestreamSession:
             "is_live": self.is_live,
             "created_at": self.created_at,
             "last_access": self.last_access,
+            "last_segment_request": self.last_segment_request,
             "worker_pid": os.getpid(),
         }
 
@@ -99,6 +111,7 @@ class AcestreamSession:
             is_live=data.get("is_live", True),
             created_at=data.get("created_at", time.time()),
             last_access=data.get("last_access", time.time()),
+            last_segment_request=data.get("last_segment_request", time.time()),
         )
 
 
@@ -537,15 +550,21 @@ class AcestreamSessionManager:
             self._cleanup_task = asyncio.create_task(self._cleanup_loop())
 
     async def _keepalive_loop(self) -> None:
-        """Periodically poll stat_url to keep sessions alive with active clients."""
+        """Periodically poll stat_url to keep sessions alive with active clients or recent segment activity."""
         while True:
             try:
                 await asyncio.sleep(settings.acestream_keepalive_interval)
 
                 for infohash, session in list(self._sessions.items()):
-                    # Only keepalive sessions with active clients
-                    if session.client_count <= 0:
-                        logger.debug(f"[AcestreamSessionManager] Skipping keepalive (no clients): {infohash[:16]}...")
+                    # Keepalive sessions with active clients OR recent segment activity
+                    # This ensures HLS streams (which don't use client_count) stay alive
+                    has_recent_activity = session.is_actively_streaming(timeout=settings.acestream_empty_timeout)
+
+                    if session.client_count <= 0 and not has_recent_activity:
+                        logger.debug(
+                            f"[AcestreamSessionManager] Skipping keepalive (no clients, no recent segments): "
+                            f"{infohash[:16]}..."
+                        )
                         continue
 
                     if session.stat_url:
@@ -556,12 +575,11 @@ class AcestreamSessionManager:
                                 timeout=aiohttp.ClientTimeout(total=5),
                             ) as response:
                                 if response.status == 200:
-                                    # Only touch if we have active clients
                                     session.touch()
                                     await self._write_registry(session)
                                     logger.debug(
                                         f"[AcestreamSessionManager] Keepalive OK: {infohash[:16]}... "
-                                        f"(clients: {session.client_count})"
+                                        f"(clients: {session.client_count}, recent_activity: {has_recent_activity})"
                                     )
                                 else:
                                     logger.warning(
@@ -588,19 +606,29 @@ class AcestreamSessionManager:
 
                 for infohash, session in list(self._sessions.items()):
                     idle_time = now - session.last_access
+                    segment_idle_time = now - session.last_segment_request
+
+                    # Don't clean up sessions with recent segment activity (active playback)
+                    # Use empty_timeout as the threshold for "recent" activity
+                    if segment_idle_time < empty_timeout:
+                        logger.debug(
+                            f"[AcestreamSessionManager] Session has recent segment activity: {infohash[:16]}... "
+                            f"(segment idle: {segment_idle_time:.0f}s)"
+                        )
+                        continue
 
                     # Clean up sessions with no clients after empty_timeout (faster cleanup)
                     if session.client_count <= 0 and idle_time > empty_timeout:
                         logger.info(
                             f"[AcestreamSessionManager] Cleaning up empty session: {infohash[:16]}... "
-                            f"(idle: {idle_time:.0f}s)"
+                            f"(idle: {idle_time:.0f}s, segment idle: {segment_idle_time:.0f}s)"
                         )
                         await self._close_session(infohash)
                     # Clean up any session after session_timeout regardless of client count
                     elif idle_time > timeout:
                         logger.info(
                             f"[AcestreamSessionManager] Cleaning up stale session: {infohash[:16]}... "
-                            f"(idle: {idle_time:.0f}s, clients: {session.client_count})"
+                            f"(idle: {idle_time:.0f}s, segment idle: {segment_idle_time:.0f}s, clients: {session.client_count})"
                         )
                         await self._close_session(infohash)
 
