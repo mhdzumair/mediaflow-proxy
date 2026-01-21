@@ -52,14 +52,9 @@ class TurboVidPlayExtractor(BaseExtractor):
 
         real_m3u8 = m2.group(0)
 
-        #
-        # 5. Final headers
-        #
-        self.base_headers.update({"referer": url, "origin": response.get_origin()})
-
         return {
             "destination_url": real_m3u8,
-            "request_headers": self.base_headers,
+            "request_headers": {"origin": response.get_origin()},
             "propagate_response_headers": {"content-type": "video/mp2t"},
             "remove_response_headers": ["content-length", "content-range"],
             "mediaflow_endpoint": "hls_manifest_proxy",
