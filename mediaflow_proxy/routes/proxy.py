@@ -447,10 +447,8 @@ async def hls_segment_proxy(
         # get_or_download returned None (timeout or error) - fall through to streaming
         logger.warning(f"[hls_segment_proxy] Prebuffer timeout, using direct streaming: {segment_url}")
 
-    # Fallback to direct streaming with live_stream=True for better timeout handling
-    # This uses sock_read timeout instead of total timeout, allowing longer streaming
-    # while still detecting dead connections
-    return await handle_stream_request("GET", segment_url, proxy_headers, transformer, live_stream=True)
+    # Fallback to direct streaming
+    return await handle_stream_request("GET", segment_url, proxy_headers, transformer)
 
 
 @proxy_router.head("/stream")

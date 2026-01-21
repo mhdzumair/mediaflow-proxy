@@ -192,7 +192,6 @@ async def handle_stream_request(
     video_url: str,
     proxy_headers: ProxyRequestHeaders,
     transformer_id: Optional[str] = None,
-    live_stream: bool = False,
 ) -> Response:
     """
     Handle general stream requests.
@@ -204,13 +203,11 @@ async def handle_stream_request(
         video_url (str): The URL of the video to stream.
         proxy_headers (ProxyRequestHeaders): Headers to be used in the proxy request.
         transformer_id (str, optional): ID of the stream transformer to use for content manipulation.
-        live_stream (bool): If True, use sock_read timeout instead of total timeout.
-                           This allows longer streaming while detecting dead connections.
 
     Returns:
         Union[Response, EnhancedStreamingResponse]: Either a HEAD response with headers or a streaming response.
     """
-    streamer = await create_streamer(video_url, live_stream=live_stream)
+    streamer = await create_streamer(video_url)
 
     try:
         # Auto-detect and resolve Vavoo links
@@ -306,7 +303,6 @@ async def proxy_stream(
     destination: str,
     proxy_headers: ProxyRequestHeaders,
     transformer_id: Optional[str] = None,
-    live_stream: bool = False,
 ):
     """
     Proxies the stream request to the given video URL.
@@ -316,12 +312,11 @@ async def proxy_stream(
         destination (str): The URL of the stream to be proxied.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
         transformer_id (str, optional): ID of the stream transformer to use.
-        live_stream (bool): If True, use sock_read timeout instead of total timeout.
 
     Returns:
         Response: The HTTP response with the streamed content.
     """
-    return await handle_stream_request(method, destination, proxy_headers, transformer_id, live_stream)
+    return await handle_stream_request(method, destination, proxy_headers, transformer_id)
 
 
 async def fetch_and_process_m3u8(

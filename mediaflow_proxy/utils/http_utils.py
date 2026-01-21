@@ -328,7 +328,7 @@ async def request_with_retry(method: str, url: str, headers: dict, **kwargs) -> 
             raise
 
 
-async def create_streamer(url: str = None, live_stream: bool = False) -> Streamer:
+async def create_streamer(url: str = None) -> Streamer:
     """
     Create a Streamer configured for the given URL.
 
@@ -337,10 +337,6 @@ async def create_streamer(url: str = None, live_stream: bool = False) -> Streame
 
     Args:
         url: Optional URL for routing configuration (SSL/proxy settings).
-        live_stream: If True, use sock_read timeout instead of total timeout.
-                     This allows indefinite streaming with per-read timeout for
-                     detecting dead connections. Suitable for live streams like
-                     acestream where the total duration is unknown.
 
     Returns:
         Streamer: A configured Streamer instance.
@@ -350,15 +346,16 @@ async def create_streamer(url: str = None, live_stream: bool = False) -> Streame
     routing_config = get_routing_config()
     route_match = routing_config.match_url(url)
 
-    if live_stream:
-        # For live streams: no total timeout, but timeout if no data received
-        # for sock_read seconds (detects dead connections without killing live streams)
-        timeout_config = ClientTimeout(
-            total=None,
-            sock_read=settings.transport_config.timeout,
-        )
-    else:
-        timeout_config = ClientTimeout(total=settings.transport_config.timeout)
+    # Use sock_read timeout: no total timeout, but timeout if no data received
+    # for sock_read seconds. This correctly handles:
+    # - Live streams (indefinite duration)
+    # - Large file downloads (total time depends on file size)
+    # - Seek operations (upstream may take time to seek)
+    # - Dead connection detection (timeout if no data flows)
+    timeout_config = ClientTimeout(
+        total=None,
+        sock_read=settings.transport_config.timeout,
+    )
 
     connector, proxy_url = _create_connector(route_match.proxy_url, route_match.verify_ssl)
 
@@ -748,16 +745,16 @@ class EnhancedStreamingResponse(Response):
             except (aiohttp.ServerDisconnectedError, aiohttp.ClientPayloadError, aiohttp.ClientError) as e:
                 # Handle connection closed / read errors gracefully
                 if data_sent:
-                    # We've sent some data to the client, so try to complete the response
-                    logger.warning(f"Upstream connection error after partial streaming: {e}")
-                    try:
-                        await send({"type": "http.response.body", "body": b"", "more_body": False})
-                        finalization_sent = True
-                        logger.info(
-                            f"Response finalized after partial content ({self.actual_content_length} bytes transferred)"
-                        )
-                    except Exception as close_err:
-                        logger.warning(f"Could not finalize response after upstream error: {close_err}")
+                    # We've sent some data to the client. With Content-Length set, we cannot
+                    # gracefully finalize a partial response - h11 will raise LocalProtocolError
+                    # if we try to send more_body: False without delivering all promised bytes.
+                    # The best we can do is log and return silently, letting the client handle
+                    # the incomplete response (most players will just stop or retry).
+                    logger.warning(
+                        f"Upstream connection error after partial streaming ({self.actual_content_length} bytes transferred): {e}"
+                    )
+                    # Don't try to finalize - just return and let the connection close naturally
+                    return
                 else:
                     # No data was sent, re-raise the error
                     logger.error(f"Upstream error before any data was streamed: {e}")
@@ -780,13 +777,16 @@ class EnhancedStreamingResponse(Response):
                 except Exception:
                     # If we can't send an error response, just log it
                     pass
-            elif response_started and not finalization_sent:
-                # Response already started but not finalized - gracefully close the stream
+            elif response_started and not finalization_sent and not data_sent:
+                # Response started but no data sent yet - we can safely finalize
+                # (If data was sent with Content-Length, we can't finalize without h11 error)
                 try:
                     await send({"type": "http.response.body", "body": b"", "more_body": False})
                     finalization_sent = True
                 except Exception:
                     pass
+            # If data was sent but streaming failed, just return silently
+            # The client will see an incomplete response which is unavoidable with Content-Length
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         async with anyio.create_task_group() as task_group:
