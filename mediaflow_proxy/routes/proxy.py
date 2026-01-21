@@ -324,6 +324,7 @@ async def _handle_hls_with_dlhd_retry(
             hls_params.key_only_proxy,
             hls_params.no_proxy,
             skip_segments_list,
+            hls_params.start_offset,
         )
         processed_manifest = await processor.process_m3u8(new_manifest, base_url=hls_params.destination)
 

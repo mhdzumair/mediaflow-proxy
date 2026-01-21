@@ -164,6 +164,10 @@ class HLSManifestParams(GenericParams):
         None,
         description="Time segments to skip, in compact format: 'start-end,start-end,...' (e.g., '0-112,280-300'). Segments are in seconds.",
     )
+    start_offset: Optional[float] = Field(
+        None,
+        description="Injects #EXT-X-START:TIME-OFFSET into the playlist. Use negative values for live streams to start behind the live edge (e.g., -18 to start 18 seconds behind). Enables prebuffer to work on live streams by creating headroom.",
+    )
     transformer: Optional[str] = Field(
         None,
         description="Stream transformer ID for host-specific content manipulation (e.g., 'ts_stream' for PNG/padding stripping).",
@@ -195,6 +199,10 @@ class MPDManifestParams(GenericParams):
         None,
         description="Time segments to skip, in compact format: 'start-end,start-end,...' (e.g., '0-112,280-300'). Segments are in seconds.",
     )
+    start_offset: Optional[float] = Field(
+        None,
+        description="Injects #EXT-X-START:TIME-OFFSET into live playlists. Use negative values for live streams to start behind the live edge (e.g., -18 to start 18 seconds behind). Enables prebuffer to work on live streams.",
+    )
 
     @field_validator("resolution", mode="before")
     @classmethod
@@ -218,6 +226,10 @@ class MPDPlaylistParams(GenericParams):
     skip: Optional[str] = Field(
         None,
         description="Time segments to skip, in compact format: 'start-end,start-end,...' (e.g., '0-112,280-300'). Segments are in seconds.",
+    )
+    start_offset: Optional[float] = Field(
+        None,
+        description="Injects #EXT-X-START:TIME-OFFSET into the playlist. Use negative values for live streams to start behind the live edge (e.g., -18 to start 18 seconds behind). Enables prebuffer to work on live streams.",
     )
 
     def get_skip_segments(self) -> Optional[list[dict]]:
