@@ -10,7 +10,7 @@ Provides endpoints for proxying acestream content:
 import asyncio
 import logging
 from typing import Annotated
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 
 import aiohttp
 from fastapi import APIRouter, Query, Request, HTTPException, Response, Depends
@@ -19,6 +19,7 @@ from starlette.background import BackgroundTask
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.utils.acestream import acestream_manager, AcestreamSession
 from mediaflow_proxy.utils.http_utils import (
+    get_original_scheme,
     get_proxy_headers,
     ProxyRequestHeaders,
     EnhancedStreamingResponse,
@@ -59,33 +60,43 @@ class AcestreamM3U8Processor(M3U8Processor):
         )
         self.session = session
 
-    def _build_proxy_url(self, url: str, is_key: bool = False) -> str:
+    async def proxy_content_url(self, url: str, base_url: str) -> str:
         """
-        Build a proxy URL for acestream segments/keys.
+        Override to route acestream segments through the acestream segment endpoint.
 
-        Overrides base class to route through acestream segment endpoint.
+        This ensures segments use /proxy/acestream/segment.ts instead of /proxy/hls/segment.ts
         """
+        full_url = urljoin(base_url, url)
+
+        # If no_proxy is enabled, return the direct URL
         if self.no_proxy:
-            return url
+            return full_url
 
-        # For keys, use the standard key proxy
-        if is_key:
-            return super()._build_proxy_url(url, is_key=True)
+        # Check if this is a playlist URL (use standard proxy for playlists)
+        parsed = urlparse(full_url)
+        is_playlist = parsed.path.endswith((".m3u", ".m3u8", ".m3u_plus"))
+
+        if is_playlist:
+            # Use standard playlist proxy
+            return await super().proxy_content_url(url, base_url)
 
         # For segments, route through acestream segment endpoint
-        # Include session infohash so we can track which session this belongs to
         query_params = {
-            "d": url,
-            "infohash": self.session.infohash,
+            "d": full_url,
         }
 
-        # Include headers from the original request
+        # Preserve the original id/infohash parameter from the request
+        if "id" in self.request.query_params:
+            query_params["id"] = self.request.query_params["id"]
+        else:
+            query_params["infohash"] = self.session.infohash
+
+        # Include api_password and headers from the original request
         for key, value in self.request.query_params.items():
-            if key.startswith("h_"):
+            if key == "api_password" or key.startswith("h_"):
                 query_params[key] = value
 
         # Determine the segment extension
-        parsed = urlparse(url)
         path = parsed.path.lower()
         if path.endswith(".ts"):
             ext = "ts"
@@ -96,7 +107,11 @@ class AcestreamM3U8Processor(M3U8Processor):
         else:
             ext = "ts"
 
-        return f"{self.mediaflow_proxy_url}/proxy/acestream/segment.{ext}?{urlencode(query_params)}"
+        # Build acestream segment proxy URL
+        base_proxy_url = str(
+            self.request.url_for("acestream_segment_proxy", ext=ext).replace(scheme=get_original_scheme(self.request))
+        )
+        return f"{base_proxy_url}?{urlencode(query_params)}"
 
 
 @acestream_router.head("/acestream/manifest.m3u8")
@@ -241,7 +256,8 @@ async def acestream_segment_proxy(
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
     ext: str,
     d: str = Query(..., description="Segment URL"),
-    infohash: str = Query(..., description="Acestream session infohash"),
+    infohash: str = Query(None, description="Acestream session infohash"),
+    id: str = Query(None, description="Acestream content ID (alternative to infohash)"),
 ):
     """
     Proxy Acestream HLS segments.
@@ -254,6 +270,7 @@ async def acestream_segment_proxy(
         ext: Segment file extension.
         d: The segment URL to proxy.
         infohash: The acestream session infohash (for tracking).
+        id: Alternative content ID.
 
     Returns:
         Proxied segment content.
@@ -261,15 +278,21 @@ async def acestream_segment_proxy(
     if not settings.enable_acestream:
         raise HTTPException(status_code=503, detail="Acestream support is disabled")
 
+    # Use id or infohash for session lookup
+    session_key = id or infohash
+    if not session_key:
+        raise HTTPException(status_code=400, detail="Either 'infohash' or 'id' parameter is required")
+
     segment_url = d
     mime_type = SEGMENT_MIME_TYPES.get(ext.lower(), "application/octet-stream")
 
     logger.debug(f"[acestream_segment_proxy] Request for: {segment_url}")
 
-    # Touch the session to keep it alive
-    session = acestream_manager.get_session(infohash)
+    # Touch the session to keep it alive - use touch_segment() to indicate active playback
+    session = acestream_manager.get_session(session_key)
     if session:
-        session.touch()
+        session.touch_segment()
+        logger.debug(f"[acestream_segment_proxy] Touched session: {session_key[:16]}...")
 
     # Use HLS prebuffer if enabled
     if settings.enable_hls_prebuffer:
