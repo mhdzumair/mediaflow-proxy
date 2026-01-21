@@ -65,7 +65,12 @@ async def process_manifest(
 
 
 async def process_playlist(
-    request: Request, mpd_dict: dict, profile_id: str, proxy_headers: ProxyRequestHeaders, skip_segments: list = None
+    request: Request,
+    mpd_dict: dict,
+    profile_id: str,
+    proxy_headers: ProxyRequestHeaders,
+    skip_segments: list = None,
+    start_offset: float = None,
 ) -> Response:
     """
     Processes the MPD manifest and converts it to an HLS playlist for a specific profile.
@@ -76,6 +81,7 @@ async def process_playlist(
         profile_id (str): The profile ID to generate the playlist for.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
         skip_segments (list, optional): List of time segments to skip. Each item should have 'start' and 'end' keys.
+        start_offset (float, optional): Start offset in seconds for live streams.
 
     Returns:
         Response: The HLS playlist as an HTTP response.
@@ -87,7 +93,7 @@ async def process_playlist(
     if not matching_profiles:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    hls_content = build_hls_playlist(mpd_dict, matching_profiles, request, skip_segments)
+    hls_content = build_hls_playlist(mpd_dict, matching_profiles, request, skip_segments, start_offset)
 
     # Trigger prebuffering of upcoming segments for live streams
     if settings.enable_dash_prebuffer and mpd_dict.get("isLive", False):
@@ -318,7 +324,9 @@ def _filter_video_profiles_by_resolution(video_profiles: dict, target_resolution
     return {profile_id: (profile, playlist_url)}
 
 
-def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request, skip_segments: list = None) -> str:
+def build_hls_playlist(
+    mpd_dict: dict, profiles: list[dict], request: Request, skip_segments: list = None, start_offset: float = None
+) -> str:
     """
     Builds an HLS playlist from the MPD manifest for specific profiles.
 
@@ -327,6 +335,7 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request, s
         profiles (list[dict]): The profiles to include in the playlist.
         request (Request): The incoming HTTP request.
         skip_segments (list, optional): List of time segments to skip. Each item should have 'start' and 'end' keys.
+        start_offset (float, optional): Start offset in seconds for live streams. Defaults to settings.livestream_start_offset for live.
 
     Returns:
         str: The HLS playlist as a string.
@@ -336,6 +345,12 @@ def build_hls_playlist(mpd_dict: dict, profiles: list[dict], request: Request, s
     added_segments = 0
     skipped_segments = 0
     is_live = mpd_dict.get("isLive", False)
+
+    # Inject EXT-X-START for live streams (enables prebuffering by starting behind live edge)
+    # User-provided start_offset always takes precedence; otherwise use default for live streams only
+    effective_start_offset = start_offset if start_offset is not None else (settings.livestream_start_offset if is_live else None)
+    if effective_start_offset is not None:
+        hls.append(f"#EXT-X-START:TIME-OFFSET={effective_start_offset:.1f},PRECISE=YES")
 
     # Initialize skip filter if skip_segments provided
     skip_filter = SkipSegmentFilter(skip_segments) if skip_segments else None

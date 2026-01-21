@@ -78,6 +78,7 @@ class M3U8Processor:
         key_only_proxy: bool = False,
         no_proxy: bool = False,
         skip_segments: Optional[List[dict]] = None,
+        start_offset: Optional[float] = None,
     ):
         """
         Initializes the M3U8Processor with the request and URL prefix.
@@ -90,6 +91,8 @@ class M3U8Processor:
             no_proxy (bool, optional): If True, returns the manifest without proxying any URLs. Defaults to False.
             skip_segments (List[dict], optional): List of time segments to skip. Each dict should have
                                                   'start', 'end' (in seconds), and optionally 'type'.
+            start_offset (float, optional): Time offset in seconds for EXT-X-START tag. Use negative values
+                                           for live streams to start behind the live edge.
         """
         self.request = request
         self.key_url = parse.urlparse(key_url) if key_url else None
@@ -97,6 +100,10 @@ class M3U8Processor:
         self.no_proxy = no_proxy
         self.force_playlist_proxy = force_playlist_proxy
         self.skip_filter = SkipSegmentFilter(skip_segments)
+        # Track if user explicitly provided start_offset (vs using default)
+        self._user_provided_start_offset = start_offset is not None
+        # Store the explicit value or default (will be applied conditionally for live streams)
+        self._start_offset_value = start_offset if start_offset is not None else settings.livestream_start_offset
         self.mediaflow_proxy_url = str(
             request.url_for("hls_manifest_proxy").replace(scheme=get_original_scheme(request))
         )
@@ -106,6 +113,31 @@ class M3U8Processor:
             request.url_for("hls_manifest_proxy").replace(scheme=get_original_scheme(request))
         ).replace("/hls/manifest.m3u8", "/hls/segment")
         self.playlist_url = None  # Will be set when processing starts
+
+    def _should_apply_start_offset(self, content: str) -> bool:
+        """
+        Determine if start_offset should be applied to this playlist.
+
+        Args:
+            content: The playlist content to check.
+
+        Returns:
+            True if start_offset should be applied, False otherwise.
+        """
+        if self._start_offset_value is None:
+            return False
+
+        # If user explicitly provided start_offset, always use it
+        if self._user_provided_start_offset:
+            return True
+
+        # Using default from settings - only apply for live streams
+        # Live streams don't have #EXT-X-ENDLIST tag
+        # Also skip master playlists (they have #EXT-X-STREAM-INF)
+        is_live = "#EXT-X-ENDLIST" not in content
+        is_master = "#EXT-X-STREAM-INF" in content
+
+        return is_live and not is_master
 
     async def process_m3u8(self, content: str, base_url: str) -> str:
         """
@@ -133,10 +165,22 @@ class M3U8Processor:
         discontinuity_pending = False
         # Buffer the current EXTINF line - only output when we output the URL
         pending_extinf: Optional[str] = None
+        # Track if we've injected EXT-X-START tag
+        start_offset_injected = False
+        # Determine if we should apply start_offset (checks if live stream)
+        apply_start_offset = self._should_apply_start_offset(content)
 
         i = 0
         while i < len(lines):
             line = lines[i]
+
+            # Inject EXT-X-START tag right after #EXTM3U (only for live streams or if user explicitly requested)
+            if line.strip() == "#EXTM3U" and apply_start_offset and not start_offset_injected:
+                processed_lines.append(line)
+                processed_lines.append(f"#EXT-X-START:TIME-OFFSET={self._start_offset_value:.1f},PRECISE=YES")
+                start_offset_injected = True
+                i += 1
+                continue
 
             # Handle EXTINF lines (segment duration markers)
             if line.startswith("#EXTINF:"):
@@ -271,6 +315,11 @@ class M3U8Processor:
         # State for skip segment filtering
         discontinuity_pending = False  # Track if we need discontinuity before next URL
         pending_extinf = None  # Buffer EXTINF line until we decide to emit it
+        # Track if we've injected EXT-X-START tag
+        start_offset_injected = False
+        # Buffer header lines until we know if it's a master playlist (for default start_offset)
+        header_buffer = []
+        header_flushed = False
 
         # Process the content chunk by chunk
         async for chunk in content_iterator:
@@ -311,6 +360,51 @@ class M3U8Processor:
                     if not line:  # Skip empty lines
                         continue
 
+                    # Buffer header lines until we can determine playlist type
+                    # This allows us to decide whether to inject EXT-X-START
+                    if not header_flushed:
+                        # Always buffer the current line first
+                        header_buffer.append(line)
+
+                        # Check if we can now determine playlist type
+                        # Only check the current line, not raw_content (which may contain future content)
+                        is_master = "#EXT-X-STREAM-INF" in line
+                        is_media = "#EXTINF" in line
+
+                        if is_master or is_media:
+                            # Flush header buffer with or without EXT-X-START
+                            should_inject = (
+                                self._start_offset_value is not None
+                                and not is_master
+                                and (
+                                    self._user_provided_start_offset or is_media
+                                )  # User provided OR it's a media playlist
+                            )
+
+                            for header_line in header_buffer:
+                                yield header_line + "\n"
+                                if header_line.strip() == "#EXTM3U" and should_inject and not start_offset_injected:
+                                    yield f"#EXT-X-START:TIME-OFFSET={self._start_offset_value:.1f},PRECISE=YES\n"
+                                    start_offset_injected = True
+
+                            header_buffer = []
+                            header_flushed = True
+                        # If not master/media yet, continue buffering (line already added above)
+                        continue
+
+                    # If user explicitly provided start_offset and we haven't injected yet
+                    # (handles edge case where we flush header before seeing EXTINF/STREAM-INF)
+                    if (
+                        line.strip() == "#EXTM3U"
+                        and self._user_provided_start_offset
+                        and self._start_offset_value is not None
+                        and not start_offset_injected
+                    ):
+                        yield line + "\n"
+                        yield f"#EXT-X-START:TIME-OFFSET={self._start_offset_value:.1f},PRECISE=YES\n"
+                        start_offset_injected = True
+                        continue
+
                     # Handle segment filtering if skip_segments are configured
                     if self.skip_filter.has_skip_segments():
                         result = await self._process_line_with_filtering(
@@ -330,6 +424,22 @@ class M3U8Processor:
         # If HTML was detected, we already returned an error playlist
         if is_html_detected:
             return
+
+        # Flush any remaining header buffer (for short playlists or edge cases)
+        if header_buffer and not header_flushed:
+            # Check final raw_content to determine if it's a master playlist
+            is_master = "#EXT-X-STREAM-INF" in raw_content
+            should_inject = (
+                self._start_offset_value is not None
+                and not is_master
+                and self._user_provided_start_offset  # Only inject for explicit user request in edge cases
+            )
+            for header_line in header_buffer:
+                yield header_line + "\n"
+                if header_line.strip() == "#EXTM3U" and should_inject and not start_offset_injected:
+                    yield f"#EXT-X-START:TIME-OFFSET={self._start_offset_value:.1f},PRECISE=YES\n"
+                    start_offset_injected = True
+            header_buffer = []
 
         # Process any remaining data in the buffer plus final bytes
         final_chunk = decoder.decode(b"", final=True)
@@ -604,8 +714,10 @@ class M3U8Processor:
             for key in list(query_params.keys())
             if key.lower().startswith("r_") and not key.lower().startswith("rp_")
         ]
-        # Remove force_playlist_proxy to avoid it being added to subsequent requests
+        # Remove manifest-only parameters to avoid them being added to subsequent requests
         query_params.pop("force_playlist_proxy", None)
+        if not is_playlist:
+            query_params.pop("start_offset", None)
 
         # Use appropriate proxy URL based on content type
         if is_playlist:

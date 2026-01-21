@@ -127,6 +127,7 @@ async def handle_hls_stream_proxy(
                 hls_params.no_proxy,
                 skip_segments_list,
                 transformer,
+                hls_params.start_offset,
             )
 
         parsed_url = urlparse(hls_params.destination)
@@ -145,6 +146,7 @@ async def handle_hls_stream_proxy(
                 hls_params.no_proxy,
                 skip_segments_list,
                 transformer,
+                hls_params.start_offset,
             )
 
         # Create initial streaming response to check content type
@@ -165,6 +167,7 @@ async def handle_hls_stream_proxy(
                 hls_params.no_proxy,
                 skip_segments_list,
                 transformer,
+                hls_params.start_offset,
             )
 
         # If we're removing content-range but upstream returned 206, change to 200
@@ -189,6 +192,7 @@ async def handle_stream_request(
     video_url: str,
     proxy_headers: ProxyRequestHeaders,
     transformer_id: Optional[str] = None,
+    live_stream: bool = False,
 ) -> Response:
     """
     Handle general stream requests.
@@ -200,11 +204,13 @@ async def handle_stream_request(
         video_url (str): The URL of the video to stream.
         proxy_headers (ProxyRequestHeaders): Headers to be used in the proxy request.
         transformer_id (str, optional): ID of the stream transformer to use for content manipulation.
+        live_stream (bool): If True, use sock_read timeout instead of total timeout.
+                           This allows longer streaming while detecting dead connections.
 
     Returns:
         Union[Response, EnhancedStreamingResponse]: Either a HEAD response with headers or a streaming response.
     """
-    streamer = await create_streamer()
+    streamer = await create_streamer(video_url, live_stream=live_stream)
 
     try:
         # Auto-detect and resolve Vavoo links
@@ -296,7 +302,11 @@ def prepare_response_headers(
 
 
 async def proxy_stream(
-    method: str, destination: str, proxy_headers: ProxyRequestHeaders, transformer_id: Optional[str] = None
+    method: str,
+    destination: str,
+    proxy_headers: ProxyRequestHeaders,
+    transformer_id: Optional[str] = None,
+    live_stream: bool = False,
 ):
     """
     Proxies the stream request to the given video URL.
@@ -306,11 +316,12 @@ async def proxy_stream(
         destination (str): The URL of the stream to be proxied.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
         transformer_id (str, optional): ID of the stream transformer to use.
+        live_stream (bool): If True, use sock_read timeout instead of total timeout.
 
     Returns:
         Response: The HTTP response with the streamed content.
     """
-    return await handle_stream_request(method, destination, proxy_headers, transformer_id)
+    return await handle_stream_request(method, destination, proxy_headers, transformer_id, live_stream)
 
 
 async def fetch_and_process_m3u8(
@@ -324,6 +335,7 @@ async def fetch_and_process_m3u8(
     no_proxy: bool = False,
     skip_segments: list = None,
     transformer: Optional[StreamTransformer] = None,
+    start_offset: float = None,
 ):
     """
     Fetches and processes the m3u8 playlist on-the-fly, converting it to an HLS playlist.
@@ -340,6 +352,8 @@ async def fetch_and_process_m3u8(
         skip_segments (list, optional): List of time segments to skip. Each item should have
                                         'start', 'end' (in seconds), and optionally 'type'.
         transformer (StreamTransformer, optional): Transformer to apply to the stream content.
+        start_offset (float, optional): Time offset in seconds for EXT-X-START tag. Use negative
+                                       values for live streams to start behind the live edge.
 
     Returns:
         Response: The HTTP response with the processed m3u8 playlist.
@@ -351,7 +365,9 @@ async def fetch_and_process_m3u8(
 
         # Initialize processor and response headers
         # skip_segments is already a list of dicts with 'start' and 'end' keys
-        processor = M3U8Processor(request, key_url, force_playlist_proxy, key_only_proxy, no_proxy, skip_segments)
+        processor = M3U8Processor(
+            request, key_url, force_playlist_proxy, key_only_proxy, no_proxy, skip_segments, start_offset
+        )
         base_headers = {
             "content-disposition": "inline",
             "accept-ranges": "none",
@@ -509,7 +525,9 @@ async def get_playlist(
     # Get skip segments if provided
     skip_segments = playlist_params.get_skip_segments()
 
-    return await process_playlist(request, mpd_dict, playlist_params.profile_id, proxy_headers, skip_segments)
+    return await process_playlist(
+        request, mpd_dict, playlist_params.profile_id, proxy_headers, skip_segments, playlist_params.start_offset
+    )
 
 
 async def get_segment(

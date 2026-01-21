@@ -159,6 +159,7 @@ Set the following environment variables:
 - `HLS_PREBUFFER_MAX_MEMORY_PERCENT`: Optional. Maximum percentage of system memory to use for HLS pre-buffer cache. Default: `80`. Only effective when `ENABLE_HLS_PREBUFFER` is `true`.
 - `HLS_PREBUFFER_EMERGENCY_THRESHOLD`: Optional. Emergency threshold (%) to trigger aggressive HLS cache cleanup. Default: `90`. Only effective when `ENABLE_HLS_PREBUFFER` is `true`.
 - `HLS_PREBUFFER_INACTIVITY_TIMEOUT`: Optional. Seconds of inactivity before stopping HLS playlist refresh. Default: `60`. Helps clean up resources when streams are stopped.
+- `LIVESTREAM_START_OFFSET`: Optional. Default start offset (in seconds) for live streams (HLS and MPD). Default: `-18`. This injects `#EXT-X-START:TIME-OFFSET` into live media playlists, causing players to start behind the live edge. This creates headroom for prebuffering to work effectively on live streams. Set to empty/unset to disable automatic injection for live streams.
 - `ENABLE_DASH_PREBUFFER`: Optional. Enables DASH pre-buffering for improved streaming performance. Default: `true`. Pre-buffering downloads upcoming segments ahead of playback to reduce buffering. Set to `false` to disable for low-memory environments.
 - `DASH_PREBUFFER_SEGMENTS`: Optional. Number of DASH segments to pre-buffer ahead. Default: `5`. Only effective when `ENABLE_DASH_PREBUFFER` is `true`.
 - `DASH_PREBUFFER_CACHE_SIZE`: Optional. Maximum number of DASH segments to keep in memory cache. Default: `50`. Only effective when `ENABLE_DASH_PREBUFFER` is `true`.
@@ -1034,6 +1035,16 @@ Skip specific time ranges in HLS and DASH/MPD streams. Useful for skipping intro
 - **Decimal Support:** Supports decimal values for precise timing (e.g., `skip=0-112.5,120.25-150.75`)  
 - **Example:** `&skip=0-90` skips the first 90 seconds (intro), `&skip=0-90,1750-1800` skips intro and outro
 
+**`&start_offset=-18`**  
+Inject `#EXT-X-START:TIME-OFFSET` tag into HLS playlists to control playback start position. Particularly useful for live streams to enable prebuffering.  
+- **Usage:** Add `&start_offset=-18` to the proxy URL (negative value for live streams)  
+- **Effect:** Injects `#EXT-X-START:TIME-OFFSET=-18.0,PRECISE=YES` into the HLS manifest, causing players to start playback behind the live edge.  
+- **Supported Endpoints:** `/proxy/hls/manifest.m3u8`, `/proxy/mpd/playlist.m3u8`, `/proxy/acestream/manifest.m3u8`  
+- **Use Case:** For live streams, starting behind the live edge creates headroom for the prebuffer system to prefetch upcoming segments, resulting in smoother playback without buffering.  
+- **Default:** Can be configured globally via `LIVESTREAM_START_OFFSET` environment variable (default: `-18` for live streams). Set to empty to disable.  
+- **Note:** When using the default setting, the offset is only applied to live media playlists (not VOD or master playlists). Explicit `start_offset` parameter overrides this behavior.  
+- **Example:** `&start_offset=-18` starts playback 18 seconds behind the live edge
+
 **`&x_headers=content-length,transfer-encoding`**  
 Remove specific headers from the proxied response.  
 - **Usage:** Add `&x_headers=header1,header2` to the proxy URL (comma-separated list)  
@@ -1133,6 +1144,21 @@ mpv "http://localhost:8888/proxy/mpd/manifest.m3u8?d=https://example.com/manifes
 # Skip multiple segments with decimal precision
 mpv "http://localhost:8888/proxy/hls/manifest.m3u8?d=https://example.com/playlist.m3u8&skip=0-112.5,1750.25-1800.75&api_password=your_password"
 ```
+
+#### Live Stream with Start Offset (Prebuffer Support)
+
+```bash
+# Start 18 seconds behind the live edge for HLS (allows prebuffer to work effectively)
+mpv "http://localhost:8888/proxy/hls/manifest.m3u8?d=https://example.com/live/playlist.m3u8&start_offset=-18&api_password=your_password"
+
+# For live DASH/MPD streams converted to HLS
+mpv "http://localhost:8888/proxy/mpd/manifest.m3u8?d=https://example.com/live/manifest.mpd&start_offset=-18&api_password=your_password"
+
+# For Acestream live streams with start offset
+mpv "http://localhost:8888/proxy/acestream/manifest.m3u8?id=your_content_id&start_offset=-18&api_password=your_password"
+```
+
+**Note:** The `start_offset` parameter is particularly useful for live streams where the prebuffer system cannot prefetch segments when sitting at the live edge. By starting slightly behind (e.g., `-18` seconds), there are future segments available for prebuffering, resulting in smoother playback. This works for both native HLS and DASH/MPD streams converted to HLS.
 
 #### Stream with Header Removal (Fix Content-Length Issues)
 

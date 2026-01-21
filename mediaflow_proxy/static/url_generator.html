@@ -266,6 +266,17 @@
                         </div>
                     </div>
                     
+                    <!-- Start Offset Section (Live Streams) -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Start Offset <span class="text-gray-400 font-normal">(Live Stream Prebuffer)</span></h4>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Time Offset (seconds)</label>
+                            <input type="number" id="hls-start-offset" placeholder="-18" step="0.1"
+                                class="input-field w-full sm:w-48 px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Use negative values to start behind the live edge (e.g., -18 to start 18 seconds behind). This enables the prebuffer to work on live streams by creating headroom for prefetching segments.</p>
+                        </div>
+                    </div>
+                    
                     <!-- HLS Response Headers Section -->
                     <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
                         <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Response Headers <span class="text-gray-400 font-normal">(Advanced)</span></h4>
@@ -361,6 +372,17 @@
                             <input type="text" id="mpd-skip-segments" placeholder="0-90,1750-1800 (start-end in seconds, comma-separated)"
                                 class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
                             <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Format: start-end,start-end (e.g., "0-90" skips first 90 seconds, "0-112,1750-1800" skips intro and outro). Supports decimal values.</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Start Offset Section (Live Streams) -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Start Offset <span class="text-gray-400 font-normal">(Live Stream Prebuffer)</span></h4>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Time Offset (seconds)</label>
+                            <input type="number" id="mpd-start-offset" placeholder="-18" step="0.1"
+                                class="input-field w-full sm:w-48 px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Use negative values to start behind the live edge (e.g., -18 to start 18 seconds behind). This enables the prebuffer to work on live streams by creating headroom for prefetching segments.</p>
                         </div>
                     </div>
                     
@@ -1013,6 +1035,17 @@
                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">40-character hex string from magnet links (e.g., b04372b9543d763bd2dbd2a1842d9723fd080076)</p>
                     </div>
 
+                    <!-- Start Offset Section (Live Streams) -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Start Offset <span class="text-gray-400 font-normal">(Live Stream Prebuffer)</span></h4>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Time Offset (seconds)</label>
+                            <input type="number" id="acestream-start-offset" placeholder="-18" step="0.1"
+                                class="input-field w-full sm:w-48 px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-teal-500 text-sm">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Use negative values to start behind the live edge (e.g., -18 to start 18 seconds behind). This enables the prebuffer to work on live streams.</p>
+                        </div>
+                    </div>
+
                     <!-- Info Box -->
                     <div class="bg-teal-50 dark:bg-teal-900/20 rounded-xl p-4 border border-teal-200 dark:border-teal-800">
                         <div class="flex items-start gap-3">
@@ -1424,6 +1457,10 @@
                 const skipSegments = document.getElementById('hls-skip-segments').value.trim();
                 if (skipSegments) params.append('skip', skipSegments);
                 
+                // Start offset (for live streams)
+                const startOffset = document.getElementById('hls-start-offset').value.trim();
+                if (startOffset) params.append('start_offset', startOffset);
+                
                 // Add HLS response headers (r_ prefix)
                 const hlsResponseHeaders = getHlsResponseHeaders();
                 for (const [name, value] of Object.entries(hlsResponseHeaders)) {
@@ -1464,6 +1501,10 @@
                 // Skip segments
                 const skipSegments = document.getElementById('mpd-skip-segments').value.trim();
                 if (skipSegments) params.append('skip', skipSegments);
+                
+                // Start offset (for live streams)
+                const startOffset = document.getElementById('mpd-start-offset').value.trim();
+                if (startOffset) params.append('start_offset', startOffset);
                 
                 // Add MPD response headers (r_ prefix)
                 const mpdResponseHeaders = getMpdResponseHeaders();
@@ -1870,6 +1911,12 @@
             
             if (apiPassword) {
                 params.append('api_password', apiPassword);
+            }
+            
+            // Start offset (for live streams) - only for HLS output
+            if (!isTs) {
+                const startOffset = document.getElementById('acestream-start-offset').value.trim();
+                if (startOffset) params.append('start_offset', startOffset);
             }
             
             const finalUrl = `${baseUrl}${endpoint}?${params.toString()}`;

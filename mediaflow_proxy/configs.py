@@ -47,7 +47,10 @@ class Settings(BaseSettings):
     m3u8_content_routing: Literal["mediaflow", "stremio", "direct"] = (
         "mediaflow"  # Routing strategy for M3U8 content URLs: "mediaflow", "stremio", or "direct"
     )
-    enable_hls_prebuffer: bool = False  # Whether to enable HLS pre-buffering for improved streaming performance.
+    enable_hls_prebuffer: bool = True  # Whether to enable HLS pre-buffering for improved streaming performance.
+    livestream_start_offset: (
+        float | None
+    ) = -18  # Default start offset for live streams (e.g., -18 to start 18 seconds behind live edge). Applies to HLS and MPD live playlists. Set to None to disable.
     hls_prebuffer_segments: int = 5  # Number of segments to pre-buffer ahead.
     hls_prebuffer_cache_size: int = 50  # Maximum number of segments to cache in memory.
     hls_prebuffer_max_memory_percent: int = 80  # Maximum percentage of system memory to use for HLS pre-buffer cache.
