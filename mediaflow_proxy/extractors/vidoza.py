@@ -44,11 +44,9 @@ class VidozaExtractor(BaseExtractor):
 
         # 2) Extract video URL
         pattern = re.compile(
-            r"""
-            (?:file|src)\s*[:=]\s*["']
-            (?P<url>https?:\/\/[^"']+|\/\/[^"']+)
-            """,
-            re.IGNORECASE | re.VERBOSE,
+            r"""["']?\s*(?:file|src)\s*["']?\s*[:=,]?\s*["'](?P<url>[^"']+)"""
+            r"""(?:[^}>\]]+)["']?\s*res\s*["']?\s*[:=]\s*["']?(?P<label>[^"',]+)""",
+            re.IGNORECASE,
         )
 
         match = pattern.search(html)
