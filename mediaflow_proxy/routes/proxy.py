@@ -478,6 +478,10 @@ async def proxy_stream_endpoint(
     Returns:
         Response: The HTTP response with the streamed content.
     """
+    # Log incoming request details for debugging seek issues
+    range_header = proxy_headers.request.get("range", "not set")
+    logger.info(f"[proxy_stream] Request received - filename: {filename}, range: {range_header}, method: {request.method}")
+
     # Sanitize destination URL to fix common encoding issues
     destination = sanitize_url(destination)
 

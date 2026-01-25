@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import logging
+import time
 from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
@@ -225,12 +226,17 @@ async def handle_stream_request(
                 logger.warning(f"Failed to auto-resolve Vavoo URL: {e}")
                 # Continue with original URL if resolution fails
 
-        # Debug: log request headers being sent
-        logger.debug(f"Request headers being sent to upstream: {proxy_headers.request}")
-        await streamer.create_streaming_response(video_url, proxy_headers.request)
+        # Log timing for debugging seek performance
+        start_time = time.time()
+        range_header = proxy_headers.request.get("range", "not set")
+        logger.info(f"[handle_stream] Starting upstream {method} request - range: {range_header}")
 
-        # Debug: log upstream response headers
-        logger.debug(f"Upstream response status: {streamer.response.status}")
+        # Use the same HTTP method for upstream request (HEAD for HEAD, GET for GET)
+        # This prevents unnecessary data download when client just wants headers
+        await streamer.create_streaming_response(video_url, proxy_headers.request, method=method)
+
+        elapsed = time.time() - start_time
+        logger.info(f"[handle_stream] Upstream responded in {elapsed:.2f}s - status: {streamer.response.status}")
         logger.debug(f"Upstream response headers: {dict(streamer.response.headers)}")
 
         response_headers = prepare_response_headers(

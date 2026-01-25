@@ -115,17 +115,30 @@ class Streamer:
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type(DownloadError),
     )
-    async def create_streaming_response(self, url: str, headers: dict):
+    async def create_streaming_response(self, url: str, headers: dict, method: str = "GET"):
         """
         Creates and sends a streaming request.
 
         Args:
             url: The URL to stream from.
             headers: The headers to include in the request.
+            method: HTTP method to use (GET or HEAD). Defaults to GET.
+                    For HEAD requests, will fallback to GET if server doesn't support HEAD.
         """
         try:
-            self.response = await self.session.get(url, headers=headers, proxy=self.proxy_url)
-            self.response.raise_for_status()
+            if method.upper() == "HEAD":
+                # Try HEAD first, fallback to GET if server doesn't support it
+                try:
+                    self.response = await self.session.head(url, headers=headers, proxy=self.proxy_url)
+                    self.response.raise_for_status()
+                except (aiohttp.ClientResponseError, aiohttp.ClientError) as head_error:
+                    # HEAD failed, fallback to GET (some servers don't support HEAD)
+                    logger.debug(f"HEAD request failed ({head_error}), falling back to GET")
+                    self.response = await self.session.get(url, headers=headers, proxy=self.proxy_url)
+                    self.response.raise_for_status()
+            else:
+                self.response = await self.session.get(url, headers=headers, proxy=self.proxy_url)
+                self.response.raise_for_status()
         except asyncio.TimeoutError:
             logger.warning("Timeout while creating streaming response")
             raise DownloadError(409, "Timeout while creating streaming response")
