@@ -8,6 +8,7 @@ import aiohttp
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError, HttpResponse
 from mediaflow_proxy.utils.http_client import create_aiohttp_session
+from mediaflow_proxy.configs import settings
 
 
 logger = logging.getLogger(__name__)
@@ -25,17 +26,79 @@ class DLHDExtractor(BaseExtractor):
     - Robust extraction of auth parameters and server lookup
     - Uses retries/timeouts via BaseExtractor where possible
     - Multi-iframe fallback for resilience
+    - Supports FlareSolverr for Cloudflare bypass
     """
 
     def __init__(self, request_headers: dict):
         super().__init__(request_headers)
         self.mediaflow_endpoint = "hls_manifest_proxy"
         self._iframe_context: Optional[str] = None
+        self._flaresolverr_cookies: Optional[str] = None
+        self._flaresolverr_user_agent: Optional[str] = None
+
+    async def _fetch_via_flaresolverr(self, url: str) -> HttpResponse:
+        """Fetch a URL using FlareSolverr to bypass Cloudflare protection."""
+        if not settings.flaresolverr_url:
+            raise ExtractorError("FlareSolverr URL not configured. Set FLARESOLVERR_URL in environment.")
+
+        flaresolverr_endpoint = f"{settings.flaresolverr_url.rstrip('/')}/v1"
+        payload = {
+            "cmd": "request.get",
+            "url": url,
+            "maxTimeout": settings.flaresolverr_timeout * 1000,
+        }
+
+        logger.info(f"Using FlareSolverr to fetch: {url}")
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                flaresolverr_endpoint,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=settings.flaresolverr_timeout + 10),
+            ) as response:
+                if response.status != 200:
+                    raise ExtractorError(f"FlareSolverr returned status {response.status}")
+
+                data = await response.json()
+
+        if data.get("status") != "ok":
+            raise ExtractorError(f"FlareSolverr failed: {data.get('message', 'Unknown error')}")
+
+        solution = data.get("solution", {})
+        html_content = solution.get("response", "")
+        final_url = solution.get("url", url)
+        status = solution.get("status", 200)
+
+        # Store cookies and user-agent for subsequent requests
+        cookies = solution.get("cookies", [])
+        if cookies:
+            cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
+            self._flaresolverr_cookies = cookie_str
+            logger.info(f"FlareSolverr provided {len(cookies)} cookies")
+
+        user_agent = solution.get("userAgent")
+        if user_agent:
+            self._flaresolverr_user_agent = user_agent
+            logger.info(f"FlareSolverr user-agent: {user_agent}")
+
+        logger.info(f"FlareSolverr successfully bypassed Cloudflare for: {url}")
+
+        return HttpResponse(
+            status=status,
+            headers={},
+            text=html_content,
+            content=html_content.encode("utf-8", errors="replace"),
+            url=final_url,
+        )
 
     async def _make_request(
-        self, url: str, method: str = "GET", headers: Optional[Dict] = None, **kwargs
+        self, url: str, method: str = "GET", headers: Optional[Dict] = None, use_flaresolverr: bool = False, **kwargs
     ) -> HttpResponse:
-        """Override to disable SSL verification for this extractor."""
+        """Override to disable SSL verification and optionally use FlareSolverr."""
+        # Use FlareSolverr for Cloudflare-protected pages
+        if use_flaresolverr and settings.flaresolverr_url:
+            return await self._fetch_via_flaresolverr(url)
+
         timeout = kwargs.pop("timeout", 15)
         kwargs.pop("retries", 3)  # consumed but not used directly
         kwargs.pop("backoff_factor", 0.5)  # consumed but not used directly
@@ -44,6 +107,18 @@ class DLHDExtractor(BaseExtractor):
         request_headers = self.base_headers.copy()
         if headers:
             request_headers.update(headers)
+
+        # Add FlareSolverr cookies if available
+        if self._flaresolverr_cookies:
+            existing_cookies = request_headers.get("Cookie", "")
+            if existing_cookies:
+                request_headers["Cookie"] = f"{existing_cookies}; {self._flaresolverr_cookies}"
+            else:
+                request_headers["Cookie"] = self._flaresolverr_cookies
+
+        # Use FlareSolverr user-agent if available
+        if self._flaresolverr_user_agent:
+            request_headers["User-Agent"] = self._flaresolverr_user_agent
 
         # Use create_aiohttp_session with verify=False for SSL bypass
         async with create_aiohttp_session(url, timeout=timeout, verify=False) as (session, proxy_url):
@@ -241,9 +316,57 @@ class DLHDExtractor(BaseExtractor):
             "mediaflow_endpoint": "hls_manifest_proxy",
         }
 
+    async def _extract_direct_stream(self, channel_id: str) -> Dict[str, Any]:
+        """
+        Direct stream extraction using server lookup API.
+        This is the simpler, more reliable approach that bypasses iframe complexity.
+        """
+        channel_key = f"premium{channel_id}"
+        server_lookup_url = f"https://chevy.dvalna.ru/server_lookup?channel_id={channel_key}"
+
+        logger.info(f"Attempting direct stream extraction for channel: {channel_key}")
+
+        try:
+            # Get server key from lookup API
+            lookup_resp = await self._make_request(server_lookup_url, timeout=10)
+            server_data = lookup_resp.json()
+            server_key = server_data.get("server_key")
+
+            if not server_key:
+                raise ExtractorError(f"No server_key in lookup response: {server_data}")
+
+            logger.info(f"Server lookup successful - Server key: {server_key}")
+
+            # Build stream URL based on server key
+            # Pattern: https://{server_key}new.dvalna.ru/{server_key}/{channel_key}/mono.css
+            stream_url = f"https://{server_key}new.dvalna.ru/{server_key}/{channel_key}/mono.css"
+
+            logger.info(f"Constructed stream URL: {stream_url}")
+
+            # The referer should be an iframe URL that would normally embed this stream
+            iframe_referer = f"https://hitsplay.fun/premiumtv/daddyhd.php?id={channel_id}"
+
+            stream_headers = {
+                "User-Agent": self._flaresolverr_user_agent
+                or "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+                "Referer": iframe_referer,
+                "Origin": "https://hitsplay.fun",
+            }
+
+            # Use hls_key_proxy since the stream is AES-128 encrypted and needs key proxying
+            return {
+                "destination_url": stream_url,
+                "request_headers": stream_headers,
+                "mediaflow_endpoint": "hls_key_proxy",
+            }
+
+        except ExtractorError:
+            raise
+        except Exception as e:
+            raise ExtractorError(f"Direct stream extraction failed: {e}")
+
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
-        """Main extraction flow: resolve base, fetch players, extract iframe, auth and final m3u8."""
-        baseurl = "https://dlhd.dad/"
+        """Main extraction flow - uses direct server lookup for simplicity and reliability."""
 
         def extract_channel_id(u: str) -> Optional[str]:
             match_watch_id = re.search(r"watch\.php\?id=(\d+)", u)
@@ -251,90 +374,109 @@ class DLHDExtractor(BaseExtractor):
                 return match_watch_id.group(1)
             return None
 
-        async def get_stream_data(initial_url: str):
-            daddy_origin = urlparse(baseurl).scheme + "://" + urlparse(baseurl).netloc
-            daddylive_headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
-                "Referer": baseurl,
-                "Origin": daddy_origin,
-            }
-
-            # 1. Request initial page
-            resp1 = await self._make_request(initial_url, headers=daddylive_headers, timeout=15)
-            resp1_text = resp1.text
-            player_links = re.findall(r'<button[^>]*data-url="([^"]+)"[^>]*>Player\s*\d+</button>', resp1_text)
-            if not player_links:
-                raise ExtractorError("No player links found on the page.")
-
-            # Prova tutti i player e raccogli tutti gli iframe validi
-            last_player_error = None
-            iframe_candidates = []
-
-            for player_url in player_links:
-                try:
-                    if not player_url.startswith("http"):
-                        player_url = baseurl + player_url.lstrip("/")
-
-                    daddylive_headers["Referer"] = player_url
-                    daddylive_headers["Origin"] = player_url
-                    resp2 = await self._make_request(player_url, headers=daddylive_headers, timeout=12)
-                    resp2_text = resp2.text
-                    iframes2 = re.findall(r'<iframe.*?src="([^"]*)"', resp2_text)
-
-                    # Raccogli tutti gli iframe trovati
-                    for iframe in iframes2:
-                        if iframe not in iframe_candidates:
-                            iframe_candidates.append(iframe)
-                            logger.info(f"Found iframe candidate: {iframe}")
-
-                except Exception as e:
-                    last_player_error = e
-                    logger.warning(f"Failed to process player link {player_url}: {e}")
-                    continue
-
-            if not iframe_candidates:
-                if last_player_error:
-                    raise ExtractorError(f"All player links failed. Last error: {last_player_error}")
-                raise ExtractorError("No valid iframe found in any player page")
-
-            # Prova ogni iframe finché uno non funziona
-            last_iframe_error = None
-
-            for iframe_candidate in iframe_candidates:
-                try:
-                    logger.info(f"Trying iframe: {iframe_candidate}")
-
-                    iframe_domain = urlparse(iframe_candidate).netloc
-                    if not iframe_domain:
-                        logger.warning(f"Invalid iframe URL format: {iframe_candidate}")
-                        continue
-
-                    self._iframe_context = iframe_candidate
-                    resp3 = await self._make_request(iframe_candidate, headers=daddylive_headers, timeout=12)
-                    iframe_content = resp3.text
-                    logger.info(f"Successfully loaded iframe from: {iframe_domain}")
-
-                    if "lovecdn.ru" in iframe_domain:
-                        logger.info("Detected lovecdn.ru iframe - using alternative extraction")
-                        return await self._extract_lovecdn_stream(iframe_candidate, iframe_content, daddylive_headers)
-                    else:
-                        logger.info("Attempting new auth flow extraction.")
-                        return await self._extract_new_auth_flow(iframe_candidate, iframe_content, daddylive_headers)
-
-                except Exception as e:
-                    logger.warning(f"Failed to process iframe {iframe_candidate}: {e}")
-                    last_iframe_error = e
-                    continue
-
-            raise ExtractorError(f"All iframe candidates failed. Last error: {last_iframe_error}")
-
         try:
             channel_id = extract_channel_id(url)
             if not channel_id:
                 raise ExtractorError(f"Unable to extract channel ID from {url}")
 
-            logger.info(f"Using base domain: {baseurl}")
-            return await get_stream_data(url)
+            logger.info(f"Extracting DLHD stream for channel ID: {channel_id}")
+
+            # Try direct stream extraction first (simpler, more reliable)
+            try:
+                return await self._extract_direct_stream(channel_id)
+            except ExtractorError as e:
+                logger.warning(f"Direct stream extraction failed: {e}")
+
+            # Fallback to legacy iframe-based extraction if direct fails
+            logger.info("Falling back to iframe-based extraction...")
+            return await self._extract_via_iframe(url, channel_id)
 
         except Exception as e:
             raise ExtractorError(f"Extraction failed: {str(e)}")
+
+    async def _extract_via_iframe(self, url: str, channel_id: str) -> Dict[str, Any]:
+        """Legacy iframe-based extraction flow - used as fallback."""
+        baseurl = "https://dlhd.dad/"
+
+        daddy_origin = urlparse(baseurl).scheme + "://" + urlparse(baseurl).netloc
+        daddylive_headers = {
+            "User-Agent": self._flaresolverr_user_agent
+            or "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+            "Referer": baseurl,
+            "Origin": daddy_origin,
+        }
+
+        # 1. Request initial page - use FlareSolverr if available to bypass Cloudflare
+        use_flaresolverr = settings.flaresolverr_url is not None
+        resp1 = await self._make_request(url, headers=daddylive_headers, timeout=15, use_flaresolverr=use_flaresolverr)
+        resp1_text = resp1.text
+
+        # Update headers with FlareSolverr user-agent after initial request
+        if self._flaresolverr_user_agent:
+            daddylive_headers["User-Agent"] = self._flaresolverr_user_agent
+
+        player_links = re.findall(r'<button[^>]*data-url="([^"]+)"[^>]*>Player\s*\d+</button>', resp1_text)
+        if not player_links:
+            raise ExtractorError("No player links found on the page.")
+
+        # Prova tutti i player e raccogli tutti gli iframe validi
+        last_player_error = None
+        iframe_candidates = []
+
+        for player_url in player_links:
+            try:
+                if not player_url.startswith("http"):
+                    player_url = baseurl + player_url.lstrip("/")
+
+                daddylive_headers["Referer"] = player_url
+                daddylive_headers["Origin"] = player_url
+                resp2 = await self._make_request(player_url, headers=daddylive_headers, timeout=12)
+                resp2_text = resp2.text
+                iframes2 = re.findall(r'<iframe.*?src="([^"]*)"', resp2_text)
+
+                # Raccogli tutti gli iframe trovati
+                for iframe in iframes2:
+                    if iframe not in iframe_candidates:
+                        iframe_candidates.append(iframe)
+                        logger.info(f"Found iframe candidate: {iframe}")
+
+            except Exception as e:
+                last_player_error = e
+                logger.warning(f"Failed to process player link {player_url}: {e}")
+                continue
+
+        if not iframe_candidates:
+            if last_player_error:
+                raise ExtractorError(f"All player links failed. Last error: {last_player_error}")
+            raise ExtractorError("No valid iframe found in any player page")
+
+        # Prova ogni iframe finché uno non funziona
+        last_iframe_error = None
+
+        for iframe_candidate in iframe_candidates:
+            try:
+                logger.info(f"Trying iframe: {iframe_candidate}")
+
+                iframe_domain = urlparse(iframe_candidate).netloc
+                if not iframe_domain:
+                    logger.warning(f"Invalid iframe URL format: {iframe_candidate}")
+                    continue
+
+                self._iframe_context = iframe_candidate
+                resp3 = await self._make_request(iframe_candidate, headers=daddylive_headers, timeout=12)
+                iframe_content = resp3.text
+                logger.info(f"Successfully loaded iframe from: {iframe_domain}")
+
+                if "lovecdn.ru" in iframe_domain:
+                    logger.info("Detected lovecdn.ru iframe - using alternative extraction")
+                    return await self._extract_lovecdn_stream(iframe_candidate, iframe_content, daddylive_headers)
+                else:
+                    logger.info("Attempting new auth flow extraction.")
+                    return await self._extract_new_auth_flow(iframe_candidate, iframe_content, daddylive_headers)
+
+            except Exception as e:
+                logger.warning(f"Failed to process iframe {iframe_candidate}: {e}")
+                last_iframe_error = e
+                continue
+
+        raise ExtractorError(f"All iframe candidates failed. Last error: {last_iframe_error}")

@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     mpd_live_init_cache_ttl: int = 60  # TTL (seconds) for live init segment cache; 0 disables caching.
     mpd_live_playlist_depth: int = 8  # Number of recent segments to expose per live playlist variant.
 
+    # FlareSolverr settings (for Cloudflare bypass)
+    flaresolverr_url: str | None = None  # FlareSolverr service URL. Example: http://localhost:8191
+    flaresolverr_timeout: int = 60  # Timeout (seconds) for FlareSolverr requests.
+
     # Acestream settings
     enable_acestream: bool = False  # Whether to enable Acestream proxy support.
     acestream_host: str = "localhost"  # Acestream engine host.
