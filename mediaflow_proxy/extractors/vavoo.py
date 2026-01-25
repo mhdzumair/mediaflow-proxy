@@ -31,7 +31,7 @@ class VavooExtractor(BaseExtractor):
         current_time = int(time.time() * 1000)
 
         data = {
-            "token": "tosFwQCJMS8qrW_AjLoHPQ41646J5dRNha6ZWHnijoYQQQoADQoXYSo7ki7O5-CsgN4CH0uRk6EEoJ0728ar9scCRQW3ZkbfrPfeCXW2VgopSW2FWDqPOoVYIuVPAOnXCZ5g",
+            "token": "",
             "reason": "app-blur",
             "locale": "de",
             "theme": "dark",
