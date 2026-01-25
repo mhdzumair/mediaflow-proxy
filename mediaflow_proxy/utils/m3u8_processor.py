@@ -14,6 +14,52 @@ from mediaflow_proxy.utils.hls_prebuffer import hls_prebuffer
 logger = logging.getLogger(__name__)
 
 
+def generate_graceful_end_playlist(message: str = "Stream ended") -> str:
+    """
+    Generate a minimal valid m3u8 playlist that signals stream end.
+
+    This is used when upstream fails but we want to provide a graceful
+    end to the player instead of an abrupt error. Most players will
+    interpret this as the stream ending normally.
+
+    Args:
+        message: Optional message to include as a comment.
+
+    Returns:
+        str: A valid m3u8 playlist string with EXT-X-ENDLIST.
+    """
+    return f"""#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:1
+#EXT-X-PLAYLIST-TYPE:VOD
+# {message}
+#EXT-X-ENDLIST
+"""
+
+
+def generate_error_playlist(error_message: str = "Stream unavailable") -> str:
+    """
+    Generate a minimal valid m3u8 playlist for error scenarios.
+
+    Unlike generate_graceful_end_playlist, this includes a very short
+    segment duration to signal something went wrong while still being
+    a valid playlist that players can parse.
+
+    Args:
+        error_message: Error message to include as a comment.
+
+    Returns:
+        str: A valid m3u8 playlist string.
+    """
+    return f"""#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:1
+#EXT-X-PLAYLIST-TYPE:VOD
+# Error: {error_message}
+#EXT-X-ENDLIST
+"""
+
+
 class SkipSegmentFilter:
     """
     Helper class to filter HLS segments based on time ranges.

@@ -78,6 +78,12 @@ class Settings(BaseSettings):
 
     user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"  # The user agent to use for HTTP requests.
 
+    # Upstream error resilience settings
+    upstream_retry_on_disconnect: bool = True  # Enable/disable retry when upstream disconnects mid-stream.
+    upstream_retry_attempts: int = 2  # Number of retry attempts when upstream disconnects during streaming.
+    upstream_retry_delay: float = 1.0  # Delay (seconds) between retry attempts.
+    graceful_stream_end: bool = True  # Return valid empty playlist instead of error when upstream fails.
+
     class Config:
         env_file = ".env"
         extra = "ignore"
