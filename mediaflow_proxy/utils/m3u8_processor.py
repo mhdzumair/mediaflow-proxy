@@ -382,7 +382,9 @@ class M3U8Processor:
                             )
 
                             for header_line in header_buffer:
-                                yield header_line + "\n"
+                                # Process header lines to rewrite URLs (e.g., #EXT-X-KEY)
+                                processed_header_line = await self.process_line(header_line, base_url)
+                                yield processed_header_line + "\n"
                                 if header_line.strip() == "#EXTM3U" and should_inject and not start_offset_injected:
                                     yield f"#EXT-X-START:TIME-OFFSET={self._start_offset_value:.1f},PRECISE=YES\n"
                                     start_offset_injected = True
