@@ -1,6 +1,6 @@
 [project]
 name = "mediaflow-proxy"
-version = "2.1.9"
+version = "2.4.1"
 description = "A high-performance proxy server for streaming media, supporting HTTP(S), HLS, and MPEG-DASH with real-time DRM decryption."
 authors = [{ name = "mhdzumair", email = "mhdzumair@gmail.com" }]
 readme = "README.md"
@@ -20,8 +20,8 @@ classifiers = [
 requires-python = ">=3.9"
 dependencies = [
     "fastapi",
-    "aiohttp>=3.9.0",
-    "aiohttp-socks>=0.8.0",
+    "aiohttp",
+    "aiohttp-socks",
     "tenacity",
     "xmltodict",
     "pydantic-settings",
@@ -33,6 +33,7 @@ dependencies = [
     "beautifulsoup4",
     "lxml",
     "psutil",
+    "curl_cffi",
 ]
 
 [project.urls]
@@ -46,6 +47,9 @@ mediaflow-proxy = "mediaflow_proxy.main:run"
 [dependency-groups]
 dev = [
     "ruff>=0.14.11",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [build-system]
@@ -77,3 +81,11 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]

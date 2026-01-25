@@ -1,30 +1,70 @@
+import re
 from typing import Dict, Any
+from urllib.parse import urljoin, urlparse
 
-from mediaflow_proxy.extractors.base import BaseExtractor
-from mediaflow_proxy.utils.packed import eval_solver
+from bs4 import BeautifulSoup, SoupStrainer
+
+from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
+from mediaflow_proxy.utils.packed import unpack, detect, UnpackingError
 
 
 class SupervideoExtractor(BaseExtractor):
-    """Supervideo URL extractor."""
+    """Supervideo URL extractor.
+
+    Uses curl_cffi to bypass Cloudflare protection.
+    """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.mediaflow_endpoint = "hls_manifest_proxy"
 
     async def extract(self, url: str, **kwargs) -> Dict[str, Any]:
-        headers = {
-            "Accept": "*/*",
-            "Connection": "keep-alive",
-            "User-Agent": "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.71 Mobile Safari/537.36",
-            "user-agent": "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.71 Mobile Safari/537.36",
-        }
+        """Extract video URL from Supervideo.
+
+        Uses curl_cffi with Chrome impersonation to bypass Cloudflare.
+        """
+        try:
+            from curl_cffi.requests import AsyncSession
+        except ImportError:
+            raise ExtractorError(
+                "curl_cffi is required for Supervideo extraction. "
+                "Install it with: pip install curl_cffi"
+            )
+
         patterns = [r'file:"(.*?)"']
 
-        final_url = await eval_solver(self, url, headers, patterns)
+        try:
+            async with AsyncSession() as session:
+                response = await session.get(url, impersonate="chrome")
 
-        self.base_headers["referer"] = url
-        return {
-            "destination_url": final_url,
-            "request_headers": self.base_headers,
-            "mediaflow_endpoint": self.mediaflow_endpoint,
-        }
+                if response.status_code != 200:
+                    raise ExtractorError(f"HTTP {response.status_code} while fetching {url}")
+
+                soup = BeautifulSoup(response.text, "lxml", parse_only=SoupStrainer("script"))
+                script_all = soup.find_all("script")
+
+                for script in script_all:
+                    if script.text and detect(script.text):
+                        unpacked_code = unpack(script.text)
+                        for pattern in patterns:
+                            match = re.search(pattern, unpacked_code)
+                            if match:
+                                extracted_url = match.group(1)
+                                if not urlparse(extracted_url).scheme:
+                                    extracted_url = urljoin(url, extracted_url)
+
+                                self.base_headers["referer"] = url
+                                return {
+                                    "destination_url": extracted_url,
+                                    "request_headers": self.base_headers,
+                                    "mediaflow_endpoint": self.mediaflow_endpoint,
+                                }
+
+                raise ExtractorError("No packed JS found or no file URL pattern matched")
+
+        except UnpackingError as e:
+            raise ExtractorError(f"Failed to unpack Supervideo JS: {e}")
+        except Exception as e:
+            if isinstance(e, ExtractorError):
+                raise
+            raise ExtractorError(f"Supervideo extraction failed: {e}")
