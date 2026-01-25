@@ -397,6 +397,24 @@ def rewrite_urls_for_api(
     content = content.replace(upstream_origin, mediaflow_base)
     content = content.replace(escaped_upstream_json, escaped_mediaflow_json)
 
+    # Also replace hostname-only version (without port) if the upstream has a non-standard port
+    # This handles cases where server_info.url doesn't include the port
+    if parsed.port and parsed.port not in (80, 443):
+        upstream_host_only = f"{parsed.scheme}://{parsed.hostname}"
+        escaped_host_only_json = upstream_host_only.replace("/", "\\/")
+        content = content.replace(upstream_host_only, mediaflow_base)
+        content = content.replace(escaped_host_only_json, escaped_mediaflow_json)
+
+    # IMPORTANT: Rewrite user_info.username in the response
+    # Some IPTV players (like Tivimate) use the username from the response for subsequent API calls
+    # So we need to replace the actual username with the encoded username in user_info
+    # Pattern: "username":"actual_username" -> "username":"encoded_username"
+    content = re.sub(
+        r'"username"\s*:\s*"' + escaped_username + r'"',
+        f'"username":"{encoded_username}"',
+        content,
+    )
+
     return content
 
 
@@ -545,6 +563,52 @@ async def xmltv_api(
             raise HTTPException(status_code=e.status, detail=f"Upstream error: {e.status}")
         except aiohttp.ClientError as e:
             raise HTTPException(status_code=502, detail=f"Failed to connect: {str(e)}")
+
+
+@xtream_root_router.get("/get.php")
+async def get_playlist(
+    request: Request,
+    username: str = Query(..., description="Format: base64({upstream}:{actual_username}:{api_password})"),
+    password: str = Query(..., description="XC password"),
+    type: str = Query("m3u_plus", description="Playlist type (m3u, m3u_plus)"),
+    output: str = Query("ts", description="Output format (ts, m3u8)"),
+):
+    """
+    M3U playlist generation endpoint (XC API v1).
+
+    Redirects to /proxy/hls/manifest.m3u8 which handles M3U URL rewriting.
+
+    Args:
+        request: The incoming FastAPI request.
+        username: Combined upstream URL, username, and API password.
+        password: XC password.
+        type: Playlist type (m3u, m3u_plus).
+        output: Output stream format (ts, m3u8).
+
+    Returns:
+        Redirect to HLS proxy with upstream get.php URL.
+    """
+    upstream_base, actual_username, api_password = parse_username_with_upstream(username)
+    verify_xc_api_password(api_password)
+
+    # Build query params for upstream get.php
+    query_params = {"username": actual_username, "password": password, "type": type, "output": output}
+    for k, v in request.query_params.items():
+        if k not in ("username", "password", "type", "output", "api_password"):
+            query_params[k] = v
+
+    upstream_url = f"{upstream_base}get.php?{urlencode(query_params)}"
+
+    logger.info(f"XC get.php: type={type}, output={output}, upstream={upstream_base}, user={actual_username}")
+
+    # Redirect to HLS proxy which handles M3U URL rewriting
+    mediaflow_base = get_mediaflow_base_url(request)
+    hls_params = {"d": upstream_url}
+    if api_password:
+        hls_params["api_password"] = api_password
+
+    redirect_url = f"{mediaflow_base}/proxy/hls/manifest.m3u8?{urlencode(hls_params)}"
+    return RedirectResponse(url=redirect_url, status_code=302)
 
 
 @xtream_root_router.get("/panel_api.php")
@@ -825,5 +889,106 @@ async def live_stream_short(
             hls_params["api_password"] = api_password
         redirect_url = f"{scheme}://{host}/proxy/hls/manifest.m3u8?{urlencode(hls_params)}"
         return RedirectResponse(url=redirect_url, status_code=302)
+
+    return await proxy_stream(request.method, upstream_url, proxy_headers)
+
+
+# =============================================================================
+# Stream Endpoints WITHOUT Extension (for players like IMPlayer)
+# These handle URLs like /{username}/{password}/{stream_id} without .ts/.m3u8
+# =============================================================================
+
+
+@xtream_root_router.head("/live/{username}/{password}/{stream_id}")
+@xtream_root_router.get("/live/{username}/{password}/{stream_id}")
+async def live_stream_no_ext(
+    username: str,
+    password: str,
+    stream_id: str,
+    request: Request,
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+):
+    """
+    Live stream endpoint without extension (defaults to .ts).
+    Some players like IMPlayer don't include the extension in stream URLs.
+    """
+    upstream_base, actual_username, api_password = parse_username_with_upstream(username)
+    verify_xc_api_password(api_password)
+
+    # Default to .ts format when no extension provided
+    stream_path = f"live/{actual_username}/{password}/{stream_id}"
+    upstream_url = urljoin(upstream_base, stream_path)
+
+    logger.info(f"XC live stream (no ext): {stream_path}")
+
+    return await proxy_stream(request.method, upstream_url, proxy_headers)
+
+
+@xtream_root_router.head("/movie/{username}/{password}/{stream_id}")
+@xtream_root_router.get("/movie/{username}/{password}/{stream_id}")
+async def movie_stream_no_ext(
+    username: str,
+    password: str,
+    stream_id: str,
+    request: Request,
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+):
+    """
+    Movie stream endpoint without extension.
+    """
+    upstream_base, actual_username, api_password = parse_username_with_upstream(username)
+    verify_xc_api_password(api_password)
+
+    stream_path = f"movie/{actual_username}/{password}/{stream_id}"
+    upstream_url = urljoin(upstream_base, stream_path)
+
+    logger.info(f"XC movie stream (no ext): {stream_path}")
+
+    return await proxy_stream(request.method, upstream_url, proxy_headers)
+
+
+@xtream_root_router.head("/series/{username}/{password}/{stream_id}")
+@xtream_root_router.get("/series/{username}/{password}/{stream_id}")
+async def series_stream_no_ext(
+    username: str,
+    password: str,
+    stream_id: str,
+    request: Request,
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+):
+    """
+    Series stream endpoint without extension.
+    """
+    upstream_base, actual_username, api_password = parse_username_with_upstream(username)
+    verify_xc_api_password(api_password)
+
+    stream_path = f"series/{actual_username}/{password}/{stream_id}"
+    upstream_url = urljoin(upstream_base, stream_path)
+
+    logger.info(f"XC series stream (no ext): {stream_path}")
+
+    return await proxy_stream(request.method, upstream_url, proxy_headers)
+
+
+@xtream_root_router.head("/{username}/{password}/{stream_id}")
+@xtream_root_router.get("/{username}/{password}/{stream_id}")
+async def live_stream_short_no_ext(
+    username: str,
+    password: str,
+    stream_id: str,
+    request: Request,
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+):
+    """
+    Short format live stream endpoint without extension (without /live/ prefix).
+    Some players like IMPlayer use this format without extension.
+    """
+    upstream_base, actual_username, api_password = parse_username_with_upstream(username)
+    verify_xc_api_password(api_password)
+
+    stream_path = f"{actual_username}/{password}/{stream_id}"
+    upstream_url = urljoin(upstream_base, stream_path)
+
+    logger.info(f"XC short live stream (no ext): {stream_path}")
 
     return await proxy_stream(request.method, upstream_url, proxy_headers)
