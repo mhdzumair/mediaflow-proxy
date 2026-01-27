@@ -28,7 +28,7 @@ class VidmolyExtractor(BaseExtractor):
         html = response.text
 
         # --- Extract master m3u8 ---
-        match = re.search(r'sources:\s*\[\{file:"([^"]+)', html)
+        match = re.search(r'sources\s*:\s*\[\s*\{\s*file\s*:\s*[\'"]([^\'"]+)', html)
         if not match:
             raise ExtractorError("VIDMOLY: Stream URL not found")
 
