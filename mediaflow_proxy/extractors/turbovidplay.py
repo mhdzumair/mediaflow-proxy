@@ -55,8 +55,6 @@ class TurboVidPlayExtractor(BaseExtractor):
         return {
             "destination_url": real_m3u8,
             "request_headers": {"origin": response.get_origin()},
-            "propagate_response_headers": {"content-type": "video/mp2t"},
-            "remove_response_headers": ["content-length", "content-range"],
             "mediaflow_endpoint": "hls_manifest_proxy",
             "stream_transformer": "ts_stream",  # Use TS transformer for PNG/padding stripping
         }
