@@ -131,6 +131,10 @@ class M3U8Processor:
         if self._user_provided_start_offset:
             return True
 
+        # If we explicitly see it's a VOD, do NOT apply live offset
+        if "#EXT-X-PLAYLIST-TYPE:VOD" in content:
+            return False
+
         # Using default from settings - only apply for live streams
         # Live streams don't have #EXT-X-ENDLIST tag
         # Also skip master playlists (they have #EXT-X-STREAM-INF)
@@ -370,12 +374,14 @@ class M3U8Processor:
                         # Only check the current line, not raw_content (which may contain future content)
                         is_master = "#EXT-X-STREAM-INF" in line
                         is_media = "#EXTINF" in line
+                        is_vod_type = "#EXT-X-PLAYLIST-TYPE:VOD" in line
 
-                        if is_master or is_media:
+                        if is_master or is_media or is_vod_type:
                             # Flush header buffer with or without EXT-X-START
                             should_inject = (
                                 self._start_offset_value is not None
                                 and not is_master
+                                and not ("#EXT-X-PLAYLIST-TYPE:VOD" in raw_content)
                                 and (
                                     self._user_provided_start_offset or is_media
                                 )  # User provided OR it's a media playlist
