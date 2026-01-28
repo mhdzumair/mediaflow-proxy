@@ -381,7 +381,7 @@ class M3U8Processor:
                             should_inject = (
                                 self._start_offset_value is not None
                                 and not is_master
-                                and not ("#EXT-X-PLAYLIST-TYPE:VOD" in raw_content)
+                                and "#EXT-X-PLAYLIST-TYPE:VOD" not in raw_content
                                 and (
                                     self._user_provided_start_offset or is_media
                                 )  # User provided OR it's a media playlist
