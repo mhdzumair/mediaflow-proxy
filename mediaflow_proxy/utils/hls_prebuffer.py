@@ -126,20 +126,26 @@ class PlaylistPrefetcher:
 
         # Update player position for prefetch limit calculation
         segment_index = self._find_segment_index(segment_url)
-        if segment_index >= 0:
-            old_player_index = self.player_index
-            self.player_index = segment_index
-            # Start prefetching from the NEXT segment (player handles current one)
-            self.current_index = segment_index + 1
 
-            # Detect seek: if player jumped more than prefetch_limit segments
-            # This handles VOD seek scenarios where user jumps to different position
-            jump_distance = abs(segment_index - old_player_index)
-            if jump_distance > self.prefetch_limit and old_player_index >= 0:
-                logger.info(
-                    f"[PlaylistPrefetcher] Seek detected: jumped {jump_distance} segments "
-                    f"(from {old_player_index} to {segment_index})"
-                )
+# ✅ FIX 2: Ignore unknown segments (playlist refresh / live edge)
+        if segment_index < 0:
+            logger.debug(
+                "[PlaylistPrefetcher] Segment not found in current playlist window "
+                "(likely playlist refresh or live edge move)"
+            )
+            return
+
+        old_player_index = self.player_index
+        self.player_index = segment_index
+        self.current_index = segment_index + 1
+
+        jump_distance = abs(segment_index - old_player_index)
+        if jump_distance > self.prefetch_limit and old_player_index >= 0:
+            logger.info(
+                f"[PlaylistPrefetcher] Seek detected: jumped {jump_distance} segments "
+                f"(from {old_player_index} to {segment_index})"
+            )
+
 
         # Signal the prefetch loop to wake up and start prefetching ahead
         async with self._lock:
@@ -363,19 +369,17 @@ class HLSPreBuffer(BasePrebuffer):
                 self.segment_to_playlist[url] = playlist_url
 
             if playlist_url in self.active_prefetchers:
-                # Update existing prefetcher
                 prefetcher = self.active_prefetchers[playlist_url]
                 prefetcher.update_segments(segment_urls)
                 prefetcher.headers = headers
                 logger.info(f"[register_playlist] Updated existing prefetcher: {playlist_url}")
             else:
-                # Create new prefetcher with configured prefetch limit
                 prefetcher = PlaylistPrefetcher(
-                    playlist_url=playlist_url,
-                    segment_urls=segment_urls,
-                    headers=headers,
-                    prebuffer=self,
-                    prefetch_limit=settings.hls_prebuffer_segments,
+                  playlist_url=playlist_url,
+                  segment_urls=segment_urls,
+                  headers=headers,
+                  prebuffer=self,
+                  prefetch_limit=settings.hls_prebuffer_segments,
                 )
                 self.active_prefetchers[playlist_url] = prefetcher
                 prefetcher.start()
@@ -383,9 +387,8 @@ class HLSPreBuffer(BasePrebuffer):
                     f"[register_playlist] Created new prefetcher ({len(segment_urls)} segments, "
                     f"prefetch_limit={settings.hls_prebuffer_segments}): {playlist_url}"
                 )
-
-            # Ensure cleanup task is running
-            self._ensure_cleanup_task()
+# Ensure cleanup task is running
+        self._ensure_cleanup_task()
 
     async def request_segment(self, segment_url: str) -> None:
         """
