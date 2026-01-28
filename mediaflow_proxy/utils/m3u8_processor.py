@@ -115,29 +115,20 @@ class M3U8Processor:
         self.playlist_url = None  # Will be set when processing starts
 
     def _should_apply_start_offset(self, content: str) -> bool:
-        """
-        Determine if start_offset should be applied to this playlist.
-
-        Args:
-            content: The playlist content to check.
-
-        Returns:
-            True if start_offset should be applied, False otherwise.
-        """
         if self._start_offset_value is None:
             return False
-
-        # If user explicitly provided start_offset, always use it
+    
         if self._user_provided_start_offset:
             return True
 
-        # Using default from settings - only apply for live streams
-        # Live streams don't have #EXT-X-ENDLIST tag
-        # Also skip master playlists (they have #EXT-X-STREAM-INF)
-        is_live = "#EXT-X-ENDLIST" not in content
-        is_master = "#EXT-X-STREAM-INF" in content
+    # ADD THIS: If we explicitly see it's a VOD, do NOT apply live offset
+        if "#EXT-X-PLAYLIST-TYPE:VOD" in content:
+            return False
 
-        return is_live and not is_master
+        is_master = "#EXT-X-STREAM-INF" in content
+        is_live = "#EXT-X-ENDLIST" not in content
+    
+        return not is_master and is_live
 
     async def process_m3u8(self, content: str, base_url: str) -> str:
         """
@@ -370,15 +361,15 @@ class M3U8Processor:
                         # Only check the current line, not raw_content (which may contain future content)
                         is_master = "#EXT-X-STREAM-INF" in line
                         is_media = "#EXTINF" in line
+                        is_vod_type = "#EXT-X-PLAYLIST-TYPE:VOD" in line # Add this
 
-                        if is_master or is_media:
-                            # Flush header buffer with or without EXT-X-START
+                        if is_master or is_media or is_vod_type:
+                            # Now we have enough info to decide
                             should_inject = (
                                 self._start_offset_value is not None
                                 and not is_master
-                                and (
-                                    self._user_provided_start_offset or is_media
-                                )  # User provided OR it's a media playlist
+                                and not ("#EXT-X-PLAYLIST-TYPE:VOD" in raw_content) # Ensure VOD is excluded
+                                and (self._user_provided_start_offset or is_media)
                             )
 
                             for header_line in header_buffer:
