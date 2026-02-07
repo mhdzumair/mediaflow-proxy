@@ -178,12 +178,12 @@ class M3U8Processor:
             return True
 
         # Using default from settings - only apply for live streams
-        # Live streams don't have #EXT-X-ENDLIST tag
+        # VOD playlists have #EXT-X-ENDLIST tag or #EXT-X-PLAYLIST-TYPE:VOD
         # Also skip master playlists (they have #EXT-X-STREAM-INF)
-        is_live = "#EXT-X-ENDLIST" not in content
+        is_vod = "#EXT-X-ENDLIST" in content or "#EXT-X-PLAYLIST-TYPE:VOD" in content
         is_master = "#EXT-X-STREAM-INF" in content
 
-        return is_live and not is_master
+        return not is_vod and not is_master
 
     async def process_m3u8(self, content: str, base_url: str) -> str:
         """
@@ -418,13 +418,44 @@ class M3U8Processor:
                         is_media = "#EXTINF" in line
 
                         if is_master or is_media:
+                            # For non-user-provided (default) start_offset, determine if this
+                            # is a live stream before injecting. We need to avoid injecting
+                            # EXT-X-START with negative offsets into VOD playlists, as players
+                            # like VLC interpret negative offsets as "from the end" and start
+                            # playing near the end of the video.
+                            #
+                            # Live stream indicators (checked in header):
+                            # - No #EXT-X-PLAYLIST-TYPE:VOD tag
+                            # - No #EXT-X-ENDLIST tag (may not be visible yet in streaming)
+                            # - #EXT-X-MEDIA-SEQUENCE > 0 (live windows have rolling sequence)
+                            #
+                            # VOD indicators:
+                            # - #EXT-X-PLAYLIST-TYPE:VOD in header
+                            # - #EXT-X-ENDLIST in raw_content (if small enough to be buffered)
+                            # - #EXT-X-MEDIA-SEQUENCE:0 or absent (VOD starts from beginning)
+                            header_content = "\n".join(header_buffer)
+                            all_content = header_content + "\n" + raw_content
+
+                            is_explicitly_vod = (
+                                "#EXT-X-PLAYLIST-TYPE:VOD" in all_content
+                                or "#EXT-X-ENDLIST" in all_content
+                            )
+
+                            # Check for live stream indicator: #EXT-X-MEDIA-SEQUENCE with value > 0
+                            # Live streams have a rolling window so their media sequence increments
+                            is_likely_live = False
+                            seq_match = re.search(r"#EXT-X-MEDIA-SEQUENCE:\s*(\d+)", all_content)
+                            if seq_match and int(seq_match.group(1)) > 0:
+                                is_likely_live = True
+
                             # Flush header buffer with or without EXT-X-START
                             should_inject = (
                                 self._start_offset_value is not None
                                 and not is_master
                                 and (
-                                    self._user_provided_start_offset or is_media
-                                )  # User provided OR it's a media playlist
+                                    self._user_provided_start_offset
+                                    or (is_media and not is_explicitly_vod and is_likely_live)
+                                )  # User provided OR it's a live media playlist
                             )
 
                             for header_line in header_buffer:
@@ -474,13 +505,22 @@ class M3U8Processor:
             return
 
         # Flush any remaining header buffer (for short playlists or edge cases)
+        # At this point we have the full raw_content so we can make a definitive determination
         if header_buffer and not header_flushed:
-            # Check final raw_content to determine if it's a master playlist
             is_master = "#EXT-X-STREAM-INF" in raw_content
+            is_vod = "#EXT-X-ENDLIST" in raw_content or "#EXT-X-PLAYLIST-TYPE:VOD" in raw_content
+            # For default offset, also require positive live indicator
+            is_likely_live = False
+            seq_match = re.search(r"#EXT-X-MEDIA-SEQUENCE:\s*(\d+)", raw_content)
+            if seq_match and int(seq_match.group(1)) > 0:
+                is_likely_live = True
             should_inject = (
                 self._start_offset_value is not None
                 and not is_master
-                and self._user_provided_start_offset  # Only inject for explicit user request in edge cases
+                and (
+                    self._user_provided_start_offset
+                    or (not is_vod and is_likely_live)  # Default offset: only inject for live streams
+                )
             )
             for header_line in header_buffer:
                 yield header_line + "\n"
