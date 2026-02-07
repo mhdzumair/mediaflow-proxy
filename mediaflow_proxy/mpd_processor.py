@@ -274,6 +274,13 @@ def build_hls(
         # Convert back to compact format for URL
         skip_str = ",".join(f"{s['start']}-{s['end']}" for s in skip_segments)
         query_params["skip"] = skip_str
+
+    # Ensure key_id and key are in query_params if provided, so they propagate to playlists
+    if key_id:
+        query_params["key_id"] = key_id
+    if key:
+        query_params["key"] = key
+
     has_encrypted = query_params.pop("has_encrypted", False)
 
     video_profiles = {}

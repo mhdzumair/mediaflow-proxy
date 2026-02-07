@@ -786,7 +786,7 @@ class EnhancedStreamingResponse(Response):
         finalization_sent = False
         try:
             # Initialize headers
-            headers = list(self.raw_headers)
+            headers = [(k, v) for k, v in self.raw_headers if k.lower() != b"content-length"]
 
             # Start the response
             await send(
