@@ -139,3 +139,5 @@ mediaflow_proxy/drm/*
 !mediaflow_proxy/drm/decrypter.py
 
 .vscode/
+stremio-test-addon/
+wireproxy/

@@ -461,6 +461,12 @@ async def proxy_stream_endpoint(
     destination: str = Query(..., description="The URL of the stream.", alias="d"),
     filename: str | None = None,
     transformer: str = Query(None, description="Stream transformer ID for content manipulation"),
+    ratelimit: str = Query(
+        None,
+        description="Rate limit handler ID for host-specific rate limiting (e.g., 'vidoza', 'aggressive'). "
+        "If not specified, auto-detects based on destination URL hostname. "
+        "Set to 'none' to explicitly disable rate limiting.",
+    ),
 ):
     """
     Proxify stream requests to the given video URL.
@@ -468,12 +474,19 @@ async def proxy_stream_endpoint(
     This is a general-purpose stream proxy endpoint. For HLS segments with prebuffer
     support, use the dedicated /hls/segment.ts endpoint instead.
 
+    Rate limiting can be controlled via the `ratelimit` parameter:
+    - Not specified: Auto-detects based on destination URL (e.g., Vidoza is auto-detected)
+    - "vidoza": Explicitly enable Vidoza rate limiting (5s cooldown between connections)
+    - "aggressive": Generic aggressive rate limiting (3s cooldown)
+    - "none": Explicitly disable all rate limiting
+
     Args:
         request (Request): The incoming HTTP request.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
         destination (str): The URL of the stream to be proxied.
         filename (str | None): The filename to be used in the response headers.
         transformer (str, optional): Stream transformer ID for content manipulation.
+        ratelimit (str, optional): Rate limit handler ID for host-specific rate limiting.
 
     Returns:
         Response: The HTTP response with the streamed content.
@@ -516,7 +529,10 @@ async def proxy_stream_endpoint(
 
         proxy_headers.response.update({"content-disposition": content_disposition})
 
-    return await proxy_stream(request.method, destination, proxy_headers, transformer)
+    # Handle "none" as explicit disable
+    rate_limit_handler_id = None if ratelimit == "none" else ratelimit
+
+    return await proxy_stream(request.method, destination, proxy_headers, transformer, rate_limit_handler_id)
 
 
 @proxy_router.get("/mpd/manifest.m3u8")

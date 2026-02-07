@@ -27,7 +27,17 @@ from .utils.http_utils import (
 )
 from .utils.m3u8_processor import M3U8Processor, generate_graceful_end_playlist
 from .utils.mpd_utils import pad_base64
+from .utils.redis_utils import (
+    acquire_stream_gate,
+    release_stream_gate,
+    get_cached_head,
+    set_cached_head,
+    check_and_set_cooldown,
+    is_redis_configured,
+)
 from .utils.stream_transformers import StreamTransformer, get_transformer
+from .utils.rate_limit_handlers import get_rate_limit_handler
+
 from .configs import settings
 
 logger = logging.getLogger(__name__)
@@ -55,6 +65,10 @@ def handle_exceptions(exception: Exception, context: str = "") -> Response:
         if exception.status == 404:
             logger.debug(f"Upstream 404{ctx}: {exception.request_info.url if exception.request_info else 'unknown'}")
             return Response(status_code=404, content="Upstream resource not found")
+        elif exception.status in (429, 509):
+            # Rate limited by upstream - pass through so the player can retry on its own
+            logger.warning(f"Upstream rate limited ({exception.status}){ctx}")
+            return Response(status_code=exception.status, content=f"Upstream rate limited: {exception.status}")
         elif exception.status in (502, 503, 504):
             # Upstream server errors - log at warning level as these are often transient
             logger.warning(f"Upstream server error{ctx}: {exception.status}")
@@ -214,21 +228,92 @@ async def handle_stream_request(
     video_url: str,
     proxy_headers: ProxyRequestHeaders,
     transformer_id: Optional[str] = None,
+    rate_limit_handler_id: Optional[str] = None,
 ) -> Response:
     """
     Handle general stream requests.
 
     This function processes both HEAD and GET requests for video streams.
+    Uses Redis for cross-worker coordination to prevent CDN rate-limiting (e.g., Vidoza 509).
+
+    Rate limiting behavior is controlled by the rate_limit_handler parameter:
+    - If specified, uses that handler's settings
+    - If not specified, auto-detects based on video URL hostname
+    - If no handler matches, no rate limiting is applied (fast path)
+
+    The coordination strategy (when rate limiting is enabled):
+    1. HEAD requests: Check/use Redis cache, skip upstream entirely if cached
+    2. GET requests: Check cooldown FIRST, return 503 if in cooldown
+    3. Only ONE request proceeds to upstream at a time via gate
+    4. After upstream responds, set cooldown to prevent rapid follow-up requests
 
     Args:
         method (str): The HTTP method (e.g., 'GET' or 'HEAD').
         video_url (str): The URL of the video to stream.
         proxy_headers (ProxyRequestHeaders): Headers to be used in the proxy request.
         transformer_id (str, optional): ID of the stream transformer to use for content manipulation.
+        rate_limit_handler_id (str, optional): ID of the rate limit handler to use (e.g., "vidoza", "aggressive").
+            If not specified, auto-detects based on video URL hostname.
 
     Returns:
         Union[Response, EnhancedStreamingResponse]: Either a HEAD response with headers or a streaming response.
     """
+    host = urlparse(video_url).hostname or "unknown"
+    gate_acquired = False
+
+    # Get rate limit handler (explicit ID, auto-detect from URL, or default no-op)
+    rate_handler = get_rate_limit_handler(rate_limit_handler_id, video_url)
+
+    # Check if rate limiting features are needed and Redis is available
+    needs_rate_limiting = (
+        rate_handler.cooldown_seconds > 0 or rate_handler.use_head_cache or rate_handler.use_stream_gate
+    )
+    redis_available = is_redis_configured()
+
+    if needs_rate_limiting and not redis_available:
+        logger.debug(f"[handle_stream] Rate limiting requested for {host} but Redis not configured - skipping")
+        needs_rate_limiting = False
+
+    # Cooldown key - prevents rapid-fire requests to same CDN URL
+    cooldown_key = f"stream_cooldown:{video_url}"
+
+    # 1. Check Redis HEAD cache first (if enabled by handler)
+    cached = None
+    if needs_rate_limiting and rate_handler.use_head_cache:
+        cached = await get_cached_head(video_url)
+
+    if method == "HEAD":
+        if cached:
+            logger.info(f"[handle_stream] Serving cached HEAD response for {host}")
+            response_headers = prepare_response_headers(
+                cached["headers"], proxy_headers.response, proxy_headers.remove, proxy_headers.propagate
+            )
+            return Response(headers=response_headers, status_code=cached["status"])
+        # No cached HEAD - proceed to upstream
+    else:
+        # For GET requests: Check cooldown if rate limiting is enabled
+        if needs_rate_limiting and rate_handler.cooldown_seconds > 0:
+            # Try to set cooldown - if we can't (already set), return 503
+            if not await check_and_set_cooldown(cooldown_key, rate_handler.cooldown_seconds):
+                # In cooldown - another stream recently hit upstream
+                if cached:
+                    # We have cached headers, but we're in cooldown - tell client to retry
+                    logger.info(f"[handle_stream] In cooldown for {host}, returning 503 with Retry-After")
+                    return Response(
+                        status_code=503,
+                        content="Stream already active, retry shortly",
+                        headers={"Retry-After": str(rate_handler.retry_after_seconds)},
+                    )
+                # else: No cached headers AND in cooldown - must wait for gate
+            # Cooldown set (or we'll wait for gate) - proceed
+
+    # 2. Acquire Redis gate if rate limiting enabled (serializes upstream requests across ALL workers)
+    if needs_rate_limiting and rate_handler.use_stream_gate:
+        gate_acquired = await acquire_stream_gate(video_url, timeout=30.0)
+        if not gate_acquired:
+            logger.warning(f"[handle_stream] Gate timeout for {host}, upstream may be slow or rate-limited")
+            return Response(status_code=503, content="Upstream host is busy, try again later")
+
     streamer = await create_streamer(video_url)
 
     try:
@@ -274,12 +359,20 @@ async def handle_stream_request(
         # Get transformer instance if specified
         transformer = get_transformer(transformer_id)
 
+        # Cache headers in Redis for future HEAD probes (if rate limiting enabled)
+        if needs_rate_limiting and rate_handler.use_head_cache and status_code in (200, 206):
+            await set_cached_head(video_url, dict(streamer.response.headers), status_code)
+
+        # 3. Release gate after headers are cached (if rate limiting enabled)
+        if gate_acquired:
+            await release_stream_gate(video_url)
+            gate_acquired = False  # Mark as released so finally block doesn't double-release
+
         if method == "HEAD":
-            # For HEAD requests, just return the headers without streaming content
             await streamer.close()
             return Response(headers=response_headers, status_code=status_code)
         else:
-            # For GET requests, return the streaming response
+            # For GET requests, streaming continues without holding the gate
             return EnhancedStreamingResponse(
                 streamer.stream_content(transformer),
                 headers=response_headers,
@@ -289,6 +382,10 @@ async def handle_stream_request(
     except Exception as e:
         await streamer.close()
         return handle_exceptions(e)
+    finally:
+        # Safety: release gate if not already released (error path before headers received)
+        if gate_acquired:
+            await release_stream_gate(video_url)
 
 
 def prepare_response_headers(
@@ -330,6 +427,7 @@ async def proxy_stream(
     destination: str,
     proxy_headers: ProxyRequestHeaders,
     transformer_id: Optional[str] = None,
+    rate_limit_handler_id: Optional[str] = None,
 ):
     """
     Proxies the stream request to the given video URL.
@@ -339,11 +437,13 @@ async def proxy_stream(
         destination (str): The URL of the stream to be proxied.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
         transformer_id (str, optional): ID of the stream transformer to use.
+        rate_limit_handler_id (str, optional): ID of the rate limit handler to use (e.g., "vidoza").
+            If not specified, auto-detects based on destination URL hostname.
 
     Returns:
         Response: The HTTP response with the streamed content.
     """
-    return await handle_stream_request(method, destination, proxy_headers, transformer_id)
+    return await handle_stream_request(method, destination, proxy_headers, transformer_id, rate_limit_handler_id)
 
 
 async def fetch_and_process_m3u8(
