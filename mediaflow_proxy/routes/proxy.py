@@ -31,6 +31,11 @@ from mediaflow_proxy.utils.extractor_helpers import (
     check_and_extract_sportsonline_stream,
 )
 from mediaflow_proxy.utils.hls_prebuffer import hls_prebuffer
+from mediaflow_proxy.utils.cache_utils import (
+    get_cached_segment,
+    get_cached_processed_segment,
+    set_cached_processed_segment,
+)
 from mediaflow_proxy.utils.hls_utils import parse_hls_playlist, find_stream_by_resolution
 from mediaflow_proxy.utils.http_utils import (
     get_proxy_headers,
@@ -419,6 +424,20 @@ async def hls_segment_proxy(
         if key.startswith("h_"):
             headers[key[2:]] = value
 
+    # Check for processed segment in cache first
+    # This avoids even checking the prebuffer if we already have the transformed result
+    if transformer:
+        processed_content = await get_cached_processed_segment(segment_url, remux=False)
+        if processed_content:
+            logger.info(f"[hls_segment_proxy] Serving processed segment from cache: {segment_url}")
+            base_headers = {
+                "content-type": mime_type,
+                "cache-control": "public, max-age=3600",
+                "access-control-allow-origin": "*",
+            }
+            response_headers = apply_header_manipulation(base_headers, proxy_headers)
+            return Response(content=processed_content, media_type=mime_type, headers=response_headers)
+
     if settings.enable_hls_prebuffer:
         # Notify the prefetcher that this segment is needed (priority download)
         # This ensures the player's segment is downloaded first, then prefetcher
@@ -442,6 +461,19 @@ async def hls_segment_proxy(
                 "access-control-allow-origin": "*",
             }
             response_headers = apply_header_manipulation(base_headers, proxy_headers)
+
+            # Cache the processed result for future requests if transformer was applied
+            if transformer:
+                asyncio.create_task(
+                    set_cached_processed_segment(
+                        segment_url,
+                        segment_data,
+                        None,
+                        False,
+                        ttl=settings.hls_segment_cache_ttl,
+                    )
+                )
+
             return Response(content=segment_data, media_type=mime_type, headers=response_headers)
 
         # get_or_download returned None (timeout or error) - fall through to streaming
