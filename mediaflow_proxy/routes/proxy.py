@@ -621,9 +621,9 @@ async def playlist_endpoint(
     return await get_playlist(request, playlist_params, proxy_headers)
 
 
-@proxy_router.get("/mpd/segment.mp4")
-@proxy_router.get("/mpd/segment.ts")
+@proxy_router.get("/mpd/segment.{ext}")
 async def segment_endpoint(
+    ext: str,
     segment_params: Annotated[MPDSegmentParams, Query()],
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
 ):

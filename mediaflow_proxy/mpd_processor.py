@@ -14,7 +14,7 @@ from mediaflow_proxy.utils.http_utils import (
     apply_header_manipulation,
 )
 from mediaflow_proxy.utils.dash_prebuffer import dash_prebuffer
-from mediaflow_proxy.utils.cache_utils import get_cached_processed_init, set_cached_processed_init, set_cached_processed_segment
+from mediaflow_proxy.utils.cache_utils import get_cached_processed_init, set_cached_processed_init
 from mediaflow_proxy.utils.m3u8_processor import SkipSegmentFilter
 from mediaflow_proxy.configs import settings
 
@@ -154,12 +154,18 @@ async def process_segment(
         try:
             now = time.time()
             remuxed_content = await _remux_to_ts(decrypted_content)
-            if remuxed_content:
-                decrypted_content = remuxed_content
-                mimetype = "video/mp2t"
-                logger.info(f"Remuxing of segment to TS took {time.time() - now:.4f} seconds")
+            if not remuxed_content:
+                logger.error("FFmpeg remuxing returned empty content")
+                raise HTTPException(status_code=502, detail="Remuxing to TS failed")
+
+            decrypted_content = remuxed_content
+            mimetype = "video/mp2t"
+            logger.info(f"Remuxing of segment to TS took {time.time() - now:.4f} seconds")
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Failed to remux segment to TS: {e}")
+            raise HTTPException(status_code=502, detail=f"Remuxing to TS failed: {str(e)}")
 
     response_headers = apply_header_manipulation({}, proxy_headers)
     return Response(content=decrypted_content, media_type=mimetype, headers=response_headers)
@@ -444,10 +450,9 @@ def build_hls_playlist(
     # Use EXT-X-MAP for live streams to avoid duplicate moov atoms
     use_map = is_live
 
-    proxy_url = request.url_for("segment_endpoint")
+    segment_ext = "ts" if settings.remux_to_ts else "mp4"
+    proxy_url = request.url_for("segment_endpoint", ext=segment_ext)
     proxy_url = str(proxy_url.replace(scheme=get_original_scheme(request)))
-    if settings.remux_to_ts:
-        proxy_url = proxy_url.replace("/mpd/segment.mp4", "/mpd/segment.ts")
 
     # Get init endpoint URL for EXT-X-MAP
     init_proxy_url = request.url_for("init_endpoint")
