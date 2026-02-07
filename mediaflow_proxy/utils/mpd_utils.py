@@ -453,14 +453,14 @@ def preprocess_timeline(
         for _ in range(repeat + 1):
             segment_start_time = period_start + timedelta(seconds=(start_time - presentation_time_offset) / timescale)
             segment_end_time = segment_start_time + timedelta(seconds=duration / timescale)
-            presentation_time = start_time - presentation_time_offset
             processed_data.append(
                 {
                     "number": start_number,
                     "start_time": segment_start_time,
                     "end_time": segment_end_time,
                     "duration": duration,
-                    "time": presentation_time,
+                    "time": start_time,
+                    "duration_mpd_timescale": duration,
                 }
             )
             start_time += duration
