@@ -327,8 +327,19 @@ def build_hls(
     for profile, playlist_url in video_profiles.values():
         # Only add AUDIO attribute if there are audio profiles available
         audio_attr = ',AUDIO="audio"' if audio_profiles else ""
+        
+        # Determine codecs - for remux_to_ts we are converting to MPEG-TS
+        # ExoPlayer is very strict about CODECS in HLS v3 for TS streams
+        codecs = profile["codecs"]
+        if settings.remux_to_ts:
+            # For TS remuxing, we should either omit codecs or use the base ones
+            # Many TS streams work better in ExoPlayer with simplified codec strings
+            if "," in codecs:
+                # If multiple codecs are listed (e.g. video,audio), take only the first one (video)
+                codecs = codecs.split(",")[0]
+
         hls.append(
-            f'#EXT-X-STREAM-INF:BANDWIDTH={profile["bandwidth"]},RESOLUTION={profile["width"]}x{profile["height"]},CODECS="{profile["codecs"]}",FRAME-RATE={profile["frameRate"]}{audio_attr}'
+            f'#EXT-X-STREAM-INF:BANDWIDTH={profile["bandwidth"]},RESOLUTION={profile["width"]}x{profile["height"]},CODECS="{codecs}",FRAME-RATE={profile["frameRate"]}{audio_attr}'
         )
         hls.append(playlist_url)
 
