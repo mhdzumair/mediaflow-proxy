@@ -138,10 +138,29 @@ def rewrite_m3u_links_streaming(
 
                 # Extract DRM keys from KODIPROP if present
                 license_key = current_kodi_props.get("inputstream.adaptive.license_key")
-                if license_key and ":" in license_key:
-                    k_id, k = license_key.split(":", 1)
-                    key_id = key_id or k_id
-                    key = key or k
+                if license_key:
+                    # Support multi-key: "KID1:KEY1,KID2:KEY2"
+                    kids = []
+                    keys = []
+                    pairs = license_key.split(",")
+                    for pair in pairs:
+                        if ":" in pair:
+                            k_id, k_val = pair.split(":", 1)
+                            kids.append(k_id.strip())
+                            keys.append(k_val.strip())
+
+                    if kids and keys:
+                        # Se avevamo già key_id/key dall'URL, li aggiungiamo alla lista se non presenti
+                        current_kid_list = key_id.split(",") if key_id else []
+                        current_key_list = key.split(",") if key else []
+
+                        for kid_val, k_val in zip(kids, keys):
+                            if kid_val not in current_kid_list:
+                                current_kid_list.append(kid_val)
+                                current_key_list.append(k_val)
+
+                        key_id = ",".join(current_kid_list)
+                        key = ",".join(current_key_list)
 
                 # Clean the original URL from DRM parameters to avoid duplication
                 clean_query_params = {k: v for k, v in query_params.items() if k not in ["key_id", "key"]}

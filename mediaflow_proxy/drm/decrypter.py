@@ -646,6 +646,7 @@ class MP4Decrypter:
     def _get_key_for_track(self, track_id: int) -> bytes:
         """
         Retrieves the decryption key for a given track ID from the key map.
+        First tries to match by track ID, then by KID if available.
 
         Args:
             track_id (int): The track ID.
@@ -655,10 +656,20 @@ class MP4Decrypter:
         """
         if len(self.key_map) == 1:
             return next(iter(self.key_map.values()))
-        key = self.key_map.get(track_id.pack(4, "big"))
-        if not key:
-            raise ValueError(f"No key found for track ID {track_id}")
-        return key
+
+        # Try matching by track ID first
+        track_id_bytes = struct.pack(">I", track_id)
+        if track_id_bytes in self.key_map:
+            return self.key_map[track_id_bytes]
+
+        # Try matching by KID from tenc box
+        track_settings = self.track_encryption_settings.get(track_id, {})
+        kid = track_settings.get("kid")
+        if kid and kid in self.key_map:
+            return self.key_map[kid]
+
+        # Fallback to first key if nothing matches
+        return next(iter(self.key_map.values()))
 
     @staticmethod
     def _process_sample(
@@ -1420,6 +1431,10 @@ class MP4Decrypter:
                 "iv_size": 8,
             }
 
+            # Extract KID (16 bytes at offset 8)
+            if len(data) >= 8 + 16:
+                track_settings["kid"] = bytes(data[8 : 8 + 16])
+
             # Extract pattern encryption parameters for version > 0 (used in cbcs)
             if version > 0 and len(data) >= 6:
                 # Byte 5 contains crypt_byte_block (upper 4 bits) and skip_byte_block (lower 4 bits)
@@ -1462,20 +1477,34 @@ def decrypt_segment(
 ) -> bytes:
     """
     Decrypts a CENC encrypted MP4 segment.
+    Supports multi-key: "KID1,KID2" and "KEY1,KEY2"
 
     Args:
         init_segment (bytes): Initialization segment data.
         segment_content (bytes): Encrypted segment content.
-        key_id (str): Key ID in hexadecimal format.
-        key (str): Key in hexadecimal format.
+        key_id (str): Key ID(s) in hexadecimal format.
+        key (str): Key(s) in hexadecimal format.
         include_init (bool): If True, include processed init segment in output.
-            If False, only return decrypted media segment (for use with EXT-X-MAP).
 
     Returns:
-        bytes: Decrypted segment with processed init (moov/ftyp) + decrypted media (moof/mdat),
-            or just decrypted media if include_init is False.
+        bytes: Decrypted segment content.
     """
-    key_map = {bytes.fromhex(key_id): bytes.fromhex(key)}
+    # Support multi-key: "KID1,KID2" and "KEY1,KEY2"
+    kid_list = [k.strip() for k in key_id.split(",")]
+    key_list = [k.strip() for k in key.split(",")]
+
+    if len(kid_list) != len(key_list):
+        logger.warning(f"Mismatched key_id/key count: {len(kid_list)} vs {len(key_list)}. Using first pair only.")
+        kid_list = kid_list[:1]
+        key_list = key_list[:1]
+
+    key_map = {}
+    for kid_hex, key_hex in zip(kid_list, key_list):
+        try:
+            key_map[bytes.fromhex(kid_hex)] = bytes.fromhex(key_hex)
+        except Exception as e:
+            logger.error(f"Error parsing hex keys: {e}")
+
     decrypter = MP4Decrypter(key_map)
     decrypted_content = decrypter.decrypt_segment(init_segment + segment_content, include_init=include_init)
     return decrypted_content
@@ -1484,17 +1513,26 @@ def decrypt_segment(
 def process_drm_init_segment(init_segment: bytes, key_id: str, key: str) -> bytes:
     """
     Processes a DRM-protected init segment for use with EXT-X-MAP.
-    Removes encryption-related boxes but keeps the moov structure.
+    Supports multi-key: "KID1,KID2" and "KEY1,KEY2"
 
     Args:
         init_segment (bytes): Initialization segment data.
-        key_id (str): Key ID in hexadecimal format.
-        key (str): Key in hexadecimal format.
+        key_id (str): Key ID(s) in hexadecimal format.
+        key (str): Key(s) in hexadecimal format.
 
     Returns:
         bytes: Processed init segment with encryption boxes removed.
     """
-    key_map = {bytes.fromhex(key_id): bytes.fromhex(key)}
+    kid_list = [k.strip() for k in key_id.split(",")]
+    key_list = [k.strip() for k in key.split(",")]
+
+    key_map = {}
+    for kid_hex, key_hex in zip(kid_list, key_list):
+        try:
+            key_map[bytes.fromhex(kid_hex)] = bytes.fromhex(key_hex)
+        except Exception as e:
+            logger.error(f"Error parsing hex keys: {e}")
+
     decrypter = MP4Decrypter(key_map)
     processed_init = decrypter.process_init_only(init_segment)
     return processed_init
