@@ -678,7 +678,7 @@ async def get_segment(
                 response.body,
                 segment_params.key_id,
                 settings.remux_to_ts,
-                ttl=settings.dash_segment_cache_ttl,
+                ttl=settings.processed_segment_cache_ttl,
             )
         )
 

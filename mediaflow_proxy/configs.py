@@ -67,6 +67,7 @@ class Settings(BaseSettings):
     mpd_live_init_cache_ttl: int = 60  # TTL (seconds) for live init segment cache; 0 disables caching.
     mpd_live_playlist_depth: int = 8  # Number of recent segments to expose per live playlist variant.
     remux_to_ts: bool = False  # Whether to use FFMPEG to remux MPD ClearKey segments to .ts for better compatibility.
+    processed_segment_cache_ttl: int = 60  # TTL (seconds) for cached processed (decrypted/remuxed) segments.
 
     # FlareSolverr settings (for Cloudflare bypass)
     flaresolverr_url: str | None = None  # FlareSolverr service URL. Example: http://localhost:8191

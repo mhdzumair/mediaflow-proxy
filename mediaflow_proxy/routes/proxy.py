@@ -470,7 +470,7 @@ async def hls_segment_proxy(
                         segment_data,
                         None,
                         False,
-                        ttl=settings.hls_segment_cache_ttl,
+                        ttl=settings.processed_segment_cache_ttl,
                     )
                 )
 
