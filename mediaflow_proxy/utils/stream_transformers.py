@@ -151,6 +151,15 @@ class TSStreamTransformer(StreamTransformer):
             while self.buffer and self.buffer[0] == 0xFF:
                 self.buffer.pop(0)
 
+            # Re-check for m3u8 playlist after stripping PNG wrapper and padding
+            # This handles cases where m3u8 content is wrapped in PNG
+            if len(self.buffer) >= 7 and self.buffer[:7] in (b"#EXTM3U", b"#EXT-X-"):
+                logger.debug("Found m3u8 content after stripping wrapper - passing through")
+                yield bytes(self.buffer)
+                self.buffer.clear()
+                self.ts_started = True
+                continue
+
             ts_offset = self._find_ts_start(bytes(self.buffer))
             if ts_offset is None:
                 # Keep buffering until we find TS or hit limit
