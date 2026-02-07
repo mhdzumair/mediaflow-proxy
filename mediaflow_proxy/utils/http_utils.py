@@ -502,8 +502,7 @@ def encode_mediaflow_proxy_url(
             {
                 key if key.lower().startswith("h_") else f"h_{key}": value
                 for key, value in request_headers.items()
-                if value
-                and (key.lower().removeprefix("h_") not in SUPPORTED_REQUEST_HEADERS)
+                if value and (key.lower().removeprefix("h_") not in SUPPORTED_REQUEST_HEADERS)
             }
         )
     if response_headers:
