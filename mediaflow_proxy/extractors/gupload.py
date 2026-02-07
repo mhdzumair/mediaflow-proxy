@@ -55,11 +55,7 @@ class GuploadExtractor(BaseExtractor):
         # --- Validate stream (prevents client timeout) ---
         test = await self._make_request(hls_url, headers=headers, raise_on_status=False)
         if test.status >= 400:
-            raise ExtractorError(
-                f"GUPLOAD: Stream unavailable ({test.status})"
-            )
-                f"GUPLOAD: Stream unavailable ({test.status})"
-            )
+            raise ExtractorError(f"GUPLOAD: Stream unavailable ({test.status})")
 
         # ✅ Return MASTER playlist
         return {
