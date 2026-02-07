@@ -4,6 +4,7 @@ from .speedtest import speedtest_router
 from .playlist_builder import playlist_builder_router
 from .xtream import xtream_root_router
 from .acestream import acestream_router
+from .telegram import telegram_router
 
 __all__ = [
     "proxy_router",
@@ -12,4 +13,5 @@ __all__ = [
     "playlist_builder_router",
     "xtream_root_router",
     "acestream_router",
+    "telegram_router",
 ]

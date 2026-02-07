@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MediaFlow URL Generator</title>
     <link rel="icon" href="/logo.png" type="image/x-icon">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -168,6 +169,9 @@
             </button>
             <button onclick="switchTab('acestream')" id="tab-acestream" class="tab-btn px-6 py-3 rounded-xl font-semibold text-sm bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 shadow-md">
                 🌐 Acestream
+            </button>
+            <button onclick="switchTab('telegram')" id="tab-telegram" class="tab-btn px-6 py-3 rounded-xl font-semibold text-sm bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 shadow-md">
+                <i class="fa-brands fa-telegram"></i> Telegram
             </button>
         </div>
 
@@ -1103,6 +1107,347 @@
                 </div>
             </div>
         </div>
+
+        <!-- Telegram Tab -->
+        <div id="panel-telegram" class="tab-panel hidden animate-fade-in">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-gray-200 dark:border-gray-700">
+                <h2 class="text-xl font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center text-white text-sm"><i class="fa-brands fa-telegram"></i></span>
+                    Telegram Proxy URL Generator
+                </h2>
+                <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">Stream Telegram media (videos, documents, photos) with high-speed parallel downloads and full seeking support.</p>
+
+                <div class="space-y-4">
+                    <!-- Input Type Selection -->
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Input Type</label>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <button onclick="selectTelegramInputType('url')" id="telegram-input-url" class="telegram-input-btn active-telegram-input px-4 py-3 rounded-xl border-2 border-sky-500 bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300 font-medium text-sm transition-all">
+                                🔗 t.me URL
+                            </button>
+                            <button onclick="selectTelegramInputType('ids')" id="telegram-input-ids" class="telegram-input-btn px-4 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-700 dark:text-gray-300 font-medium text-sm transition-all hover:border-sky-300">
+                                🔢 Chat ID + Message ID
+                            </button>
+                            <button onclick="selectTelegramInputType('file_id')" id="telegram-input-file_id" class="telegram-input-btn px-4 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-700 dark:text-gray-300 font-medium text-sm transition-all hover:border-sky-300">
+                                📄 File ID
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Telegram URL Input -->
+                    <div id="telegram-url-input">
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Telegram URL <span class="text-red-500">*</span></label>
+                        <input type="text" id="telegram-url" placeholder="https://t.me/channel/123 or https://t.me/c/123456789/456"
+                            class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-sky-500 text-sm">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Supported formats: t.me/channel/123 (public), t.me/c/123456789/456 (private), t.me/username/123</p>
+                    </div>
+
+                    <!-- Chat ID + Message ID Input (hidden by default) -->
+                    <div id="telegram-ids-input" class="hidden space-y-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Chat ID <span class="text-red-500">*</span></label>
+                            <input type="text" id="telegram-chat-id" placeholder="-100123456789 or @channelname"
+                                class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-sky-500 font-mono text-sm">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Channel/group ID (with -100 prefix for supergroups) or @username</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Message ID <span class="text-red-500">*</span></label>
+                            <input type="number" id="telegram-message-id" placeholder="12345"
+                                class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-sky-500 font-mono text-sm">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">The message ID containing the media</p>
+                        </div>
+                    </div>
+
+                    <!-- File ID Input (hidden by default) -->
+                    <div id="telegram-fileid-input" class="hidden space-y-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">File ID <span class="text-red-500">*</span></label>
+                            <input type="text" id="telegram-file-id" placeholder="BQACAgIAAxkBAAIBZ2..."
+                                class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-sky-500 font-mono text-sm">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Bot API file_id string (base64-encoded)</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">File Size (bytes) <span class="text-red-500">*</span></label>
+                            <input type="number" id="telegram-file-size" placeholder="1048576"
+                                class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-sky-500 font-mono text-sm">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">File size is required for range requests (seeking). Get this from the Bot API file info.</p>
+                        </div>
+                    </div>
+
+                    <!-- Custom Filename -->
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Custom Filename <span class="text-gray-400 font-normal">(optional)</span></label>
+                        <input type="text" id="telegram-filename" placeholder="movie.mp4"
+                            class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-sky-500 text-sm">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Override the filename for media players that use filename for metadata</p>
+                    </div>
+
+                    <!-- URL Format Examples -->
+                    <div class="bg-sky-50 dark:bg-sky-900/20 rounded-xl p-4 border border-sky-200 dark:border-sky-800">
+                        <h4 class="text-sm font-semibold text-sky-800 dark:text-sky-200 mb-2">📋 Input Format Examples</h4>
+                        <div class="space-y-2 text-sm text-sky-700 dark:text-sky-300 font-mono">
+                            <p>• <code>https://t.me/channelname/123</code> - Public channel URL</p>
+                            <p>• <code>https://t.me/c/123456789/456</code> - Private channel URL</p>
+                            <p>• <code>chat_id=-1001234567890, message_id=123</code> - Direct IDs</p>
+                            <p>• <code>file_id=BQACAgI..., file_size=1048576</code> - Bot API file_id</p>
+                        </div>
+                    </div>
+
+                    <!-- Requirements Notice -->
+                    <div class="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4 border border-amber-200 dark:border-amber-800">
+                        <div class="flex items-start gap-3">
+                            <span class="text-amber-500 mt-0.5">⚠️</span>
+                            <div class="text-sm text-amber-800 dark:text-amber-200">
+                                <p class="font-semibold mb-1">Requirements</p>
+                                <p>Telegram proxy requires configuration on the server side. Make sure <code class="bg-amber-100 dark:bg-amber-800 px-1 rounded">ENABLE_TELEGRAM=true</code> is set along with your API credentials and session string.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Generate Button -->
+                <div class="mt-6">
+                    <button onclick="generateTelegramUrl()" class="w-full py-3.5 rounded-xl text-white font-semibold text-sm bg-gradient-to-r from-sky-500 to-blue-500 hover:from-sky-600 hover:to-blue-600 transition-all shadow-lg hover:shadow-xl">
+                        Generate Telegram URL
+                    </button>
+                </div>
+
+                <!-- Output -->
+                <div id="telegram-output" class="mt-6 hidden">
+                    <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Generated URL</label>
+                    <div class="url-output rounded-xl p-4 text-green-400 text-sm break-all overflow-x-auto">
+                        <code id="telegram-generated-url"></code>
+                    </div>
+                    <button onclick="copyUrl('telegram-generated-url', event)" class="copy-btn mt-3 px-6 py-2.5 rounded-xl text-white font-semibold text-sm">
+                        📋 Copy to Clipboard
+                    </button>
+
+                    <!-- Usage Examples -->
+                    <div class="mt-4 bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Usage Examples</h4>
+                        <div class="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                            <p><strong>VLC:</strong> Media → Open Network Stream → Paste the URL</p>
+                            <p><strong>mpv:</strong> <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded">mpv "YOUR_URL"</code></p>
+                            <p><strong>Infuse/Kodi:</strong> Add as network stream for full metadata support</p>
+                            <p><strong>Web Player:</strong> Direct URL works in browsers with video tag</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Additional Endpoints -->
+                <div class="mt-6 bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                    <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">📡 Additional Endpoints</h4>
+                    <div class="space-y-3 text-sm">
+                        <div class="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600">
+                            <div>
+                                <span class="font-medium text-gray-700 dark:text-gray-200">Media Info</span>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">Get file metadata (size, duration, dimensions)</p>
+                            </div>
+                            <code class="text-xs text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30 px-2 py-1 rounded">/proxy/telegram/info</code>
+                        </div>
+                        <div class="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600">
+                            <div>
+                                <span class="font-medium text-gray-700 dark:text-gray-200">Status Check</span>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">Check Telegram session status</p>
+                            </div>
+                            <code class="text-xs text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30 px-2 py-1 rounded">/proxy/telegram/status</code>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Supported Features -->
+                <div class="mt-6 bg-green-50 dark:bg-green-900/20 rounded-xl p-4 border border-green-200 dark:border-green-800">
+                    <h4 class="text-sm font-semibold text-green-800 dark:text-green-200 mb-2">✅ Features</h4>
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm text-green-700 dark:text-green-300">
+                        <span>• High-speed Downloads</span>
+                        <span>• Parallel Connections</span>
+                        <span>• Range Requests</span>
+                        <span>• Seeking Support</span>
+                        <span>• Video/Audio/Photos</span>
+                        <span>• Private Channels</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Session String Generator Section -->
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-gray-200 dark:border-gray-700 mt-6">
+                <h2 class="text-xl font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white text-sm">🔑</span>
+                    Session String Generator
+                </h2>
+                <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">Generate a session string to authenticate MediaFlow with your Telegram account. You only need to do this once.</p>
+
+                <!-- Step 1: API Credentials -->
+                <div id="session-step-1" class="session-step">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm">1</div>
+                        <h4 class="font-semibold text-gray-800 dark:text-white">Enter API Credentials</h4>
+                    </div>
+                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Get your API credentials from <a href="https://my.telegram.org/apps" target="_blank" class="text-violet-600 dark:text-violet-400 hover:underline">my.telegram.org/apps</a></p>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">API ID <span class="text-red-500">*</span></label>
+                            <input type="text" id="session-api-id" placeholder="12345678"
+                                class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-violet-500 text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">API Hash <span class="text-red-500">*</span></label>
+                            <input type="text" id="session-api-hash" placeholder="0123456789abcdef0123456789abcdef"
+                                class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-violet-500 font-mono text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Authentication Method</label>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <button onclick="selectSessionAuthType('phone')" id="session-auth-phone" class="session-auth-btn active-session-auth px-4 py-3 rounded-xl border-2 border-violet-500 bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 font-medium text-sm transition-all">
+                                    📱 Phone Number (Full Access)
+                                </button>
+                                <button onclick="selectSessionAuthType('bot')" id="session-auth-bot" class="session-auth-btn px-4 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-700 dark:text-gray-300 font-medium text-sm transition-all hover:border-violet-300">
+                                    🤖 Bot Token (Limited)
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Phone Number Input -->
+                        <div id="session-phone-input">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Phone Number <span class="text-red-500">*</span></label>
+                            <input type="tel" id="session-phone" placeholder="+1234567890"
+                                class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-violet-500 text-sm">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">International format with country code</p>
+                        </div>
+
+                        <!-- Bot Token Input (hidden by default) -->
+                        <div id="session-bot-input" class="hidden">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Bot Token <span class="text-red-500">*</span></label>
+                            <input type="text" id="session-bot-token" placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+                                class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-violet-500 font-mono text-sm">
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Get from @BotFather on Telegram</p>
+                        </div>
+
+                        <button onclick="startSessionGeneration()" id="session-start-btn" class="w-full py-3 rounded-xl text-white font-semibold text-sm bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 transition-all shadow-lg hover:shadow-xl">
+                            <span id="session-start-btn-text">Send Verification Code</span>
+                            <span id="session-start-btn-loading" class="hidden"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Processing...</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Step 2: Verification Code -->
+                <div id="session-step-2" class="session-step hidden">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm">2</div>
+                        <h4 class="font-semibold text-gray-800 dark:text-white">Enter Verification Code</h4>
+                    </div>
+                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">A verification code has been sent to your Telegram app. Enter it below.</p>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Verification Code <span class="text-red-500">*</span></label>
+                            <input type="text" id="session-code" placeholder="12345"
+                                class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-violet-500 text-center text-2xl tracking-widest font-mono">
+                        </div>
+                        <div class="flex gap-3">
+                            <button onclick="cancelSession()" class="flex-1 py-3 rounded-xl font-semibold text-sm border-2 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all">
+                                Cancel
+                            </button>
+                            <button onclick="verifySessionCode()" id="session-verify-btn" class="flex-1 py-3 rounded-xl text-white font-semibold text-sm bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 transition-all shadow-lg">
+                                <span id="session-verify-btn-text">Verify Code</span>
+                                <span id="session-verify-btn-loading" class="hidden"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Verifying...</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2b: 2FA Password -->
+                <div id="session-step-2fa" class="session-step hidden">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white font-bold text-sm">2</div>
+                        <h4 class="font-semibold text-gray-800 dark:text-white">Two-Factor Authentication</h4>
+                    </div>
+                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Your account has 2FA enabled. Please enter your cloud password.</p>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">2FA Password <span class="text-red-500">*</span></label>
+                            <input type="password" id="session-2fa-password" placeholder="Enter your 2FA password"
+                                class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-violet-500 text-sm">
+                        </div>
+                        <div class="flex gap-3">
+                            <button onclick="cancelSession()" class="flex-1 py-3 rounded-xl font-semibold text-sm border-2 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all">
+                                Cancel
+                            </button>
+                            <button onclick="verify2FA()" id="session-2fa-btn" class="flex-1 py-3 rounded-xl text-white font-semibold text-sm bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 transition-all shadow-lg">
+                                <span id="session-2fa-btn-text">Verify Password</span>
+                                <span id="session-2fa-btn-loading" class="hidden"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Verifying...</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 3: Success - Show Session String -->
+                <div id="session-step-3" class="session-step hidden">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center text-white font-bold text-sm">✓</div>
+                        <h4 class="font-semibold text-gray-800 dark:text-white">Session String Generated!</h4>
+                    </div>
+                    
+                    <div class="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 border border-green-200 dark:border-green-800 mb-4">
+                        <p class="text-sm text-green-700 dark:text-green-300">Your session string has been generated successfully. Copy the configuration below and add it to your environment variables.</p>
+                    </div>
+
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Environment Configuration</label>
+                            <div class="bg-gray-900 rounded-xl p-4 font-mono text-sm text-green-400 overflow-x-auto">
+                                <div class="space-y-1">
+                                    <div>ENABLE_TELEGRAM=true</div>
+                                    <div>TELEGRAM_API_ID=<span id="session-result-api-id"></span></div>
+                                    <div>TELEGRAM_API_HASH=<span id="session-result-api-hash"></span></div>
+                                    <div class="break-all">TELEGRAM_SESSION_STRING=<span id="session-result-string"></span></div>
+                                </div>
+                            </div>
+                            <button onclick="copySessionConfig(event)" class="copy-btn mt-3 px-6 py-2.5 rounded-xl text-white font-semibold text-sm">
+                                📋 Copy Configuration
+                            </button>
+                        </div>
+
+                        <button onclick="resetSessionGenerator()" class="w-full py-3 rounded-xl font-semibold text-sm border-2 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all">
+                            Generate Another Session
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Error Display -->
+                <div id="session-error" class="hidden mt-4 bg-red-50 dark:bg-red-900/20 rounded-xl p-4 border border-red-200 dark:border-red-800">
+                    <div class="flex items-start gap-3">
+                        <span class="text-red-500 mt-0.5">❌</span>
+                        <div class="text-sm text-red-800 dark:text-red-200">
+                            <p class="font-semibold">Error</p>
+                            <p id="session-error-message"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Security Notice -->
+                <div class="mt-6 bg-red-50 dark:bg-red-900/20 rounded-xl p-4 border border-red-200 dark:border-red-800">
+                    <div class="flex items-start gap-3">
+                        <span class="text-red-500 mt-0.5">🔒</span>
+                        <div class="text-sm text-red-800 dark:text-red-200">
+                            <p class="font-semibold mb-1">Security Notice</p>
+                            <p>The session string is equivalent to your Telegram password. Keep it secret and never share it publicly. If compromised, revoke all sessions in your Telegram app settings.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Check Status Section -->
+                <div class="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                    <h4 class="font-semibold text-gray-800 dark:text-white mb-3">Check Connection Status</h4>
+                    <button onclick="checkTelegramStatus()" class="px-4 py-2 rounded-lg bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 text-sm font-medium hover:bg-violet-200 dark:hover:bg-violet-900/50 transition-colors">
+                        🔍 Check Status
+                    </button>
+                    <div id="telegram-status-result" class="mt-3 hidden"></div>
+                </div>
+            </div>
+        </div>
     </main>
 
     <script>
@@ -1931,7 +2276,441 @@
             document.getElementById('acestream-output').classList.remove('hidden');
         }
 
-        // Check for hash on page load to switch to XC or Acestream tab
+        // =====================================================
+        // Telegram Session Generator Functions
+        // =====================================================
+        
+        let currentSessionId = null;
+        let currentAuthType = 'phone';
+
+        function selectSessionAuthType(type) {
+            currentAuthType = type;
+            
+            document.querySelectorAll('.session-auth-btn').forEach(btn => {
+                btn.classList.remove('active-session-auth', 'border-violet-500', 'bg-violet-50', 'dark:bg-violet-900/30', 'text-violet-700', 'dark:text-violet-300');
+                btn.classList.add('border-gray-200', 'dark:border-gray-600', 'bg-gray-50', 'dark:bg-gray-700/50', 'text-gray-700', 'dark:text-gray-300');
+            });
+            
+            const activeBtn = document.getElementById(`session-auth-${type}`);
+            activeBtn.classList.add('active-session-auth', 'border-violet-500', 'bg-violet-50', 'dark:bg-violet-900/30', 'text-violet-700', 'dark:text-violet-300');
+            activeBtn.classList.remove('border-gray-200', 'dark:border-gray-600', 'bg-gray-50', 'dark:bg-gray-700/50', 'text-gray-700', 'dark:text-gray-300');
+
+            // Toggle input fields
+            if (type === 'phone') {
+                document.getElementById('session-phone-input').classList.remove('hidden');
+                document.getElementById('session-bot-input').classList.add('hidden');
+                document.getElementById('session-start-btn-text').textContent = 'Send Verification Code';
+            } else {
+                document.getElementById('session-phone-input').classList.add('hidden');
+                document.getElementById('session-bot-input').classList.remove('hidden');
+                document.getElementById('session-start-btn-text').textContent = 'Generate Session';
+            }
+        }
+
+        function showSessionError(message) {
+            const errorDiv = document.getElementById('session-error');
+            document.getElementById('session-error-message').textContent = message;
+            errorDiv.classList.remove('hidden');
+        }
+
+        function hideSessionError() {
+            document.getElementById('session-error').classList.add('hidden');
+        }
+
+        function setButtonLoading(btnId, loading) {
+            const textEl = document.getElementById(`${btnId}-text`);
+            const loadingEl = document.getElementById(`${btnId}-loading`);
+            const btn = document.getElementById(btnId);
+            
+            if (loading) {
+                textEl.classList.add('hidden');
+                loadingEl.classList.remove('hidden');
+                btn.disabled = true;
+            } else {
+                textEl.classList.remove('hidden');
+                loadingEl.classList.add('hidden');
+                btn.disabled = false;
+            }
+        }
+
+        function showStep(stepNum) {
+            document.querySelectorAll('.session-step').forEach(step => step.classList.add('hidden'));
+            document.getElementById(`session-step-${stepNum}`).classList.remove('hidden');
+        }
+
+        function getSessionApiUrl(endpoint) {
+            const apiPassword = document.getElementById('globalApiPassword').value.trim();
+            let url = `/proxy/telegram/session/${endpoint}`;
+            if (apiPassword) {
+                url += `?api_password=${encodeURIComponent(apiPassword)}`;
+            }
+            return url;
+        }
+
+        async function startSessionGeneration() {
+            hideSessionError();
+            
+            const apiId = document.getElementById('session-api-id').value.trim();
+            const apiHash = document.getElementById('session-api-hash').value.trim();
+            
+            if (!apiId || !apiHash) {
+                showSessionError('Please enter both API ID and API Hash');
+                return;
+            }
+            
+            if (!/^\d+$/.test(apiId)) {
+                showSessionError('API ID must be a number');
+                return;
+            }
+
+            const requestBody = {
+                api_id: parseInt(apiId),
+                api_hash: apiHash,
+                auth_type: currentAuthType
+            };
+
+            if (currentAuthType === 'phone') {
+                const phone = document.getElementById('session-phone').value.trim();
+                if (!phone) {
+                    showSessionError('Please enter your phone number');
+                    return;
+                }
+                requestBody.phone = phone;
+            } else {
+                const botToken = document.getElementById('session-bot-token').value.trim();
+                if (!botToken) {
+                    showSessionError('Please enter your bot token');
+                    return;
+                }
+                requestBody.bot_token = botToken;
+            }
+
+            setButtonLoading('session-start-btn', true);
+
+            try {
+                const response = await fetch(getSessionApiUrl('start'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Failed to start session generation');
+                }
+
+                if (data.step === 'complete') {
+                    // Bot auth completed immediately
+                    showSessionResult(data);
+                } else if (data.step === 'code_sent') {
+                    // Phone auth - code sent
+                    currentSessionId = data.session_id;
+                    showStep(2);
+                }
+            } catch (error) {
+                showSessionError(error.message);
+            } finally {
+                setButtonLoading('session-start-btn', false);
+            }
+        }
+
+        async function verifySessionCode() {
+            hideSessionError();
+            
+            const code = document.getElementById('session-code').value.trim();
+            if (!code) {
+                showSessionError('Please enter the verification code');
+                return;
+            }
+
+            setButtonLoading('session-verify-btn', true);
+
+            try {
+                const response = await fetch(getSessionApiUrl('verify'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: currentSessionId,
+                        code: code
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Verification failed');
+                }
+
+                if (data.step === 'complete') {
+                    showSessionResult(data);
+                } else if (data.step === '2fa_required') {
+                    showStep('2fa');
+                }
+            } catch (error) {
+                showSessionError(error.message);
+            } finally {
+                setButtonLoading('session-verify-btn', false);
+            }
+        }
+
+        async function verify2FA() {
+            hideSessionError();
+            
+            const password = document.getElementById('session-2fa-password').value;
+            if (!password) {
+                showSessionError('Please enter your 2FA password');
+                return;
+            }
+
+            setButtonLoading('session-2fa-btn', true);
+
+            try {
+                const response = await fetch(getSessionApiUrl('2fa'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: currentSessionId,
+                        password: password
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || '2FA verification failed');
+                }
+
+                if (data.step === 'complete') {
+                    showSessionResult(data);
+                }
+            } catch (error) {
+                showSessionError(error.message);
+            } finally {
+                setButtonLoading('session-2fa-btn', false);
+            }
+        }
+
+        function showSessionResult(data) {
+            document.getElementById('session-result-api-id').textContent = data.api_id;
+            document.getElementById('session-result-api-hash').textContent = data.api_hash;
+            document.getElementById('session-result-string').textContent = data.session_string;
+            showStep(3);
+        }
+
+        async function cancelSession() {
+            if (currentSessionId) {
+                try {
+                    const apiPassword = document.getElementById('globalApiPassword').value.trim();
+                    let url = `/proxy/telegram/session/cancel?session_id=${currentSessionId}`;
+                    if (apiPassword) {
+                        url += `&api_password=${encodeURIComponent(apiPassword)}`;
+                    }
+                    await fetch(url, {
+                        method: 'POST'
+                    });
+                } catch (e) {
+                    // Ignore cancel errors
+                }
+            }
+            resetSessionGenerator();
+        }
+
+        function resetSessionGenerator() {
+            currentSessionId = null;
+            hideSessionError();
+            
+            // Clear all inputs
+            document.getElementById('session-api-id').value = '';
+            document.getElementById('session-api-hash').value = '';
+            document.getElementById('session-phone').value = '';
+            document.getElementById('session-bot-token').value = '';
+            document.getElementById('session-code').value = '';
+            document.getElementById('session-2fa-password').value = '';
+            
+            // Reset to phone auth
+            selectSessionAuthType('phone');
+            
+            // Show step 1
+            showStep(1);
+        }
+
+        function copySessionConfig(event) {
+            const btn = event.currentTarget;  // Capture button reference before async operation
+            const apiId = document.getElementById('session-result-api-id').textContent;
+            const apiHash = document.getElementById('session-result-api-hash').textContent;
+            const sessionString = document.getElementById('session-result-string').textContent;
+            
+            const config = `ENABLE_TELEGRAM=true
+TELEGRAM_API_ID=${apiId}
+TELEGRAM_API_HASH=${apiHash}
+TELEGRAM_SESSION_STRING=${sessionString}`;
+            
+            const originalText = btn.innerHTML;
+            navigator.clipboard.writeText(config).then(() => {
+                btn.innerHTML = '✓ Copied!';
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                }, 2000);
+            }).catch(err => {
+                alert('Failed to copy: ' + err);
+            });
+        }
+
+        // =====================================================
+        // Telegram URL Generator
+        // =====================================================
+
+        let currentTelegramInputType = 'url';
+
+        function selectTelegramInputType(type) {
+            currentTelegramInputType = type;
+            
+            document.querySelectorAll('.telegram-input-btn').forEach(btn => {
+                btn.classList.remove('active-telegram-input', 'border-sky-500', 'bg-sky-50', 'dark:bg-sky-900/30', 'text-sky-700', 'dark:text-sky-300');
+                btn.classList.add('border-gray-200', 'dark:border-gray-600', 'bg-gray-50', 'dark:bg-gray-700/50', 'text-gray-700', 'dark:text-gray-300');
+            });
+            
+            const activeBtn = document.getElementById(`telegram-input-${type}`);
+            activeBtn.classList.add('active-telegram-input', 'border-sky-500', 'bg-sky-50', 'dark:bg-sky-900/30', 'text-sky-700', 'dark:text-sky-300');
+            activeBtn.classList.remove('border-gray-200', 'dark:border-gray-600', 'bg-gray-50', 'dark:bg-gray-700/50', 'text-gray-700', 'dark:text-gray-300');
+
+            // Toggle input fields - hide all first
+            document.getElementById('telegram-url-input').classList.add('hidden');
+            document.getElementById('telegram-ids-input').classList.add('hidden');
+            document.getElementById('telegram-fileid-input').classList.add('hidden');
+            
+            // Show the selected one
+            if (type === 'url') {
+                document.getElementById('telegram-url-input').classList.remove('hidden');
+            } else if (type === 'ids') {
+                document.getElementById('telegram-ids-input').classList.remove('hidden');
+            } else if (type === 'file_id') {
+                document.getElementById('telegram-fileid-input').classList.remove('hidden');
+            }
+        }
+
+        function generateTelegramUrl() {
+            const baseUrl = window.location.origin;
+            const apiPassword = document.getElementById('globalApiPassword').value.trim();
+            const filename = document.getElementById('telegram-filename').value.trim();
+            
+            const params = new URLSearchParams();
+            
+            if (currentTelegramInputType === 'url') {
+                const telegramUrl = document.getElementById('telegram-url').value.trim();
+                
+                if (!telegramUrl) {
+                    alert('Please enter a Telegram URL');
+                    return;
+                }
+                
+                // Validate URL format
+                if (!telegramUrl.match(/^https?:\/\/t\.me\//)) {
+                    alert('Invalid Telegram URL format. URL should start with https://t.me/');
+                    return;
+                }
+                
+                params.append('url', telegramUrl);
+            } else if (currentTelegramInputType === 'ids') {
+                const chatId = document.getElementById('telegram-chat-id').value.trim();
+                const messageId = document.getElementById('telegram-message-id').value.trim();
+                
+                if (!chatId) {
+                    alert('Please enter a Chat ID');
+                    return;
+                }
+                if (!messageId) {
+                    alert('Please enter a Message ID');
+                    return;
+                }
+                
+                params.append('chat_id', chatId);
+                params.append('message_id', messageId);
+            } else if (currentTelegramInputType === 'file_id') {
+                const fileId = document.getElementById('telegram-file-id').value.trim();
+                const fileSize = document.getElementById('telegram-file-size').value.trim();
+                
+                if (!fileId) {
+                    alert('Please enter a File ID');
+                    return;
+                }
+                if (!fileSize) {
+                    alert('Please enter the File Size (required for seeking/range requests)');
+                    return;
+                }
+                
+                params.append('file_id', fileId);
+                params.append('file_size', fileSize);
+            }
+            
+            if (filename) {
+                params.append('filename', filename);
+            }
+            
+            if (apiPassword) {
+                params.append('api_password', apiPassword);
+            }
+            
+            const finalUrl = `${baseUrl}/proxy/telegram/stream?${params.toString()}`;
+            
+            document.getElementById('telegram-generated-url').textContent = finalUrl;
+            document.getElementById('telegram-output').classList.remove('hidden');
+        }
+
+        // Check Telegram Status
+        async function checkTelegramStatus() {
+            const baseUrl = window.location.origin;
+            const apiPassword = document.getElementById('globalApiPassword').value.trim();
+            const resultDiv = document.getElementById('telegram-status-result');
+            
+            resultDiv.classList.remove('hidden');
+            resultDiv.innerHTML = '<div class="text-sm text-gray-500 dark:text-gray-400">Checking status...</div>';
+            
+            try {
+                let url = `${baseUrl}/proxy/telegram/status`;
+                if (apiPassword) {
+                    url += `?api_password=${encodeURIComponent(apiPassword)}`;
+                }
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.status === 'connected' || data.status === 'ready') {
+                    resultDiv.innerHTML = `
+                        <div class="p-3 bg-green-100 dark:bg-green-900/30 rounded-lg border border-green-200 dark:border-green-800">
+                            <div class="flex items-center gap-2 text-green-700 dark:text-green-300 text-sm font-medium">
+                                <span>✅</span>
+                                <span>${data.status === 'connected' ? 'Connected' : 'Ready'}</span>
+                            </div>
+                            <p class="text-xs text-green-600 dark:text-green-400 mt-1">${data.message || 'Telegram proxy is ready to use'}</p>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="p-3 bg-red-100 dark:bg-red-900/30 rounded-lg border border-red-200 dark:border-red-800">
+                            <div class="flex items-center gap-2 text-red-700 dark:text-red-300 text-sm font-medium">
+                                <span>❌</span>
+                                <span>${data.status === 'disabled' ? 'Disabled' : 'Not Connected'}</span>
+                            </div>
+                            <p class="text-xs text-red-600 dark:text-red-400 mt-1">${data.message || 'Telegram proxy is not configured or disabled'}</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="p-3 bg-red-100 dark:bg-red-900/30 rounded-lg border border-red-200 dark:border-red-800">
+                        <div class="flex items-center gap-2 text-red-700 dark:text-red-300 text-sm font-medium">
+                            <span>❌</span>
+                            <span>Connection Failed</span>
+                        </div>
+                        <p class="text-xs text-red-600 dark:text-red-400 mt-1">${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Check for hash on page load to switch to correct tab
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('encoded-proxy-url').value = window.location.origin;
             
@@ -1940,6 +2719,8 @@
                 switchTab('xc');
             } else if (window.location.hash === '#acestream') {
                 switchTab('acestream');
+            } else if (window.location.hash === '#telegram') {
+                switchTab('telegram');
             }
         });
     </script>
