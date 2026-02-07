@@ -178,7 +178,7 @@ Set the following environment variables:
 - `DASH_SEGMENT_CACHE_TTL`: Optional. TTL in seconds for cached DASH segments. Default: `60`. Longer values help with slow network playback.
 - `MPD_LIVE_INIT_CACHE_TTL`: Optional. TTL in seconds for live init segment cache. Default: `60`.
 - `MPD_LIVE_PLAYLIST_DEPTH`: Optional. Number of recent segments to expose per live playlist variant. Default: `8`.
-- `REMUX_TO_TS`: Optional. Whether to use FFMPEG to remux MPD ClearKey segments to .ts for better compatibility with players like ExoPlayer. Default: `false`.
+-181→- `REMUX_TO_TS`: Optional. Whether to use FFmpeg to remux MPD ClearKey segments to .ts for better compatibility with players like ExoPlayer. Default: `false`.
 - `PROCESSED_SEGMENT_CACHE_TTL`: Optional. TTL in seconds for cached processed (decrypted/remuxed) segments. Default: `60`.
 - `FORWARDED_ALLOW_IPS`: Optional. Controls which IP addresses are trusted to provide forwarded headers (X-Forwarded-For, X-Forwarded-Proto, etc.) when MediaFlow Proxy is deployed behind reverse proxies or load balancers. Default: `127.0.0.1`. See [Forwarded Headers Configuration](#forwarded-headers-configuration) for detailed usage.
 

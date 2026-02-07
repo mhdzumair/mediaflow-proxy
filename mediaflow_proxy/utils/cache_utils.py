@@ -91,7 +91,7 @@ class CrossProcessLock:
 
         try:
             # Open the lock file (create if doesn't exist)
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def _open_lock_file():
                 return open(lock_path, "w")
