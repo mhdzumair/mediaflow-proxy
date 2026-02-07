@@ -493,12 +493,17 @@ def encode_mediaflow_proxy_url(
 
     # Add headers if provided (always use lowercase prefix for consistency)
     # Filter out empty values to avoid URLs like &h_if-range=&h_referer=...
+    # Also exclude dynamic per-request headers (range, if-range) that are already handled
+    # via SUPPORTED_REQUEST_HEADERS from the player's actual request. Encoding them as h_
+    # query params would bake in stale values that override the player's real headers on
+    # subsequent requests (e.g., when seeking to a different position).
     if request_headers:
         query_params.update(
             {
                 key if key.lower().startswith("h_") else f"h_{key}": value
                 for key, value in request_headers.items()
-                if value  # Skip empty/None values
+                if value
+                and (key.lower().removeprefix("h_") not in SUPPORTED_REQUEST_HEADERS)
             }
         )
     if response_headers:
