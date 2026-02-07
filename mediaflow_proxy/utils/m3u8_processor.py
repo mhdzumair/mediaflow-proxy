@@ -437,8 +437,7 @@ class M3U8Processor:
                             all_content = header_content + "\n" + raw_content
 
                             is_explicitly_vod = (
-                                "#EXT-X-PLAYLIST-TYPE:VOD" in all_content
-                                or "#EXT-X-ENDLIST" in all_content
+                                "#EXT-X-PLAYLIST-TYPE:VOD" in all_content or "#EXT-X-ENDLIST" in all_content
                             )
 
                             # Check for live stream indicator: #EXT-X-MEDIA-SEQUENCE with value > 0
