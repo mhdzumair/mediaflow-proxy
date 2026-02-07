@@ -61,6 +61,5 @@ class VidozaExtractor(BaseExtractor):
         return {
             "destination_url": video_url,
             "request_headers": headers,
-            "remove_response_headers": ["content-length", "content-range"],
             "mediaflow_endpoint": self.mediaflow_endpoint,
         }
