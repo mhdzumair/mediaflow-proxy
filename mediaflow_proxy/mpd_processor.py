@@ -150,8 +150,49 @@ async def process_segment(
             # Concatenate init and segment content
             decrypted_content = init_content + segment_content
 
+    if settings.remux_to_ts and key_id and key:
+        try:
+            now = time.time()
+            remuxed_content = await _remux_to_ts(decrypted_content)
+            if remuxed_content:
+                decrypted_content = remuxed_content
+                mimetype = "video/MP2T"
+                logger.info(f"Remuxing of segment to TS took {time.time() - now:.4f} seconds")
+        except Exception as e:
+            logger.error(f"Failed to remux segment to TS: {e}")
+
     response_headers = apply_header_manipulation({}, proxy_headers)
     return Response(content=decrypted_content, media_type=mimetype, headers=response_headers)
+
+
+async def _remux_to_ts(content: bytes) -> bytes:
+    """
+    Remuxes media content to MPEG-TS using FFmpeg.
+    """
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        "pipe:0",
+        "-c",
+        "copy",
+        "-copyts",
+        "-bsf:v",
+        "h264_mp4toannexb",
+        "-bsf:a",
+        "aac_adtstoasc",
+        "-f",
+        "mpegts",
+        "pipe:1",
+    ]
+    process = await asyncio.create_subprocess_exec(
+        *cmd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+    stdout, stderr = await process.communicate(input=content)
+    if process.returncode != 0:
+        logger.error(f"FFmpeg remuxing failed: {stderr.decode()}")
+        return None
+    return stdout
 
 
 async def process_init_segment(
@@ -224,7 +265,8 @@ def build_hls(
     Returns:
         str: The HLS manifest as a string.
     """
-    hls = ["#EXTM3U", "#EXT-X-VERSION:6"]
+    version = 3 if settings.remux_to_ts else 6
+    hls = ["#EXTM3U", f"#EXT-X-VERSION:{version}"]
     query_params = dict(request.query_params)
 
     # Preserve skip parameter in query params so it propagates to playlists
@@ -340,7 +382,8 @@ def build_hls_playlist(
     Returns:
         str: The HLS playlist as a string.
     """
-    hls = ["#EXTM3U", "#EXT-X-VERSION:6"]
+    version = 3 if settings.remux_to_ts else 6
+    hls = ["#EXTM3U", f"#EXT-X-VERSION:{version}"]
 
     added_segments = 0
     skipped_segments = 0
@@ -352,6 +395,9 @@ def build_hls_playlist(
         start_offset if start_offset is not None else (settings.livestream_start_offset if is_live else None)
     )
     if effective_start_offset is not None:
+        if settings.remux_to_ts and is_live and start_offset is None:
+            # Match EasyProxy's -30.0 for TS live streams if not explicitly overridden
+            effective_start_offset = -30.0
         hls.append(f"#EXT-X-START:TIME-OFFSET={effective_start_offset:.1f},PRECISE=YES")
 
     # Initialize skip filter if skip_segments provided
@@ -422,7 +468,7 @@ def build_hls_playlist(
         has_encrypted = query_params.pop("has_encrypted", False)
 
         # Add EXT-X-MAP for init segment (for live streams or when beneficial)
-        if use_map:
+        if use_map and not (settings.remux_to_ts and query_params.get("key_id")):
             init_query_params = {
                 "init_url": init_url,
                 "mime_type": profile["mimeType"],
@@ -477,7 +523,7 @@ def build_hls_playlist(
             }
 
             # Add use_map flag so segment endpoint knows not to include init
-            if use_map:
+            if use_map and not (settings.remux_to_ts and query_params.get("key_id")):
                 segment_query_params["use_map"] = "true"
 
             # Add byte range parameters for SegmentBase

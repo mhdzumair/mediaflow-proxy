@@ -24,6 +24,7 @@ from mediaflow_proxy.extractors.vidoza import VidozaExtractor
 from mediaflow_proxy.extractors.vixcloud import VixCloudExtractor
 from mediaflow_proxy.extractors.fastream import FastreamExtractor
 from mediaflow_proxy.extractors.voe import VoeExtractor
+from mediaflow_proxy.extractors.freeshot import FreeshotExtractor
 
 
 class ExtractorFactory:
@@ -53,6 +54,7 @@ class ExtractorFactory:
         "Fastream": FastreamExtractor,
         "Voe": VoeExtractor,
         "Sportsonline": SportsonlineExtractor,
+        "Freeshot": FreeshotExtractor,
     }
 
     @classmethod
