@@ -65,7 +65,7 @@ async def _extract_url_impl(
 ):
     """
     Core extraction logic shared by all extractor endpoints.
-    
+
     Args:
         extractor_params: Extraction parameters from query string
         request: FastAPI request object
@@ -116,9 +116,7 @@ async def _extract_url_impl(
                         else:
                             logger.info(f"Cache miss for key: {cache_key}. Fetching fresh data.")
                             try:
-                                extractor = ExtractorFactory.get_extractor(
-                                    extractor_params.host, proxy_headers.request
-                                )
+                                extractor = ExtractorFactory.get_extractor(extractor_params.host, proxy_headers.request)
                                 response = await extractor.extract(
                                     extractor_params.destination, **extractor_params.extra_params
                                 )
@@ -185,7 +183,7 @@ async def extract_url(
 ):
     """
     Extract clean links from various video hosting services.
-    
+
     This is the base endpoint without extension. For better player compatibility
     (especially ExoPlayer), use the extension variants:
     - /extractor/video.m3u8 for HLS streams
@@ -205,12 +203,12 @@ async def extract_url_with_extension(
 ):
     """
     Extract clean links with file extension hint for player compatibility.
-    
+
     The extension in the URL helps players like ExoPlayer detect the content type
     without needing to follow redirects or inspect headers. This is especially
     important for HLS streams where ExoPlayer needs .m3u8 in the URL to use
     HlsMediaSource instead of ProgressiveMediaSource.
-    
+
     Supported extensions:
     - .m3u8, .m3u - HLS playlists (application/vnd.apple.mpegurl)
     - .mp4 - MP4 video (video/mp4)
@@ -218,17 +216,17 @@ async def extract_url_with_extension(
     - .ts - MPEG-TS (video/mp2t)
     - .avi - AVI video (video/x-msvideo)
     - .webm - WebM video (video/webm)
-    
+
     Example:
         /extractor/video.m3u8?host=TurboVidPlay&d=...&redirect_stream=true
-        
+
     This URL clearly indicates HLS content, making ExoPlayer use the correct source.
     """
     ext_lower = ext.lower()
     if ext_lower not in EXTRACTOR_EXT_CONTENT_TYPES:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported extension: .{ext}. Supported: {', '.join('.' + e for e in EXTRACTOR_EXT_CONTENT_TYPES.keys())}"
+            detail=f"Unsupported extension: .{ext}. Supported: {', '.join('.' + e for e in EXTRACTOR_EXT_CONTENT_TYPES.keys())}",
         )
-    
+
     return await _extract_url_impl(extractor_params, request, background_tasks, proxy_headers, ext=ext_lower)
