@@ -156,7 +156,7 @@ async def process_segment(
             remuxed_content = await _remux_to_ts(decrypted_content)
             if remuxed_content:
                 decrypted_content = remuxed_content
-                mimetype = "video/MP2T"
+                mimetype = "video/mp2t"
                 logger.info(f"Remuxing of segment to TS took {time.time() - now:.4f} seconds")
         except Exception as e:
             logger.error(f"Failed to remux segment to TS: {e}")
@@ -177,10 +177,7 @@ async def _remux_to_ts(content: bytes) -> bytes:
         "-c",
         "copy",
         "-copyts",
-        "-bsf:v",
-        "h264_mp4toannexb",
-        "-bsf:a",
-        "aac_adtstoasc",
+        "-muxdelay", "0",
         "-f",
         "mpegts",
         "pipe:1",
@@ -332,14 +329,16 @@ def build_hls(
         # ExoPlayer is very strict about CODECS in HLS v3 for TS streams
         codecs = profile["codecs"]
         if settings.remux_to_ts:
-            # For TS remuxing, we should either omit codecs or use the base ones
-            # Many TS streams work better in ExoPlayer with simplified codec strings
-            if "," in codecs:
-                # If multiple codecs are listed (e.g. video,audio), take only the first one (video)
-                codecs = codecs.split(",")[0]
+            # For TS remuxing, we should use simplified codec strings to ensure ExoPlayer compatibility
+            # avc1.xxxx -> avc1, mp4a.xxxx -> mp4a
+            if codecs:
+                if "," in codecs:
+                    codecs = ",".join(c.split(".")[0] for c in codecs.split(","))
+                else:
+                    codecs = codecs.split(".")[0]
 
         hls.append(
-            f'#EXT-X-STREAM-INF:BANDWIDTH={profile["bandwidth"]},RESOLUTION={profile["width"]}x{profile["height"]},CODECS="{codecs}",FRAME-RATE={profile["frameRate"]}{audio_attr}'
+            f'#EXT-X-STREAM-INF:BANDWIDTH={profile["bandwidth"]},RESOLUTION={profile["width"]}x{profile["height"]},CODECS="{codecs}"{audio_attr}'
         )
         hls.append(playlist_url)
 
