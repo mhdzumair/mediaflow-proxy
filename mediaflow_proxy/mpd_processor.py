@@ -442,22 +442,30 @@ def build_hls_playlist(
             extinf_values = [f["extinf"] for f in trimmed_segments if "extinf" in f]
             target_duration = math.ceil(max(extinf_values)) if extinf_values else 3
 
-            # Align HLS media sequence with MPD-provided numbering when available
-            mpd_start_number = profile.get("segment_template_start_number")
-            sequence = first_segment.get("number")
-
-            if sequence is None:
-                # Fallback to MPD template start number
-                if mpd_start_number is not None:
-                    sequence = mpd_start_number
+            # For live TS streams, prioritize timestamp-based sequence for better ExoPlayer compatibility
+            # This matches EasyProxy's behavior and ensures continuity across refreshes
+            if settings.remux_to_ts and is_live:
+                time_val = first_segment.get("time")
+                duration_val = first_segment.get("duration_mpd_timescale")
+                if time_val is not None and duration_val and duration_val > 0:
+                    sequence = math.floor(time_val / duration_val)
                 else:
-                    # As a last resort, derive from timeline information
-                    time_val = first_segment.get("time")
-                    duration_val = first_segment.get("duration_mpd_timescale")
-                    if time_val is not None and duration_val and duration_val > 0:
-                        sequence = math.floor(time_val / duration_val)
+                    sequence = first_segment.get("number") or profile.get("segment_template_start_number") or 1
+            else:
+                # Align HLS media sequence with MPD-provided numbering when available
+                sequence = first_segment.get("number")
+                if sequence is None:
+                    mpd_start_number = profile.get("segment_template_start_number")
+                    if mpd_start_number is not None:
+                        sequence = mpd_start_number
                     else:
-                        sequence = 1
+                        # As a last resort, derive from timeline information
+                        time_val = first_segment.get("time")
+                        duration_val = first_segment.get("duration_mpd_timescale")
+                        if time_val is not None and duration_val and duration_val > 0:
+                            sequence = math.floor(time_val / duration_val)
+                        else:
+                            sequence = 1
 
             hls.extend(
                 [
