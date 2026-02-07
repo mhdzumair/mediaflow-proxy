@@ -9,8 +9,7 @@ logger = logging.getLogger(__name__)
 
 class FreeshotExtractor(BaseExtractor):
     """
-    Extractor per Freeshot (popcdn.day).
-    Risolve l'URL iframe e restituisce l'm3u8 finale.
+    Extractor for Freeshot (popcdn.day).
     """
     
     def __init__(self, request_headers: dict):
@@ -22,10 +21,7 @@ class FreeshotExtractor(BaseExtractor):
         })
 
     async def extract(self, url: str, **kwargs) -> Dict:
-        """
-        Estrae l'URL m3u8 da un link popcdn.day o da un codice canale.
-        """
-        # Determina il codice canale
+
         channel_code = url
         
         if "go.php?stream=" in url:
