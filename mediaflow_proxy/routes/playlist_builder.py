@@ -78,17 +78,27 @@ def rewrite_m3u_links_streaming(
                 current_ext_headers = {}  # Resetta in caso di errore
 
         elif logical_line.startswith("#KODIPROP:"):
-            # Yield the original line to preserve it
-            yield line_with_newline
-
-            is_header_tag = True
             try:
                 prop_str = logical_line.split(":", 1)[1]
                 if "=" in prop_str:
                     key_kodi, value_kodi = prop_str.split("=", 1)
-                    current_kodi_props[key_kodi.strip()] = value_kodi.strip()
+                    key_kodi = key_kodi.strip()
+                    value_kodi = value_kodi.strip()
+                    current_kodi_props[key_kodi] = value_kodi
+
+                    # Se è una delle proprietà DRM/Manifest che stiamo gestendo, non fare lo yield
+                    if key_kodi in [
+                        "inputstream.adaptive.manifest_type",
+                        "inputstream.adaptive.license_type",
+                        "inputstream.adaptive.license_key",
+                    ]:
+                        is_header_tag = True
             except Exception as e:
                 logger.error(f"⚠️ Error parsing #KODIPROP '{logical_line}': {e}")
+
+            if not is_header_tag:
+                yield line_with_newline
+                is_header_tag = True
 
         if is_header_tag:
             continue
