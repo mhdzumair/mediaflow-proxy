@@ -312,12 +312,18 @@ def build_hls(
         is_default = "YES" if i == 0 else "NO"  # Set the first audio track as default
         lang = profile.get("lang", "und")
         bandwidth = profile.get("bandwidth", "128000")
-        name = f"Audio {lang.upper()} ({bandwidth})" if lang != "und" else f"Audio {i+1} ({bandwidth})"
+        name = f"Audio {lang} ({bandwidth})" if lang != "und" else f"Audio {i+1} ({bandwidth})"
         hls.append(
             f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="{name}",DEFAULT={is_default},AUTOSELECT=YES,LANGUAGE="{lang}",URI="{playlist_url}"'
         )
 
     # Add video streams
+    # For remux_to_ts, we follow EasyProxy's behavior and only provide the highest quality
+    # to avoid compatibility issues with some players like ExoPlayer/Stremio
+    if settings.remux_to_ts and video_profiles:
+        max_height = max(p[0].get("height", 0) for p in video_profiles.values())
+        video_profiles = {k: v for k, v in video_profiles.items() if v[0].get("height", 0) >= max_height}
+
     for profile, playlist_url in video_profiles.values():
         # Only add AUDIO attribute if there are audio profiles available
         audio_attr = ',AUDIO="audio"' if audio_profiles else ""
@@ -443,7 +449,11 @@ def build_hls_playlist(
         if index == 0:
             first_segment = trimmed_segments[0]
             extinf_values = [f["extinf"] for f in trimmed_segments if "extinf" in f]
-            target_duration = math.ceil(max(extinf_values)) if extinf_values else 3
+            if settings.remux_to_ts:
+                # Match EasyProxy's target duration calculation
+                target_duration = int(max(extinf_values)) + 1 if extinf_values else 10
+            else:
+                target_duration = math.ceil(max(extinf_values)) if extinf_values else 3
 
             # For live TS streams, prioritize timestamp-based sequence for better ExoPlayer compatibility
             # This matches EasyProxy's behavior and ensures continuity across refreshes
@@ -534,7 +544,7 @@ def build_hls_playlist(
                 need_discontinuity = False
 
             program_date_time = segment.get("program_date_time")
-            if program_date_time:
+            if program_date_time and not settings.remux_to_ts:
                 hls.append(f"#EXT-X-PROGRAM-DATE-TIME:{program_date_time}")
             hls.append(f"#EXTINF:{duration:.3f},")
 
