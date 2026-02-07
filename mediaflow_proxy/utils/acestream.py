@@ -7,7 +7,7 @@ This module provides:
 - AsyncMultiWriter: Fan-out writer for streaming to multiple clients (MPEG-TS mode)
 
 Architecture:
-- Uses file-based session registry for cross-worker coordination
+- Uses Redis for cross-worker coordination and session registry
 - Each worker can reuse existing session's playback_url (acestream allows multiple connections)
 - Session cleanup via command_url?method=stop when all clients disconnect
 """
@@ -17,19 +17,15 @@ import hashlib
 import json
 import logging
 import os
-import tempfile
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional, Dict, Any, List
 from uuid import uuid4
 
-import aiofiles
-import aiofiles.os
 import aiohttp
 
 from mediaflow_proxy.configs import settings
-from mediaflow_proxy.utils.cache_utils import CrossProcessLock
+from mediaflow_proxy.utils import redis_utils
 
 logger = logging.getLogger(__name__)
 
@@ -223,22 +219,19 @@ class AcestreamSessionManager:
 
     Features:
     - Per-worker session tracking
-    - File-based session registry for cross-worker visibility
+    - Redis-based session registry for cross-worker visibility
     - Session creation via acestream's format=json API
     - Session cleanup via command_url?method=stop
     - Session keepalive via periodic stat_url polling
     """
 
+    # Redis key prefixes
+    REGISTRY_PREFIX = "mfp:acestream:session:"
+    REGISTRY_TTL = 3600  # 1 hour
+
     def __init__(self):
         # Per-worker session tracking (infohash -> session)
         self._sessions: Dict[str, AcestreamSession] = {}
-
-        # Cross-process lock for session coordination
-        self._lock = CrossProcessLock(lock_dir=os.path.join(tempfile.gettempdir(), "mediaflow_acestream_locks"))
-
-        # Session registry directory
-        self._registry_dir = Path(tempfile.gettempdir()) / "mediaflow_acestream" / "sessions"
-        self._registry_dir.mkdir(parents=True, exist_ok=True)
 
         # Keepalive task
         self._keepalive_task: Optional[asyncio.Task] = None
@@ -247,12 +240,12 @@ class AcestreamSessionManager:
         # HTTP client session
         self._http_session: Optional[aiohttp.ClientSession] = None
 
-        logger.info(f"[AcestreamSessionManager] Initialized, registry: {self._registry_dir}")
+        logger.info("[AcestreamSessionManager] Initialized with Redis backend")
 
-    def _get_registry_path(self, infohash: str) -> Path:
-        """Get the registry file path for an infohash."""
+    def _get_registry_key(self, infohash: str) -> str:
+        """Get the Redis key for an infohash."""
         hash_key = hashlib.md5(infohash.encode()).hexdigest()
-        return self._registry_dir / f"{hash_key}.json"
+        return f"{self.REGISTRY_PREFIX}{hash_key}"
 
     async def _get_http_session(self) -> aiohttp.ClientSession:
         """Get or create HTTP client session."""
@@ -261,34 +254,32 @@ class AcestreamSessionManager:
         return self._http_session
 
     async def _read_registry(self, infohash: str) -> Optional[Dict[str, Any]]:
-        """Read session data from registry file."""
-        registry_path = self._get_registry_path(infohash)
+        """Read session data from Redis registry."""
         try:
-            if registry_path.exists():
-                async with aiofiles.open(registry_path, "r") as f:
-                    content = await f.read()
-                    return json.loads(content)
+            r = await redis_utils.get_redis()
+            key = self._get_registry_key(infohash)
+            data = await r.get(key)
+            if data:
+                return json.loads(data)
         except Exception as e:
             logger.warning(f"[AcestreamSessionManager] Error reading registry: {e}")
         return None
 
     async def _write_registry(self, session: AcestreamSession) -> None:
-        """Write session data to registry file."""
-        registry_path = self._get_registry_path(session.infohash)
+        """Write session data to Redis registry."""
         try:
-            temp_path = registry_path.with_suffix(".tmp")
-            async with aiofiles.open(temp_path, "w") as f:
-                await f.write(json.dumps(session.to_dict()))
-            await aiofiles.os.rename(temp_path, registry_path)
+            r = await redis_utils.get_redis()
+            key = self._get_registry_key(session.infohash)
+            await r.set(key, json.dumps(session.to_dict()), ex=self.REGISTRY_TTL)
         except Exception as e:
             logger.warning(f"[AcestreamSessionManager] Error writing registry: {e}")
 
     async def _delete_registry(self, infohash: str) -> None:
-        """Delete session from registry file."""
-        registry_path = self._get_registry_path(infohash)
+        """Delete session from Redis registry."""
         try:
-            if registry_path.exists():
-                await aiofiles.os.remove(registry_path)
+            r = await redis_utils.get_redis()
+            key = self._get_registry_key(infohash)
+            await r.delete(key)
         except Exception as e:
             logger.warning(f"[AcestreamSessionManager] Error deleting registry: {e}")
 
@@ -361,7 +352,7 @@ class AcestreamSessionManager:
         """
         Get an existing session or create a new one.
 
-        Uses cross-process locking to coordinate session creation across workers.
+        Uses Redis locking to coordinate session creation across workers.
 
         Args:
             infohash: The infohash of the content
@@ -383,8 +374,14 @@ class AcestreamSessionManager:
             )
             return session
 
-        # Need to create or fetch session - use cross-process lock
-        async with self._lock.acquire(infohash, timeout=30):
+        # Need to create or fetch session - use Redis lock
+        lock_key = f"acestream_session:{infohash}"
+        lock_acquired = await redis_utils.acquire_lock(lock_key, ttl=30, timeout=30)
+
+        if not lock_acquired:
+            raise Exception(f"Failed to acquire lock for acestream session: {infohash[:16]}...")
+
+        try:
             # Double-check after acquiring lock
             if infohash in self._sessions:
                 session = self._sessions[infohash]
@@ -438,6 +435,8 @@ class AcestreamSessionManager:
             except Exception as e:
                 logger.error(f"[AcestreamSessionManager] Failed to create session: {e}")
                 raise
+        finally:
+            await redis_utils.release_lock(lock_key)
 
     async def _validate_session(self, stat_url: str) -> bool:
         """Check if a session is still valid by polling stat_url."""
@@ -515,7 +514,10 @@ class AcestreamSessionManager:
 
         session = self._sessions.pop(infohash)
 
-        async with self._lock.acquire(infohash, timeout=10):
+        lock_key = f"acestream_session:{infohash}"
+        lock_acquired = await redis_utils.acquire_lock(lock_key, ttl=10, timeout=10)
+
+        try:
             # Check if this is the last worker using this session
             registry_data = await self._read_registry(infohash)
 
@@ -540,6 +542,9 @@ class AcestreamSessionManager:
                 logger.debug(
                     f"[AcestreamSessionManager] Session {infohash[:16]}... owned by another worker, not closing"
                 )
+        finally:
+            if lock_acquired:
+                await redis_utils.release_lock(lock_key)
 
     def _ensure_tasks(self) -> None:
         """Ensure background tasks are running."""
@@ -632,37 +637,12 @@ class AcestreamSessionManager:
                         )
                         await self._close_session(infohash)
 
-                # Also clean up stale registry files
-                await self._cleanup_stale_registry()
+                # Note: Redis entries expire via TTL, no manual cleanup needed
 
             except asyncio.CancelledError:
                 return
             except Exception as e:
                 logger.warning(f"[AcestreamSessionManager] Cleanup loop error: {e}")
-
-    async def _cleanup_stale_registry(self) -> None:
-        """Clean up stale registry files."""
-        try:
-            now = time.time()
-            timeout = settings.acestream_session_timeout
-
-            for registry_file in self._registry_dir.glob("*.json"):
-                try:
-                    async with aiofiles.open(registry_file, "r") as f:
-                        content = await f.read()
-                        data = json.loads(content)
-
-                    last_access = data.get("last_access", 0)
-                    if (now - last_access) > timeout:
-                        # Check if session is still alive
-                        if not await self._validate_session(data.get("stat_url", "")):
-                            await aiofiles.os.remove(registry_file)
-                            logger.info(f"[AcestreamSessionManager] Removed stale registry: {registry_file.name}")
-                except Exception as e:
-                    logger.debug(f"[AcestreamSessionManager] Error processing registry file: {e}")
-
-        except Exception as e:
-            logger.warning(f"[AcestreamSessionManager] Stale registry cleanup error: {e}")
 
     def get_session(self, infohash: str) -> Optional[AcestreamSession]:
         """Get a session by infohash if it exists in this worker."""

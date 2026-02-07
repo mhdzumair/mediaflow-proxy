@@ -153,6 +153,13 @@ class Streamer:
             if e.status == 404:
                 logger.debug(f"Segment not found (404): {url}")
                 raise
+            # Don't retry rate-limit errors (429, 509) - retrying while other connections
+            # are still active just wastes time. Let the player handle its own retry logic.
+            if e.status in (429, 509):
+                logger.warning(f"Rate limited ({e.status}) by upstream: {url}")
+                raise aiohttp.ClientResponseError(
+                    e.request_info, e.history, status=e.status, message=e.message
+                )
             logger.error(f"HTTP error {e.status} while creating streaming response")
             raise DownloadError(e.status, f"HTTP error {e.status} while creating streaming response")
         except aiohttp.ClientError as e:

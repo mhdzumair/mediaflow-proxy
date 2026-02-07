@@ -1,7 +1,7 @@
 """
 Base prebuffer class with shared functionality for HLS and DASH prebuffering.
 
-This module provides cross-process download coordination using file-based locking
+This module provides cross-process download coordination using Redis-based locking
 to prevent duplicate downloads across multiple uvicorn workers. Both player requests
 and background prebuffer tasks use the same coordination mechanism.
 """
@@ -17,9 +17,9 @@ from typing import Dict, Optional
 from mediaflow_proxy.utils.cache_utils import (
     get_cached_segment,
     set_cached_segment,
-    SEGMENT_DOWNLOAD_LOCK,
 )
 from mediaflow_proxy.utils.http_utils import download_file_with_retry
+from mediaflow_proxy.utils import redis_utils
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +71,12 @@ class BasePrebuffer(ABC):
     Base class for prebuffer systems with cross-process download coordination.
 
     This class provides:
-    - Cross-process coordination using file-based locks to prevent duplicate downloads
+    - Cross-process coordination using Redis locks to prevent duplicate downloads
     - Memory usage monitoring
     - Cache statistics tracking
     - Shared download and caching logic
 
-    The file-based locking ensures that even with multiple uvicorn workers,
+    The Redis-based locking ensures that even with multiple uvicorn workers,
     only one worker downloads any given segment at a time.
 
     Subclasses should implement protocol-specific logic (HLS playlist parsing,
@@ -107,19 +107,12 @@ class BasePrebuffer(ABC):
         self.emergency_threshold = emergency_threshold
         self.segment_ttl = segment_ttl
 
-        # Cross-process lock for download coordination
-        self._cross_process_lock = SEGMENT_DOWNLOAD_LOCK
-
         # Statistics (per-worker, not shared - but that's fine for monitoring)
         self.stats = PrebufferStats()
 
         # Stats logging task
         self._stats_task: Optional[asyncio.Task] = None
         self._stats_interval = 60  # Log stats every 60 seconds
-
-        # Lock cleanup task
-        self._cleanup_task: Optional[asyncio.Task] = None
-        self._cleanup_interval = 300  # Cleanup stale locks every 5 minutes
 
     def _get_memory_usage_percent(self) -> float:
         """Get current memory usage percentage."""
@@ -149,11 +142,9 @@ class BasePrebuffer(ABC):
         self._ensure_stats_logging()
 
     def _ensure_stats_logging(self) -> None:
-        """Ensure the stats logging and cleanup tasks are running."""
+        """Ensure the stats logging task is running."""
         if self._stats_task is None or self._stats_task.done():
             self._stats_task = asyncio.create_task(self._periodic_stats_logging())
-        if self._cleanup_task is None or self._cleanup_task.done():
-            self._cleanup_task = asyncio.create_task(self._periodic_lock_cleanup())
 
     async def _periodic_stats_logging(self) -> None:
         """Periodically log prebuffer statistics."""
@@ -169,17 +160,6 @@ class BasePrebuffer(ABC):
             except Exception as e:
                 logger.warning(f"Error in stats logging: {e}")
 
-    async def _periodic_lock_cleanup(self) -> None:
-        """Periodically clean up stale lock files."""
-        while True:
-            try:
-                await asyncio.sleep(self._cleanup_interval)
-                await self._cross_process_lock.cleanup_stale_locks()
-            except asyncio.CancelledError:
-                return
-            except Exception as e:
-                logger.warning(f"Error in lock cleanup: {e}")
-
     async def get_or_download(
         self,
         url: str,
@@ -191,11 +171,11 @@ class BasePrebuffer(ABC):
 
         This is the primary method for getting segments. It:
         1. Checks cache first (immediate return if hit)
-        2. Acquires cross-process lock to prevent duplicate downloads across workers
+        2. Acquires Redis lock to prevent duplicate downloads across workers
         3. Double-checks cache after acquiring lock
         4. Downloads and caches if needed
 
-        The file-based locking ensures that even with multiple uvicorn workers,
+        The Redis-based locking ensures that even with multiple uvicorn workers,
         only one worker downloads any given segment at a time.
 
         Args:
@@ -210,7 +190,7 @@ class BasePrebuffer(ABC):
         """
         self._ensure_stats_logging()
 
-        # Check cache first (file-based cache is shared across workers)
+        # Check cache first (Redis cache is shared across workers)
         cached = await get_cached_segment(url)
         if cached:
             self.record_cache_hit()
@@ -220,33 +200,41 @@ class BasePrebuffer(ABC):
         # Cache miss - need to coordinate download across workers
         logger.info(f"[get_or_download] CACHE MISS: {url}")
 
+        lock_key = f"segment_download:{url}"
+        lock_acquired = False
+
         try:
-            # Acquire cross-process lock - only one worker downloads at a time
-            async with self._cross_process_lock.acquire(url, timeout=timeout):
-                # Double-check cache after acquiring lock
-                # Another worker may have completed the download while we waited
-                cached = await get_cached_segment(url)
-                if cached:
-                    # Count this as a cache hit since we didn't download
-                    self.record_cache_hit()
-                    self.stats.downloads_coordinated += 1
-                    logger.info(f"[get_or_download] Found in cache after lock (coordinated): {url}")
-                    return cached
+            # Acquire Redis lock - only one worker downloads at a time
+            lock_acquired = await redis_utils.acquire_lock(lock_key, ttl=30, timeout=timeout)
+            
+            if not lock_acquired:
+                logger.warning(f"[get_or_download] Lock TIMEOUT ({timeout}s), falling back to streaming: {url}")
+                return None
 
-                # We're the one who needs to download - count as miss now
-                self.record_cache_miss()
+            # Double-check cache after acquiring lock
+            # Another worker may have completed the download while we waited
+            cached = await get_cached_segment(url)
+            if cached:
+                # Count this as a cache hit since we didn't download
+                self.record_cache_hit()
+                self.stats.downloads_coordinated += 1
+                logger.info(f"[get_or_download] Found in cache after lock (coordinated): {url}")
+                return cached
 
-                # We're the first - download and cache
-                logger.info(f"[get_or_download] Downloading: {url}")
-                content = await self._download_and_cache(url, headers)
-                return content
+            # We're the one who needs to download - count as miss now
+            self.record_cache_miss()
 
-        except asyncio.TimeoutError:
-            logger.warning(f"[get_or_download] Lock TIMEOUT ({timeout}s), falling back to streaming: {url}")
-            return None
+            # We're the first - download and cache
+            logger.info(f"[get_or_download] Downloading: {url}")
+            content = await self._download_and_cache(url, headers)
+            return content
+
         except Exception as e:
             logger.warning(f"[get_or_download] Error during download coordination: {e}")
             return None
+        finally:
+            if lock_acquired:
+                await redis_utils.release_lock(lock_key)
 
     async def _download_and_cache(
         self,
@@ -256,7 +244,7 @@ class BasePrebuffer(ABC):
         """
         Download a segment and cache it.
 
-        This method should only be called while holding the cross-process lock.
+        This method should only be called while holding the Redis lock.
 
         Args:
             url: URL to download
@@ -299,7 +287,7 @@ class BasePrebuffer(ABC):
         """
         Prebuffer a single segment in the background.
 
-        This method uses cross-process locking to prevent duplicate downloads
+        This method uses Redis locking to prevent duplicate downloads
         across multiple workers.
 
         Args:
@@ -316,25 +304,34 @@ class BasePrebuffer(ABC):
             logger.debug(f"[prebuffer_segment] Already cached, skipping: {url}")
             return
 
+        lock_key = f"segment_download:{url}"
+        lock_acquired = False
+
         try:
             # Try to acquire lock with short timeout for prebuffering
             # If lock is held by another process, skip this segment
-            async with self._cross_process_lock.acquire(url, timeout=1.0):
-                # Double-check cache after acquiring lock
-                cached = await get_cached_segment(url)
-                if cached:
-                    logger.debug(f"[prebuffer_segment] Found in cache after lock: {url}")
-                    return
+            lock_acquired = await redis_utils.acquire_lock(lock_key, ttl=30, timeout=1.0)
+            
+            if not lock_acquired:
+                # Another process is downloading, skip this segment
+                logger.debug(f"[prebuffer_segment] Lock busy, skipping: {url}")
+                return
 
-                # Download and cache
-                logger.info(f"[prebuffer_segment] Downloading: {url}")
-                await self._download_and_cache(url, headers)
+            # Double-check cache after acquiring lock
+            cached = await get_cached_segment(url)
+            if cached:
+                logger.debug(f"[prebuffer_segment] Found in cache after lock: {url}")
+                return
 
-        except asyncio.TimeoutError:
-            # Another process is downloading, skip this segment
-            logger.debug(f"[prebuffer_segment] Lock busy, skipping: {url}")
+            # Download and cache
+            logger.info(f"[prebuffer_segment] Downloading: {url}")
+            await self._download_and_cache(url, headers)
+
         except Exception as e:
             logger.warning(f"[prebuffer_segment] Error: {e}")
+        finally:
+            if lock_acquired:
+                await redis_utils.release_lock(lock_key)
 
     async def prebuffer_segments_batch(
         self,

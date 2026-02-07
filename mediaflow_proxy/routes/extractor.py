@@ -1,3 +1,4 @@
+import copy
 import logging
 from typing import Annotated
 
@@ -7,7 +8,10 @@ from fastapi.responses import RedirectResponse
 from mediaflow_proxy.extractors.base import ExtractorError
 from mediaflow_proxy.extractors.factory import ExtractorFactory
 from mediaflow_proxy.schemas import ExtractorURLParams
-from mediaflow_proxy.utils.cache_utils import get_cached_extractor_result, set_cache_extractor_result
+from mediaflow_proxy.utils.cache_utils import (
+    get_cached_extractor_result,
+    set_cache_extractor_result,
+)
 from mediaflow_proxy.utils.http_utils import (
     DownloadError,
     encode_mediaflow_proxy_url,
@@ -16,9 +20,13 @@ from mediaflow_proxy.utils.http_utils import (
     get_proxy_headers,
 )
 from mediaflow_proxy.utils.base64_utils import process_potential_base64_url
+from mediaflow_proxy.utils import redis_utils
 
 extractor_router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Cooldown duration for background refresh (2 minutes)
+_REFRESH_COOLDOWN = 120
 
 
 async def refresh_extractor_cache(
@@ -54,13 +62,60 @@ async def extract_url(
 
         if response:
             logger.info(f"Serving from cache for key: {cache_key}")
-            # Schedule a background task to refresh the cache without blocking the user
-            background_tasks.add_task(refresh_extractor_cache, cache_key, extractor_params, proxy_headers)
+            # Schedule a background refresh, but only if cooldown has elapsed.
+            # This prevents flooding upstream when many requests arrive at once
+            # (e.g., ExoPlayer sends HEAD + multiple GETs within seconds).
+            # Using Redis-based cooldown for cross-worker coordination.
+            cooldown_key = f"extractor_refresh:{cache_key}"
+            if await redis_utils.check_and_set_cooldown(cooldown_key, _REFRESH_COOLDOWN):
+                background_tasks.add_task(refresh_extractor_cache, cache_key, extractor_params, proxy_headers)
         else:
-            logger.info(f"Cache miss for key: {cache_key}. Fetching fresh data.")
-            extractor = ExtractorFactory.get_extractor(extractor_params.host, proxy_headers.request)
-            response = await extractor.extract(extractor_params.destination, **extractor_params.extra_params)
-            await set_cache_extractor_result(cache_key, response)
+            # Use Redis-based in-flight tracking for cross-worker deduplication.
+            # If another worker is already extracting, wait for them to finish.
+            inflight_key = f"extractor:{cache_key}"
+
+            if not await redis_utils.mark_inflight(inflight_key, ttl=60):
+                # Another worker is extracting - wait for them to finish and check cache
+                logger.info(f"Waiting for in-flight extraction (cross-worker) for key: {cache_key}")
+                if await redis_utils.wait_for_completion(inflight_key, timeout=30.0):
+                    # Extraction completed, check cache
+                    response = await get_cached_extractor_result(cache_key)
+                    if response:
+                        logger.info(f"Serving from cache (after wait) for key: {cache_key}")
+
+            if response is None:
+                # We either marked it as in-flight (first) or waited and still no cache hit.
+                # Use Redis lock to ensure only one worker extracts at a time.
+                if await redis_utils.acquire_lock(f"extractor_lock:{cache_key}", ttl=30, timeout=30.0):
+                    try:
+                        # Re-check cache after acquiring lock - another worker may have populated it
+                        response = await get_cached_extractor_result(cache_key)
+                        if response:
+                            logger.info(f"Serving from cache (after lock) for key: {cache_key}")
+                        else:
+                            logger.info(f"Cache miss for key: {cache_key}. Fetching fresh data.")
+                            try:
+                                extractor = ExtractorFactory.get_extractor(
+                                    extractor_params.host, proxy_headers.request
+                                )
+                                response = await extractor.extract(
+                                    extractor_params.destination, **extractor_params.extra_params
+                                )
+                                await set_cache_extractor_result(cache_key, response)
+                            except Exception:
+                                raise
+                    finally:
+                        await redis_utils.release_lock(f"extractor_lock:{cache_key}")
+                        await redis_utils.clear_inflight(inflight_key)
+                else:
+                    # Lock timeout - try to serve from cache anyway
+                    response = await get_cached_extractor_result(cache_key)
+                    if not response:
+                        raise HTTPException(status_code=503, detail="Extraction in progress, please retry")
+
+        # Deep copy so each concurrent request gets its own dict to mutate
+        # (pop mediaflow_endpoint, update request_headers, etc.)
+        response = copy.deepcopy(response)
 
         # Ensure the latest request headers are used, even with cached data
         if "request_headers" not in response:
