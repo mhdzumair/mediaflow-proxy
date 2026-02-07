@@ -14,7 +14,7 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 - Support for **multi-key DRM** streams (different keys for video/audio tracks)
 - Support for non-DRM protected DASH live and VOD streams
 - Proxy and modify HLS (M3U8) streams in real-time
-- **Smart pre-buffering** for both HLS and DASH streams (enabled by default)
+- **Smart pre-buffering** for both HLS and DASH streams (disabled by default)
 - Proxy HTTP/HTTPS links with custom headers
 
 ### Proxy & Routing
