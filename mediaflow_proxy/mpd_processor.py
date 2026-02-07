@@ -185,7 +185,17 @@ async def _remux_to_ts(content: bytes) -> bytes:
     process = await asyncio.create_subprocess_exec(
         *cmd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
-    stdout, stderr = await process.communicate(input=content)
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(input=content), timeout=30)
+    except asyncio.TimeoutError:
+        logger.error("FFmpeg remuxing timed out after 30 seconds")
+        try:
+            process.kill()
+            await process.wait()
+        except Exception as e:
+            logger.error(f"Error killing FFmpeg process: {e}")
+        return None
+
     if process.returncode != 0:
         logger.error(f"FFmpeg remuxing failed: {stderr.decode()}")
         return None
