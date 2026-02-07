@@ -157,9 +157,7 @@ class Streamer:
             # are still active just wastes time. Let the player handle its own retry logic.
             if e.status in (429, 509):
                 logger.warning(f"Rate limited ({e.status}) by upstream: {url}")
-                raise aiohttp.ClientResponseError(
-                    e.request_info, e.history, status=e.status, message=e.message
-                )
+                raise aiohttp.ClientResponseError(e.request_info, e.history, status=e.status, message=e.message)
             logger.error(f"HTTP error {e.status} while creating streaming response")
             raise DownloadError(e.status, f"HTTP error {e.status} while creating streaming response")
         except aiohttp.ClientError as e:

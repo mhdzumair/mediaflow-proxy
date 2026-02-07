@@ -206,7 +206,7 @@ class BasePrebuffer(ABC):
         try:
             # Acquire Redis lock - only one worker downloads at a time
             lock_acquired = await redis_utils.acquire_lock(lock_key, ttl=30, timeout=timeout)
-            
+
             if not lock_acquired:
                 logger.warning(f"[get_or_download] Lock TIMEOUT ({timeout}s), falling back to streaming: {url}")
                 return None
@@ -311,7 +311,7 @@ class BasePrebuffer(ABC):
             # Try to acquire lock with short timeout for prebuffering
             # If lock is held by another process, skip this segment
             lock_acquired = await redis_utils.acquire_lock(lock_key, ttl=30, timeout=1.0)
-            
+
             if not lock_acquired:
                 # Another process is downloading, skip this segment
                 logger.debug(f"[prebuffer_segment] Lock busy, skipping: {url}")
