@@ -265,8 +265,8 @@ def build_hls(
     Returns:
         str: The HLS manifest as a string.
     """
-    version = 4 if settings.remux_to_ts else 6
-    hls = ["#EXTM3U", f"#EXT-X-VERSION:{version}", "#EXT-X-INDEPENDENT-SEGMENTS"]
+    version = 3 if settings.remux_to_ts else 6
+    hls = ["#EXTM3U", f"#EXT-X-VERSION:{version}"]
     query_params = dict(request.query_params)
 
     # Preserve skip parameter in query params so it propagates to playlists
@@ -311,27 +311,18 @@ def build_hls(
     for i, (profile, playlist_url) in enumerate(audio_profiles.values()):
         is_default = "YES" if i == 0 else "NO"  # Set the first audio track as default
         lang = profile.get("lang", "und")
-        name = lang.upper() if lang != "und" else f"Audio {i+1}"
+        bandwidth = profile.get("bandwidth", "128000")
+        name = f"Audio {lang.upper()} ({bandwidth})" if lang != "und" else f"Audio {i+1} ({bandwidth})"
         hls.append(
-            f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="{name}",DEFAULT={is_default},AUTOSELECT={is_default},LANGUAGE="{lang}",URI="{playlist_url}"'
+            f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="{name}",DEFAULT={is_default},AUTOSELECT=YES,LANGUAGE="{lang}",URI="{playlist_url}"'
         )
 
     # Add video streams
     for profile, playlist_url in video_profiles.values():
         # Only add AUDIO attribute if there are audio profiles available
-        audio_attr = ""
-        all_codecs = profile["codecs"]
-        if audio_profiles:
-            audio_attr = ',AUDIO="audio"'
-            # Add the first audio codec found to the CODECS attribute
-            first_audio_profile = next(iter(audio_profiles.values()))[0]
-            if first_audio_profile.get("codecs"):
-                # Avoid duplicate codecs if they are somehow already there
-                if first_audio_profile["codecs"] not in all_codecs:
-                    all_codecs += f',{first_audio_profile["codecs"]}'
-
+        audio_attr = ',AUDIO="audio"' if audio_profiles else ""
         hls.append(
-            f'#EXT-X-STREAM-INF:BANDWIDTH={profile["bandwidth"]},RESOLUTION={profile["width"]}x{profile["height"]},CODECS="{all_codecs}",FRAME-RATE={profile["frameRate"]}{audio_attr}'
+            f'#EXT-X-STREAM-INF:BANDWIDTH={profile["bandwidth"]},RESOLUTION={profile["width"]}x{profile["height"]},CODECS="{profile["codecs"]}",FRAME-RATE={profile["frameRate"]}{audio_attr}'
         )
         hls.append(playlist_url)
 
@@ -401,8 +392,8 @@ def build_hls_playlist(
     Returns:
         str: The HLS playlist as a string.
     """
-    version = 4 if settings.remux_to_ts else 6
-    hls = ["#EXTM3U", f"#EXT-X-VERSION:{version}", "#EXT-X-INDEPENDENT-SEGMENTS"]
+    version = 3 if settings.remux_to_ts else 6
+    hls = ["#EXTM3U", f"#EXT-X-VERSION:{version}"]
 
     added_segments = 0
     skipped_segments = 0
@@ -443,7 +434,7 @@ def build_hls_playlist(
             continue
 
         if is_live:
-            depth = max(settings.mpd_live_playlist_depth, 1)
+            depth = 20 if settings.remux_to_ts else max(settings.mpd_live_playlist_depth, 1)
             trimmed_segments = segments[-depth:]
         else:
             trimmed_segments = segments
