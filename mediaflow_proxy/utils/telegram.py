@@ -22,7 +22,6 @@ from urllib.parse import urlparse
 
 from telethon import TelegramClient, utils
 from telethon.crypto import AuthKey
-from telethon.errors import MessageIdInvalidError
 from telethon.network import MTProtoSender
 from telethon.sessions import StringSession
 from telethon.tl.alltlobjects import LAYER
@@ -530,11 +529,11 @@ class TelegramSessionManager:
 
             logger.info("Initializing Telegram client...")
 
-            # Create client with StringSession
+            # Create client with StringSession (extract raw values from SecretStr)
             self._client = TelegramClient(
-                StringSession(settings.telegram_session_string),
+                StringSession(settings.telegram_session_string.get_secret_value()),
                 settings.telegram_api_id,
-                settings.telegram_api_hash,
+                settings.telegram_api_hash.get_secret_value(),
                 request_retries=3,
                 connection_retries=3,
                 retry_delay=1,
@@ -573,7 +572,7 @@ class TelegramSessionManager:
         messages = await client.get_messages(ref.chat_id, ids=ref.message_id)
 
         if not messages:
-            raise MessageIdInvalidError(f"Message {ref.message_id} not found in {ref.chat_id}")
+            raise ValueError(f"Message {ref.message_id} not found in {ref.chat_id}")
 
         return messages
 
@@ -894,10 +893,13 @@ class TelegramSessionManager:
             else:
                 raise ValueError(f"Unsupported media type from file_id: {type(media)}")
 
-            # Use parallel transferrer for download
+            # Use parallel transferrer for download with guaranteed cleanup
             transferrer = ParallelTransferrer(client, dc_id)
-            async for chunk in transferrer.download(file_location, actual_file_size, offset=offset, limit=limit):
-                yield chunk
+            try:
+                async for chunk in transferrer.download(file_location, actual_file_size, offset=offset, limit=limit):
+                    yield chunk
+            finally:
+                await transferrer._cleanup()
             return
 
         # Handle message-based reference
@@ -939,10 +941,13 @@ class TelegramSessionManager:
         else:
             raise ValueError(f"Unsupported media type: {type(message.media)}")
 
-        # Use parallel transferrer for download
+        # Use parallel transferrer for download with guaranteed cleanup
         transferrer = ParallelTransferrer(client, dc_id)
-        async for chunk in transferrer.download(file_location, actual_file_size, offset=offset, limit=limit):
-            yield chunk
+        try:
+            async for chunk in transferrer.download(file_location, actual_file_size, offset=offset, limit=limit):
+                yield chunk
+        finally:
+            await transferrer._cleanup()
 
     async def close(self) -> None:
         """Close the Telegram client connection."""

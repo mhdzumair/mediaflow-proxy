@@ -45,7 +45,7 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 ### Telegram MTProto Proxy
 - **Telegram video streaming** - Stream videos from Telegram channels, groups, and DMs through MediaFlow
 - **High-speed parallel downloads** using FastTelethon technique (up to 20+ MB/s)
-- **Full range request support** - Seeking works seamlessly in video players
+- **Full range-request support** - Seeking works seamlessly in video players
 - Support for **t.me links** and direct file references
 - Works with public channels, private channels (if member), groups, and DMs
 - Persistent session management with automatic reconnection
@@ -254,11 +254,8 @@ MediaFlow Proxy can stream Telegram media (videos, documents, photos) through th
 | `TELEGRAM_API_ID` | Telegram API ID from my.telegram.org | Required |
 | `TELEGRAM_API_HASH` | Telegram API Hash from my.telegram.org | Required |
 | `TELEGRAM_SESSION_STRING` | Persistent session string (see below) | Required |
-| `TELEGRAM_CHUNK_SIZE` | Chunk size for downloads (bytes) | `524288` (512KB) |
 | `TELEGRAM_MAX_CONNECTIONS` | Max parallel DC connections | `8` |
 | `TELEGRAM_REQUEST_TIMEOUT` | Request timeout in seconds | `30` |
-| `TELEGRAM_CACHE_SIZE` | Max cached chunks in memory | `100` |
-| `TELEGRAM_CACHE_TTL` | Cache TTL in seconds | `300` |
 
 #### Generating a Session String
 

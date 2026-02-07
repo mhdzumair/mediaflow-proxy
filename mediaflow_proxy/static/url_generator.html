@@ -2676,12 +2676,12 @@ TELEGRAM_SESSION_STRING=${sessionString}`;
                 const response = await fetch(url);
                 const data = await response.json();
                 
-                if (data.status === 'connected') {
+                if (data.status === 'connected' || data.status === 'ready') {
                     resultDiv.innerHTML = `
                         <div class="p-3 bg-green-100 dark:bg-green-900/30 rounded-lg border border-green-200 dark:border-green-800">
                             <div class="flex items-center gap-2 text-green-700 dark:text-green-300 text-sm font-medium">
                                 <span>✅</span>
-                                <span>Connected</span>
+                                <span>${data.status === 'connected' ? 'Connected' : 'Ready'}</span>
                             </div>
                             <p class="text-xs text-green-600 dark:text-green-400 mt-1">${data.message || 'Telegram proxy is ready to use'}</p>
                         </div>

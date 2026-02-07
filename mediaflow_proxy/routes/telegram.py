@@ -100,6 +100,10 @@ def parse_range_header(range_header: Optional[str], file_size: int) -> tuple[int
         start = 0
         end = file_size - 1
 
+    # Validate start <= end (handle malformed ranges like "bytes=999-0")
+    if start > end:
+        return 0, file_size - 1
+
     return start, end
 
 
@@ -443,25 +447,16 @@ async def telegram_status():
             "status": "connected",
             "message": "Telegram client is connected and ready",
             "max_connections": settings.telegram_max_connections,
-            "chunk_size": settings.telegram_chunk_size,
         }
 
-    # Try to connect
-    try:
-        await telegram_manager.get_client()
-        return {
-            "enabled": True,
-            "status": "connected",
-            "message": "Telegram client connected successfully",
-            "max_connections": settings.telegram_max_connections,
-            "chunk_size": settings.telegram_chunk_size,
-        }
-    except Exception as e:
-        return {
-            "enabled": True,
-            "status": "error",
-            "message": f"Failed to connect: {type(e).__name__}: {str(e)}",
-        }
+    # Don't trigger connection - just report ready status
+    # Connection will be established on first actual request
+    return {
+        "enabled": True,
+        "status": "ready",
+        "message": "Telegram client is configured and ready. Will connect on first request.",
+        "max_connections": settings.telegram_max_connections,
+    }
 
 
 # =============================================================================
