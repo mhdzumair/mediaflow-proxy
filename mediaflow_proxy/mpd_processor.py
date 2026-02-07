@@ -150,7 +150,7 @@ async def process_segment(
             # Concatenate init and segment content
             decrypted_content = init_content + segment_content
 
-    if settings.remux_to_ts and key_id and key:
+    if settings.remux_to_ts:
         try:
             now = time.time()
             remuxed_content = await _remux_to_ts(decrypted_content)
@@ -405,7 +405,9 @@ def build_hls_playlist(
         if settings.remux_to_ts and is_live and start_offset is None:
             # Match EasyProxy's -30.0 for TS live streams if not explicitly overridden
             effective_start_offset = -30.0
-        hls.append(f"#EXT-X-START:TIME-OFFSET={effective_start_offset:.1f},PRECISE=YES")
+        
+        precise = "NO" if settings.remux_to_ts else "YES"
+        hls.append(f"#EXT-X-START:TIME-OFFSET={effective_start_offset:.1f},PRECISE={precise}")
 
     # Initialize skip filter if skip_segments provided
     skip_filter = SkipSegmentFilter(skip_segments) if skip_segments else None
@@ -415,6 +417,8 @@ def build_hls_playlist(
 
     proxy_url = request.url_for("segment_endpoint")
     proxy_url = str(proxy_url.replace(scheme=get_original_scheme(request)))
+    if settings.remux_to_ts:
+        proxy_url = proxy_url.replace("/mpd/segment.mp4", "/mpd/segment.ts")
 
     # Get init endpoint URL for EXT-X-MAP
     init_proxy_url = request.url_for("init_endpoint")
@@ -475,7 +479,8 @@ def build_hls_playlist(
         has_encrypted = query_params.pop("has_encrypted", False)
 
         # Add EXT-X-MAP for init segment (for live streams or when beneficial)
-        if use_map and not (settings.remux_to_ts and query_params.get("key_id")):
+        # TS segments (HLS v3) do not support EXT-X-MAP
+        if use_map and not settings.remux_to_ts:
             init_query_params = {
                 "init_url": init_url,
                 "mime_type": profile["mimeType"],
@@ -530,7 +535,7 @@ def build_hls_playlist(
             }
 
             # Add use_map flag so segment endpoint knows not to include init
-            if use_map and not (settings.remux_to_ts and query_params.get("key_id")):
+            if use_map and not settings.remux_to_ts:
                 segment_query_params["use_map"] = "true"
 
             # Add byte range parameters for SegmentBase
