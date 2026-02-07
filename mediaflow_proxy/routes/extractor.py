@@ -43,15 +43,36 @@ async def refresh_extractor_cache(
         logger.error(f"Background cache refresh failed for key {cache_key}: {e}")
 
 
-@extractor_router.head("/video")
-@extractor_router.get("/video")
-async def extract_url(
-    extractor_params: Annotated[ExtractorURLParams, Query()],
+# Extension to content-type mapping for player compatibility
+# When a player requests /extractor/video.m3u8, it can detect HLS from the URL
+EXTRACTOR_EXT_CONTENT_TYPES = {
+    "m3u8": "application/vnd.apple.mpegurl",
+    "m3u": "application/vnd.apple.mpegurl",
+    "mp4": "video/mp4",
+    "mkv": "video/x-matroska",
+    "ts": "video/mp2t",
+    "avi": "video/x-msvideo",
+    "webm": "video/webm",
+}
+
+
+async def _extract_url_impl(
+    extractor_params: ExtractorURLParams,
     request: Request,
     background_tasks: BackgroundTasks,
-    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+    proxy_headers: ProxyRequestHeaders,
+    ext: str | None = None,
 ):
-    """Extract clean links from various video hosting services."""
+    """
+    Core extraction logic shared by all extractor endpoints.
+    
+    Args:
+        extractor_params: Extraction parameters from query string
+        request: FastAPI request object
+        background_tasks: Background task manager
+        proxy_headers: Proxy headers from request
+        ext: Optional file extension hint for player compatibility (e.g., "m3u8", "mp4")
+    """
     try:
         # Process potential base64 encoded destination URL
         processed_destination = process_potential_base64_url(extractor_params.destination)
@@ -152,3 +173,62 @@ async def extract_url(
     except Exception as e:
         logger.exception(f"Extraction failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
+
+
+@extractor_router.head("/video")
+@extractor_router.get("/video")
+async def extract_url(
+    extractor_params: Annotated[ExtractorURLParams, Query()],
+    request: Request,
+    background_tasks: BackgroundTasks,
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+):
+    """
+    Extract clean links from various video hosting services.
+    
+    This is the base endpoint without extension. For better player compatibility
+    (especially ExoPlayer), use the extension variants:
+    - /extractor/video.m3u8 for HLS streams
+    - /extractor/video.mp4 for MP4 streams
+    """
+    return await _extract_url_impl(extractor_params, request, background_tasks, proxy_headers)
+
+
+@extractor_router.head("/video.{ext}")
+@extractor_router.get("/video.{ext}")
+async def extract_url_with_extension(
+    ext: str,
+    extractor_params: Annotated[ExtractorURLParams, Query()],
+    request: Request,
+    background_tasks: BackgroundTasks,
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+):
+    """
+    Extract clean links with file extension hint for player compatibility.
+    
+    The extension in the URL helps players like ExoPlayer detect the content type
+    without needing to follow redirects or inspect headers. This is especially
+    important for HLS streams where ExoPlayer needs .m3u8 in the URL to use
+    HlsMediaSource instead of ProgressiveMediaSource.
+    
+    Supported extensions:
+    - .m3u8, .m3u - HLS playlists (application/vnd.apple.mpegurl)
+    - .mp4 - MP4 video (video/mp4)
+    - .mkv - Matroska video (video/x-matroska)
+    - .ts - MPEG-TS (video/mp2t)
+    - .avi - AVI video (video/x-msvideo)
+    - .webm - WebM video (video/webm)
+    
+    Example:
+        /extractor/video.m3u8?host=TurboVidPlay&d=...&redirect_stream=true
+        
+    This URL clearly indicates HLS content, making ExoPlayer use the correct source.
+    """
+    ext_lower = ext.lower()
+    if ext_lower not in EXTRACTOR_EXT_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported extension: .{ext}. Supported: {', '.join('.' + e for e in EXTRACTOR_EXT_CONTENT_TYPES.keys())}"
+        )
+    
+    return await _extract_url_impl(extractor_params, request, background_tasks, proxy_headers, ext=ext_lower)
