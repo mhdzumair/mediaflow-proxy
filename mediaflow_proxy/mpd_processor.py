@@ -548,6 +548,9 @@ def build_hls_playlist(
             # Add use_map flag so segment endpoint knows not to include init
             if use_map and not settings.remux_to_ts:
                 segment_query_params["use_map"] = "true"
+            elif settings.remux_to_ts:
+                # For TS streams, we never use MAP and always need the init segment for remuxing
+                segment_query_params["use_map"] = "false"
 
             # Add byte range parameters for SegmentBase
             if init_range:
