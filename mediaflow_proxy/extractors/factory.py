@@ -7,6 +7,7 @@ from mediaflow_proxy.extractors.sportsonline import SportsonlineExtractor
 from mediaflow_proxy.extractors.filelions import FileLionsExtractor
 from mediaflow_proxy.extractors.filemoon import FileMoonExtractor
 from mediaflow_proxy.extractors.F16Px import F16PxExtractor
+from mediaflow_proxy.extractors.gupload import GuploadExtractor
 from mediaflow_proxy.extractors.livetv import LiveTVExtractor
 from mediaflow_proxy.extractors.lulustream import LuluStreamExtractor
 from mediaflow_proxy.extractors.maxstream import MaxstreamExtractor
@@ -33,6 +34,7 @@ class ExtractorFactory:
         "FileLions": FileLionsExtractor,
         "FileMoon": FileMoonExtractor,
         "F16Px": F16PxExtractor,
+        "Gupload": GuploadExtractor,
         "Uqload": UqloadExtractor,
         "Mixdrop": MixdropExtractor,
         "Streamtape": StreamtapeExtractor,
