@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MediaFlow Proxy</title>
     <link rel="icon" href="/logo.png" type="image/x-icon">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -183,6 +184,14 @@
                     </span>
                     <span class="text-gray-700 dark:text-gray-300 text-sm">Acestream P2P proxy with HLS and MPEG-TS output support</span>
                 </div>
+                <div class="feature-item flex items-start gap-3 p-4 rounded-xl bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700">
+                    <span class="text-indigo-500 mt-0.5">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                        </svg>
+                    </span>
+                    <span class="text-gray-700 dark:text-gray-300 text-sm">Telegram MTProto proxy with high-speed parallel downloads</span>
+                </div>
             </div>
         </div>
 
@@ -192,7 +201,7 @@
             Tools
         </h2>
         
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 mb-10 animate-slide-up" style="animation-delay: 0.3s;">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10 animate-slide-up" style="animation-delay: 0.3s;">
             <!-- Speed Test Card -->
             <a href="/speedtest" class="tool-card block bg-white dark:bg-gray-800 rounded-2xl shadow-xl overflow-hidden border border-gray-200 dark:border-gray-700 hover:shadow-2xl">
                 <div class="h-2 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
@@ -259,6 +268,20 @@
                     <h3 class="text-lg font-bold text-gray-800 dark:text-white mb-2">Acestream Proxy</h3>
                     <p class="text-sm text-gray-600 dark:text-gray-400">
                         Generate URLs to proxy Acestream P2P content via HLS or MPEG-TS streams.
+                    </p>
+                </div>
+            </a>
+
+            <!-- Telegram Proxy Card -->
+            <a href="/url-generator#telegram" class="tool-card block bg-white dark:bg-gray-800 rounded-2xl shadow-xl overflow-hidden border border-gray-200 dark:border-gray-700 hover:shadow-2xl">
+                <div class="h-2 bg-gradient-to-r from-sky-500 to-blue-500"></div>
+                <div class="p-6">
+                    <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-500 to-blue-500 flex items-center justify-center text-white text-2xl mb-4">
+                        <i class="fa-brands fa-telegram"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-gray-800 dark:text-white mb-2">Telegram Proxy</h3>
+                    <p class="text-sm text-gray-600 dark:text-gray-400">
+                        Stream Telegram media with high-speed parallel downloads and seeking support.
                     </p>
                 </div>
             </a>

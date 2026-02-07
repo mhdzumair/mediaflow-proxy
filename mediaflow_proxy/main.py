@@ -18,6 +18,7 @@ from mediaflow_proxy.routes import (
     playlist_builder_router,
     xtream_root_router,
     acestream_router,
+    telegram_router,
 )
 from mediaflow_proxy.schemas import GenerateUrlRequest, GenerateMultiUrlRequest, MultiUrlRequestItem
 from mediaflow_proxy.utils.cache_utils import EXTRACTOR_CACHE
@@ -25,6 +26,7 @@ from mediaflow_proxy.utils.crypto_utils import EncryptionHandler, EncryptionMidd
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
 from mediaflow_proxy.utils.base64_utils import encode_url_to_base64, decode_base64_url, is_base64_url
 from mediaflow_proxy.utils.acestream import acestream_manager
+from mediaflow_proxy.utils.telegram import telegram_manager
 
 logging.basicConfig(level=settings.log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -46,6 +48,9 @@ async def lifespan(app: FastAPI):
     # Close acestream sessions
     await acestream_manager.close()
     logger.info("Acestream manager closed")
+    # Close telegram session
+    await telegram_manager.close()
+    logger.info("Telegram manager closed")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -277,6 +282,7 @@ async def check_base64_url(url: str):
 
 app.include_router(proxy_router, prefix="/proxy", tags=["proxy"], dependencies=[Depends(verify_api_key)])
 app.include_router(acestream_router, prefix="/proxy", tags=["acestream"], dependencies=[Depends(verify_api_key)])
+app.include_router(telegram_router, prefix="/proxy", tags=["telegram"], dependencies=[Depends(verify_api_key)])
 app.include_router(extractor_router, prefix="/extractor", tags=["extractors"], dependencies=[Depends(verify_api_key)])
 app.include_router(speedtest_router, prefix="/speedtest", tags=["speedtest"], dependencies=[Depends(verify_api_key)])
 app.include_router(playlist_builder_router, prefix="/playlist", tags=["playlist"])
