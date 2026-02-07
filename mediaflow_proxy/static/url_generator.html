@@ -511,7 +511,7 @@
                 <div class="space-y-4">
                     <div>
                         <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Video Host <span class="text-red-500">*</span></label>
-                        <select id="extractor-host" class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500">
+                        <select id="extractor-host" onchange="onExtractorHostChange()" class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500">
                             <option value="">Select a host...</option>
                             <option value="Doodstream">Doodstream</option>
                             <option value="FileLions">FileLions</option>
@@ -561,6 +561,25 @@
                                 <span class="text-sm text-gray-700 dark:text-gray-300">No Proxy</span>
                             </label>
                         </div>
+                        
+                        <!-- URL Extension -->
+                        <div class="mt-4">
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">URL Extension <span class="text-gray-400 font-normal">(for player compatibility)</span></label>
+                            <select id="extractor-extension" class="input-field w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                                <option value="">None (default)</option>
+                                <option value="m3u8">HLS (.m3u8) - for ExoPlayer/Android</option>
+                                <option value="mp4">MP4 (.mp4)</option>
+                                <option value="ts">MPEG-TS (.ts)</option>
+                                <option value="mkv">MKV (.mkv)</option>
+                                <option value="webm">WebM (.webm)</option>
+                                <option value="avi">AVI (.avi)</option>
+                            </select>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                <strong>Tip:</strong> Use <code>.m3u8</code> for HLS streams when using ExoPlayer (Android/Stremio). 
+                                The extension helps players detect the stream type from the URL.
+                            </p>
+                        </div>
+                        
                         <div class="mt-3 text-xs text-gray-500 dark:text-gray-400 space-y-1">
                             <p><strong>Redirect to Stream:</strong> Automatically redirect to the stream endpoint after extraction</p>
                             <p><strong>Max Resolution:</strong> Select the highest resolution available</p>
@@ -669,6 +688,8 @@
                                 <option value="/proxy/mpd/manifest.m3u8">MPD Manifest (/proxy/mpd/manifest.m3u8)</option>
                                 <option value="/proxy/stream">Stream (/proxy/stream)</option>
                                 <option value="/extractor/video">Extractor (/extractor/video)</option>
+                                <option value="/extractor/video.m3u8">Extractor HLS (/extractor/video.m3u8)</option>
+                                <option value="/extractor/video.mp4">Extractor MP4 (/extractor/video.mp4)</option>
                             </select>
                         </div>
                     </div>
@@ -1909,6 +1930,27 @@
             document.getElementById('proxy-output').classList.remove('hidden');
         }
 
+        // Hosts that return HLS streams (auto-suggest .m3u8 extension)
+        const HLS_EXTRACTOR_HOSTS = [
+            'TurboVidPlay', 'FileMoon', 'StreamWish', 'VixCloud', 
+            'LiveTV', 'LuluStream', 'DLHD', 'Fastream', 'Sportsonline',
+            'FileLions', 'Vidmoly', 'Voe'
+        ];
+        
+        // Handle extractor host selection change
+        function onExtractorHostChange() {
+            const host = document.getElementById('extractor-host').value;
+            const extensionSelect = document.getElementById('extractor-extension');
+            
+            // Auto-suggest .m3u8 for HLS hosts if no extension is currently selected
+            if (HLS_EXTRACTOR_HOSTS.includes(host) && extensionSelect.value === '') {
+                extensionSelect.value = 'm3u8';
+            } else if (!HLS_EXTRACTOR_HOSTS.includes(host) && extensionSelect.value === 'm3u8') {
+                // Reset to none if switching to non-HLS host (only if m3u8 was auto-selected)
+                extensionSelect.value = '';
+            }
+        }
+
         // Generate Extractor URL
         function generateExtractorUrl() {
             const baseUrl = window.location.origin;
@@ -1916,6 +1958,7 @@
             
             const host = document.getElementById('extractor-host').value;
             const destination = document.getElementById('extractor-destination').value.trim();
+            const extension = document.getElementById('extractor-extension').value;
             
             if (!host) {
                 alert('Please select a video host');
@@ -1973,7 +2016,9 @@
                 params.append('api_password', apiPassword);
             }
             
-            const finalUrl = `${baseUrl}/extractor/video?${params.toString()}`;
+            // Build endpoint path with optional extension
+            const endpoint = extension ? `/extractor/video.${extension}` : '/extractor/video';
+            const finalUrl = `${baseUrl}${endpoint}?${params.toString()}`;
             
             document.getElementById('extractor-generated-url').textContent = finalUrl;
             document.getElementById('extractor-output').classList.remove('hidden');

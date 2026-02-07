@@ -21,8 +21,8 @@ from mediaflow_proxy.routes import (
     telegram_router,
 )
 from mediaflow_proxy.schemas import GenerateUrlRequest, GenerateMultiUrlRequest, MultiUrlRequestItem
-from mediaflow_proxy.utils.cache_utils import EXTRACTOR_CACHE
 from mediaflow_proxy.utils.crypto_utils import EncryptionHandler, EncryptionMiddleware
+from mediaflow_proxy.utils import redis_utils
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
 from mediaflow_proxy.utils.base64_utils import encode_url_to_base64, decode_base64_url, is_base64_url
 from mediaflow_proxy.utils.acestream import acestream_manager
@@ -38,8 +38,10 @@ async def lifespan(app: FastAPI):
     # Startup
     if settings.clear_cache_on_startup:
         logger.info("Clearing caches on startup (CLEAR_CACHE_ON_STARTUP=true)")
-        EXTRACTOR_CACHE.clear()
-        logger.info("Extractor cache cleared")
+        # Note: Redis cache clearing would require FLUSHDB which is too aggressive.
+        # Individual cache entries will expire via TTL. If full clear is needed,
+        # use redis-cli KEYS "mfp:*" | xargs redis-cli DEL
+        logger.info("Cache clearing note: Redis entries will expire via TTL")
 
     yield
 
@@ -51,6 +53,9 @@ async def lifespan(app: FastAPI):
     # Close telegram session
     await telegram_manager.close()
     logger.info("Telegram manager closed")
+    # Close Redis connections
+    await redis_utils.close_redis()
+    logger.info("Redis connections closed")
 
 
 app = FastAPI(lifespan=lifespan)

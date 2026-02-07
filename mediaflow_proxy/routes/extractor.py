@@ -1,3 +1,4 @@
+import copy
 import logging
 from typing import Annotated
 
@@ -7,7 +8,10 @@ from fastapi.responses import RedirectResponse
 from mediaflow_proxy.extractors.base import ExtractorError
 from mediaflow_proxy.extractors.factory import ExtractorFactory
 from mediaflow_proxy.schemas import ExtractorURLParams
-from mediaflow_proxy.utils.cache_utils import get_cached_extractor_result, set_cache_extractor_result
+from mediaflow_proxy.utils.cache_utils import (
+    get_cached_extractor_result,
+    set_cache_extractor_result,
+)
 from mediaflow_proxy.utils.http_utils import (
     DownloadError,
     encode_mediaflow_proxy_url,
@@ -16,9 +20,13 @@ from mediaflow_proxy.utils.http_utils import (
     get_proxy_headers,
 )
 from mediaflow_proxy.utils.base64_utils import process_potential_base64_url
+from mediaflow_proxy.utils import redis_utils
 
 extractor_router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Cooldown duration for background refresh (2 minutes)
+_REFRESH_COOLDOWN = 120
 
 
 async def refresh_extractor_cache(
@@ -35,15 +43,36 @@ async def refresh_extractor_cache(
         logger.error(f"Background cache refresh failed for key {cache_key}: {e}")
 
 
-@extractor_router.head("/video")
-@extractor_router.get("/video")
-async def extract_url(
-    extractor_params: Annotated[ExtractorURLParams, Query()],
+# Extension to content-type mapping for player compatibility
+# When a player requests /extractor/video.m3u8, it can detect HLS from the URL
+EXTRACTOR_EXT_CONTENT_TYPES = {
+    "m3u8": "application/vnd.apple.mpegurl",
+    "m3u": "application/vnd.apple.mpegurl",
+    "mp4": "video/mp4",
+    "mkv": "video/x-matroska",
+    "ts": "video/mp2t",
+    "avi": "video/x-msvideo",
+    "webm": "video/webm",
+}
+
+
+async def _extract_url_impl(
+    extractor_params: ExtractorURLParams,
     request: Request,
     background_tasks: BackgroundTasks,
-    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+    proxy_headers: ProxyRequestHeaders,
+    ext: str | None = None,
 ):
-    """Extract clean links from various video hosting services."""
+    """
+    Core extraction logic shared by all extractor endpoints.
+
+    Args:
+        extractor_params: Extraction parameters from query string
+        request: FastAPI request object
+        background_tasks: Background task manager
+        proxy_headers: Proxy headers from request
+        ext: Optional file extension hint for player compatibility (e.g., "m3u8", "mp4")
+    """
     try:
         # Process potential base64 encoded destination URL
         processed_destination = process_potential_base64_url(extractor_params.destination)
@@ -54,13 +83,58 @@ async def extract_url(
 
         if response:
             logger.info(f"Serving from cache for key: {cache_key}")
-            # Schedule a background task to refresh the cache without blocking the user
-            background_tasks.add_task(refresh_extractor_cache, cache_key, extractor_params, proxy_headers)
+            # Schedule a background refresh, but only if cooldown has elapsed.
+            # This prevents flooding upstream when many requests arrive at once
+            # (e.g., ExoPlayer sends HEAD + multiple GETs within seconds).
+            # Using Redis-based cooldown for cross-worker coordination.
+            cooldown_key = f"extractor_refresh:{cache_key}"
+            if await redis_utils.check_and_set_cooldown(cooldown_key, _REFRESH_COOLDOWN):
+                background_tasks.add_task(refresh_extractor_cache, cache_key, extractor_params, proxy_headers)
         else:
-            logger.info(f"Cache miss for key: {cache_key}. Fetching fresh data.")
-            extractor = ExtractorFactory.get_extractor(extractor_params.host, proxy_headers.request)
-            response = await extractor.extract(extractor_params.destination, **extractor_params.extra_params)
-            await set_cache_extractor_result(cache_key, response)
+            # Use Redis-based in-flight tracking for cross-worker deduplication.
+            # If another worker is already extracting, wait for them to finish.
+            inflight_key = f"extractor:{cache_key}"
+
+            if not await redis_utils.mark_inflight(inflight_key, ttl=60):
+                # Another worker is extracting - wait for them to finish and check cache
+                logger.info(f"Waiting for in-flight extraction (cross-worker) for key: {cache_key}")
+                if await redis_utils.wait_for_completion(inflight_key, timeout=30.0):
+                    # Extraction completed, check cache
+                    response = await get_cached_extractor_result(cache_key)
+                    if response:
+                        logger.info(f"Serving from cache (after wait) for key: {cache_key}")
+
+            if response is None:
+                # We either marked it as in-flight (first) or waited and still no cache hit.
+                # Use Redis lock to ensure only one worker extracts at a time.
+                if await redis_utils.acquire_lock(f"extractor_lock:{cache_key}", ttl=30, timeout=30.0):
+                    try:
+                        # Re-check cache after acquiring lock - another worker may have populated it
+                        response = await get_cached_extractor_result(cache_key)
+                        if response:
+                            logger.info(f"Serving from cache (after lock) for key: {cache_key}")
+                        else:
+                            logger.info(f"Cache miss for key: {cache_key}. Fetching fresh data.")
+                            try:
+                                extractor = ExtractorFactory.get_extractor(extractor_params.host, proxy_headers.request)
+                                response = await extractor.extract(
+                                    extractor_params.destination, **extractor_params.extra_params
+                                )
+                                await set_cache_extractor_result(cache_key, response)
+                            except Exception:
+                                raise
+                    finally:
+                        await redis_utils.release_lock(f"extractor_lock:{cache_key}")
+                        await redis_utils.clear_inflight(inflight_key)
+                else:
+                    # Lock timeout - try to serve from cache anyway
+                    response = await get_cached_extractor_result(cache_key)
+                    if not response:
+                        raise HTTPException(status_code=503, detail="Extraction in progress, please retry")
+
+        # Deep copy so each concurrent request gets its own dict to mutate
+        # (pop mediaflow_endpoint, update request_headers, etc.)
+        response = copy.deepcopy(response)
 
         # Ensure the latest request headers are used, even with cached data
         if "request_headers" not in response:
@@ -97,3 +171,62 @@ async def extract_url(
     except Exception as e:
         logger.exception(f"Extraction failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
+
+
+@extractor_router.head("/video")
+@extractor_router.get("/video")
+async def extract_url(
+    extractor_params: Annotated[ExtractorURLParams, Query()],
+    request: Request,
+    background_tasks: BackgroundTasks,
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+):
+    """
+    Extract clean links from various video hosting services.
+
+    This is the base endpoint without extension. For better player compatibility
+    (especially ExoPlayer), use the extension variants:
+    - /extractor/video.m3u8 for HLS streams
+    - /extractor/video.mp4 for MP4 streams
+    """
+    return await _extract_url_impl(extractor_params, request, background_tasks, proxy_headers)
+
+
+@extractor_router.head("/video.{ext}")
+@extractor_router.get("/video.{ext}")
+async def extract_url_with_extension(
+    ext: str,
+    extractor_params: Annotated[ExtractorURLParams, Query()],
+    request: Request,
+    background_tasks: BackgroundTasks,
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+):
+    """
+    Extract clean links with file extension hint for player compatibility.
+
+    The extension in the URL helps players like ExoPlayer detect the content type
+    without needing to follow redirects or inspect headers. This is especially
+    important for HLS streams where ExoPlayer needs .m3u8 in the URL to use
+    HlsMediaSource instead of ProgressiveMediaSource.
+
+    Supported extensions:
+    - .m3u8, .m3u - HLS playlists (application/vnd.apple.mpegurl)
+    - .mp4 - MP4 video (video/mp4)
+    - .mkv - Matroska video (video/x-matroska)
+    - .ts - MPEG-TS (video/mp2t)
+    - .avi - AVI video (video/x-msvideo)
+    - .webm - WebM video (video/webm)
+
+    Example:
+        /extractor/video.m3u8?host=TurboVidPlay&d=...&redirect_stream=true
+
+    This URL clearly indicates HLS content, making ExoPlayer use the correct source.
+    """
+    ext_lower = ext.lower()
+    if ext_lower not in EXTRACTOR_EXT_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported extension: .{ext}. Supported: {', '.join('.' + e for e in EXTRACTOR_EXT_CONTENT_TYPES.keys())}",
+        )
+
+    return await _extract_url_impl(extractor_params, request, background_tasks, proxy_headers, ext=ext_lower)
