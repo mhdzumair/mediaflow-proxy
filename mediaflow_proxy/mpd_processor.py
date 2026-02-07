@@ -315,7 +315,7 @@ def build_hls(
         )
 
     # Add video streams
-    # For remux_to_ts, we follow EasyProxy's behavior and only provide the highest quality
+    # For remux_to_ts, we only provide the highest quality
     # to avoid compatibility issues with some players like ExoPlayer/Stremio
     if settings.remux_to_ts and video_profiles:
         max_height = max(p[0].get("height", 0) for p in video_profiles.values())
@@ -422,7 +422,7 @@ def build_hls_playlist(
     )
     if effective_start_offset is not None:
         if settings.remux_to_ts and is_live and start_offset is None:
-            # Match EasyProxy's -30.0 for TS live streams if not explicitly overridden
+            # Use -30.0 for TS live streams if not explicitly overridden to improve buffering
             effective_start_offset = -30.0
         
         precise = "NO" if settings.remux_to_ts else "YES"
@@ -460,13 +460,13 @@ def build_hls_playlist(
             first_segment = trimmed_segments[0]
             extinf_values = [f["extinf"] for f in trimmed_segments if "extinf" in f]
             if settings.remux_to_ts:
-                # Match EasyProxy's target duration calculation
+                # Use a slightly larger target duration for TS streams to avoid buffer underruns
                 target_duration = int(max(extinf_values)) + 1 if extinf_values else 10
             else:
                 target_duration = math.ceil(max(extinf_values)) if extinf_values else 3
 
             # For live TS streams, prioritize timestamp-based sequence for better ExoPlayer compatibility
-            # This matches EasyProxy's behavior and ensures continuity across refreshes
+            # This ensures continuity across refreshes by deriving sequence from timeline
             if settings.remux_to_ts and is_live:
                 time_val = first_segment.get("time")
                 duration_val = first_segment.get("duration_mpd_timescale")
