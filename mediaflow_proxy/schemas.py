@@ -277,6 +277,7 @@ class ExtractorURLParams(GenericParams):
         "FileMoon",
         "F16Px",
         "Mixdrop",
+        "Gupload",
         "Uqload",
         "Streamtape",
         "StreamWish",
