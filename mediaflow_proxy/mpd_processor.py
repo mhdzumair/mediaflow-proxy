@@ -14,7 +14,7 @@ from mediaflow_proxy.utils.http_utils import (
     apply_header_manipulation,
 )
 from mediaflow_proxy.utils.dash_prebuffer import dash_prebuffer
-from mediaflow_proxy.utils.cache_utils import get_cached_processed_init, set_cached_processed_init
+from mediaflow_proxy.utils.cache_utils import get_cached_processed_init, set_cached_processed_init, set_cached_processed_segment
 from mediaflow_proxy.utils.m3u8_processor import SkipSegmentFilter
 from mediaflow_proxy.configs import settings
 
@@ -172,14 +172,14 @@ async def _remux_to_ts(content: bytes) -> bytes:
     cmd = [
         "ffmpeg",
         "-y",
-        "-i",
-        "pipe:0",
-        "-c",
-        "copy",
+        "-loglevel", "error",
+        "-probesize", "128K",
+        "-analyzeduration", "0",
+        "-i", "pipe:0",
+        "-c", "copy",
         "-copyts",
         "-muxdelay", "0",
-        "-f",
-        "mpegts",
+        "-f", "mpegts",
         "pipe:1",
     ]
     process = await asyncio.create_subprocess_exec(

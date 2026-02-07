@@ -1,5 +1,13 @@
 import asyncio
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
 import hashlib
 import json
 import logging
@@ -387,12 +395,25 @@ class CrossProcessLock:
             start_time = time.time()
             while time.time() - start_time < timeout:
                 try:
-                    # Non-blocking lock attempt
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    acquired = True
-                    logger.debug(f"[CrossProcessLock] Acquired lock for: {key[:80]}...")
-                    break
-                except BlockingIOError:
+                    if fcntl:
+                        # Unix-style locking
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        acquired = True
+                    elif msvcrt:
+                        # Windows-style locking
+                        # msvcrt.locking(fd, mode, nbytes)
+                        # LK_NBLCK is non-blocking lock
+                        lock_file.seek(0)
+                        msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                        acquired = True
+                    else:
+                        # No cross-process locking available
+                        acquired = True
+                    
+                    if acquired:
+                        logger.debug(f"[CrossProcessLock] Acquired lock for: {key[:80]}...")
+                        break
+                except (BlockingIOError, PermissionError, IOError):
                     # Lock is held by another process, wait a bit
                     await asyncio.sleep(0.05)  # 50ms between retries
 
@@ -406,7 +427,11 @@ class CrossProcessLock:
                 try:
                     if acquired:
                         # Release the lock
-                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                        if fcntl:
+                            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                        elif msvcrt:
+                            lock_file.seek(0)
+                            msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
                         logger.debug(f"[CrossProcessLock] Released lock for: {key[:80]}...")
                     lock_file.close()
                 except Exception as e:
@@ -650,4 +675,42 @@ async def set_cached_segment(segment_url: str, content: bytes, ttl: int = 60) ->
         return await SEGMENT_CACHE.set(segment_url, content, ttl=ttl)
     except Exception as e:
         logger.error(f"Error caching segment: {e}")
+        return False
+
+
+async def get_cached_processed_segment(segment_url: str, key_id: str = None, remux: bool = False) -> Optional[bytes]:
+    """Get processed (decrypted/remuxed) segment from cache.
+
+    Args:
+        segment_url: URL of the segment
+        key_id: Optional key ID used for decryption
+        remux: Whether remuxing was applied
+
+    Returns:
+        Processed segment bytes if cached, None otherwise
+    """
+    cache_key = f"proc|{segment_url}|{key_id or ''}|{remux}"
+    return await SEGMENT_CACHE.get(cache_key)
+
+
+async def set_cached_processed_segment(
+    segment_url: str, content: bytes, key_id: str = None, remux: bool = False, ttl: int = 60
+) -> bool:
+    """Cache processed (decrypted/remuxed) segment.
+
+    Args:
+        segment_url: URL of the segment
+        content: Processed segment bytes
+        key_id: Optional key ID used for decryption
+        remux: Whether remuxing was applied
+        ttl: Time to live in seconds
+
+    Returns:
+        True if cached successfully
+    """
+    cache_key = f"proc|{segment_url}|{key_id or ''}|{remux}"
+    try:
+        return await SEGMENT_CACHE.set(cache_key, content, ttl=ttl)
+    except Exception as e:
+        logger.error(f"Error caching processed segment: {e}")
         return False
