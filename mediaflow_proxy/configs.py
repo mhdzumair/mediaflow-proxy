@@ -1,6 +1,6 @@
 from typing import Dict, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings
 
 
@@ -79,6 +79,14 @@ class Settings(BaseSettings):
     acestream_empty_timeout: int = 30  # Timeout (seconds) when no data is received from upstream.
     acestream_session_timeout: int = 60  # Session timeout (seconds) for cleanup of inactive sessions.
     acestream_keepalive_interval: int = 15  # Interval (seconds) for session keepalive polling.
+
+    # Telegram MTProto settings
+    enable_telegram: bool = False  # Whether to enable Telegram MTProto proxy support.
+    telegram_api_id: int | None = None  # Telegram API ID from https://my.telegram.org/apps
+    telegram_api_hash: SecretStr | None = None  # Telegram API hash from https://my.telegram.org/apps
+    telegram_session_string: SecretStr | None = None  # Persistent session string (avoids re-authentication).
+    telegram_max_connections: int = 8  # Max parallel DC connections for downloads (max 20, careful of floods).
+    telegram_request_timeout: int = 30  # Request timeout in seconds.
 
     user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"  # The user agent to use for HTTP requests.
 

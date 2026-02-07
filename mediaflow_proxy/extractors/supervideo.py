@@ -3,6 +3,7 @@ from typing import Dict, Any
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup, SoupStrainer
+from curl_cffi.requests import AsyncSession
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 from mediaflow_proxy.utils.packed import unpack, detect, UnpackingError
@@ -23,13 +24,6 @@ class SupervideoExtractor(BaseExtractor):
 
         Uses curl_cffi with Chrome impersonation to bypass Cloudflare.
         """
-        try:
-            from curl_cffi.requests import AsyncSession
-        except ImportError:
-            raise ExtractorError(
-                "curl_cffi is required for Supervideo extraction. "
-                "Install it with: pip install curl_cffi"
-            )
 
         patterns = [r'file:"(.*?)"']
 
