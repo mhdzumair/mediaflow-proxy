@@ -15,7 +15,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import iterate_in_threadpool
 from starlette.requests import Request
 from starlette.types import Receive, Send, Scope
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential
 from tqdm.asyncio import tqdm as tqdm_asyncio
 
 from mediaflow_proxy.configs import settings
@@ -39,10 +39,19 @@ class DownloadError(Exception):
         super().__init__(message)
 
 
+def retry_if_download_error_not_404(retry_state):
+    """Retry on DownloadError except for 404 errors."""
+    if retry_state.outcome.failed:
+        exception = retry_state.outcome.exception()
+        if isinstance(exception, DownloadError):
+            return exception.status_code != 404
+    return False
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry=retry_if_exception_type(DownloadError),
+    retry=retry_if_download_error_not_404,
 )
 async def fetch_with_retry(
     session: ClientSession,
@@ -79,7 +88,7 @@ async def fetch_with_retry(
     except aiohttp.ClientResponseError as e:
         if e.status == 404:
             logger.debug(f"Segment not found (404): {url}")
-            raise
+            raise DownloadError(404, f"Not found (404): {url}")
         logger.error(f"HTTP error {e.status} while downloading {url}")
         raise DownloadError(e.status, f"HTTP error {e.status} while downloading {url}")
     except aiohttp.ClientError as e:
@@ -116,7 +125,7 @@ class Streamer:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type(DownloadError),
+        retry=retry_if_download_error_not_404,
     )
     async def create_streaming_response(self, url: str, headers: dict, method: str = "GET"):
         """
@@ -152,7 +161,7 @@ class Streamer:
         except aiohttp.ClientResponseError as e:
             if e.status == 404:
                 logger.debug(f"Segment not found (404): {url}")
-                raise
+                raise DownloadError(404, f"Not found (404): {url}")
             # Don't retry rate-limit errors (429, 509) - retrying while other connections
             # are still active just wastes time. Let the player handle its own retry logic.
             if e.status in (429, 509):

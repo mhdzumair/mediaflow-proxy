@@ -623,6 +623,27 @@ async def segment_endpoint(
     return await get_segment(segment_params, proxy_headers)
 
 
+@proxy_router.get("/mpd/segment.ts")
+async def segment_ts_endpoint(
+    segment_params: Annotated[MPDSegmentParams, Query()],
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+):
+    """
+    Retrieves and processes a media segment, remuxing fMP4 to MPEG-TS.
+
+    This endpoint is used for HLS playlists when remux_to_ts is enabled.
+    Unlike /mpd/segment.mp4, this forces TS remuxing regardless of global settings.
+
+    Args:
+        segment_params (MPDSegmentParams): The parameters for the segment request.
+        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
+
+    Returns:
+        Response: The HTTP response with the MPEG-TS segment.
+    """
+    return await get_segment(segment_params, proxy_headers, force_remux_ts=True)
+
+
 @proxy_router.get("/mpd/init.mp4")
 async def init_endpoint(
     init_params: Annotated[MPDInitParams, Query()],

@@ -454,15 +454,17 @@ async def get_cached_mpd(key: str) -> Optional[dict]:
     return None
 
 
-async def set_cached_mpd(key: str, data: dict, ttl: int = DEFAULT_MPD_CACHE_TTL):
+async def set_cached_mpd(key: str, data: dict, ttl: int | float = DEFAULT_MPD_CACHE_TTL):
     """Cache MPD manifest. No-op if Redis unavailable."""
     r = await get_redis()
     if r is None:
         return
 
     redis_key = _mpd_key(key)
-    await r.set(redis_key, json.dumps(data), ex=ttl)
-    logger.debug(f"[Redis] MPD cache set ({ttl}s TTL): {key[:60]}...")
+    # Ensure TTL is an integer (Redis requires int for ex parameter)
+    ttl_int = max(1, int(ttl))
+    await r.set(redis_key, json.dumps(data), ex=ttl_int)
+    logger.debug(f"[Redis] MPD cache set ({ttl_int}s TTL): {key[:60]}...")
 
 
 # =============================================================================

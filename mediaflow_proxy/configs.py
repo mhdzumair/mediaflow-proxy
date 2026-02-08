@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     dash_segment_cache_ttl: int = 60  # TTL (seconds) for cached media segments; longer = better for slow playback.
     mpd_live_init_cache_ttl: int = 60  # TTL (seconds) for live init segment cache; 0 disables caching.
     mpd_live_playlist_depth: int = 8  # Number of recent segments to expose per live playlist variant.
+    remux_to_ts: bool = False  # Remux fMP4 segments to MPEG-TS for ExoPlayer/VLC compatibility.
 
     # FlareSolverr settings (for Cloudflare bypass)
     flaresolverr_url: str | None = None  # FlareSolverr service URL. Example: http://localhost:8191

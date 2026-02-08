@@ -16,6 +16,7 @@ from mediaflow_proxy.utils.http_utils import (
 from mediaflow_proxy.utils.dash_prebuffer import dash_prebuffer
 from mediaflow_proxy.utils.cache_utils import get_cached_processed_init, set_cached_processed_init
 from mediaflow_proxy.utils.m3u8_processor import SkipSegmentFilter
+from mediaflow_proxy.utils.ts_muxer import remux_fmp4_to_ts
 from mediaflow_proxy.configs import settings
 
 logger = logging.getLogger(__name__)
@@ -119,9 +120,10 @@ async def process_segment(
     key_id: str = None,
     key: str = None,
     use_map: bool = False,
+    remux_ts: bool = None,
 ) -> Response:
     """
-    Processes and decrypts a media segment.
+    Processes and decrypts a media segment, optionally remuxing to MPEG-TS.
 
     Args:
         init_content (bytes): The initialization segment content.
@@ -132,9 +134,10 @@ async def process_segment(
         key (str, optional): The DRM key. Defaults to None.
         use_map (bool, optional): If True, init segment is served separately via EXT-X-MAP,
             so don't concatenate init with segment. Defaults to False.
+        remux_ts (bool, optional): If True, remux fMP4 to MPEG-TS. Defaults to settings.remux_to_ts.
 
     Returns:
-        Response: The decrypted segment as an HTTP response.
+        Response: The processed segment as an HTTP response.
     """
     if key_id and key:
         # For DRM protected content
@@ -149,6 +152,29 @@ async def process_segment(
         else:
             # Concatenate init and segment content
             decrypted_content = init_content + segment_content
+
+    # Check if we should remux to TS
+    should_remux = remux_ts if remux_ts is not None else settings.remux_to_ts
+
+    # Remux both video and audio to MPEG-TS for proper HLS TS playback
+    if should_remux and ("video" in mimetype or "audio" in mimetype):
+        # Remux fMP4 to MPEG-TS for ExoPlayer/VLC compatibility
+        now = time.time()
+        try:
+            # For TS remuxing, we always need init_content for codec config
+            # preserve_timestamps=True keeps the original tfdt timestamps from the
+            # fMP4 segment, ensuring continuous playback across HLS segments
+            ts_content = remux_fmp4_to_ts(
+                init_content,
+                segment_content if use_map else decrypted_content,
+                preserve_timestamps=True,
+            )
+            decrypted_content = ts_content
+            mimetype = "video/mp2t"  # Update MIME type for TS (same for audio-only TS)
+            logger.info(f"TS remuxing took {time.time() - now:.4f} seconds")
+        except Exception as e:
+            logger.warning(f"TS remuxing failed, returning fMP4: {e}")
+            # Fall through to return original content
 
     response_headers = apply_header_manipulation({}, proxy_headers)
     return Response(content=decrypted_content, media_type=mimetype, headers=response_headers)
@@ -357,13 +383,22 @@ def build_hls_playlist(
     # Initialize skip filter if skip_segments provided
     skip_filter = SkipSegmentFilter(skip_segments) if skip_segments else None
 
-    # Use EXT-X-MAP for live streams to avoid duplicate moov atoms
-    use_map = is_live
+    # Determine if we're in TS remux mode
+    # In TS mode, we don't use EXT-X-MAP because TS segments are self-contained
+    # (PAT/PMT/VPS/SPS/PPS are embedded in each segment)
+    is_ts_mode = settings.remux_to_ts
 
-    proxy_url = request.url_for("segment_endpoint")
+    # Use EXT-X-MAP for live streams, but only for fMP4 (not TS)
+    use_map = is_live and not is_ts_mode
+
+    # Select appropriate endpoint based on remux mode
+    if is_ts_mode:
+        proxy_url = request.url_for("segment_ts_endpoint")  # /mpd/segment.ts
+    else:
+        proxy_url = request.url_for("segment_endpoint")  # /mpd/segment.mp4
     proxy_url = str(proxy_url.replace(scheme=get_original_scheme(request)))
 
-    # Get init endpoint URL for EXT-X-MAP
+    # Get init endpoint URL for EXT-X-MAP (only used for fMP4 mode)
     init_proxy_url = request.url_for("init_endpoint")
     init_proxy_url = str(init_proxy_url.replace(scheme=get_original_scheme(request)))
 
