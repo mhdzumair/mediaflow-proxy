@@ -270,8 +270,15 @@ async def handle_stream_request(
     )
     redis_available = is_redis_configured()
 
+    if needs_rate_limiting:
+        logger.info(
+            f"[handle_stream] Rate limiting ENABLED for {host}: "
+            f"cooldown={rate_handler.cooldown_seconds}s, gate={rate_handler.use_stream_gate}, "
+            f"head_cache={rate_handler.use_head_cache}, redis={redis_available}"
+        )
+
     if needs_rate_limiting and not redis_available:
-        logger.debug(f"[handle_stream] Rate limiting requested for {host} but Redis not configured - skipping")
+        logger.warning(f"[handle_stream] Rate limiting requested for {host} but Redis not configured - skipping")
         needs_rate_limiting = False
 
     # Cooldown key - prevents rapid-fire requests to same CDN URL
@@ -289,30 +296,66 @@ async def handle_stream_request(
                 cached["headers"], proxy_headers.response, proxy_headers.remove, proxy_headers.propagate
             )
             return Response(headers=response_headers, status_code=cached["status"])
-        # No cached HEAD - proceed to upstream
-    else:
-        # For GET requests: Check cooldown if rate limiting is enabled
-        if needs_rate_limiting and rate_handler.cooldown_seconds > 0:
-            # Try to set cooldown - if we can't (already set), return 503
-            if not await check_and_set_cooldown(cooldown_key, rate_handler.cooldown_seconds):
-                # In cooldown - another stream recently hit upstream
+        # No cached HEAD - for rate-limited hosts, wait for cache via gate instead of hitting upstream
+        if needs_rate_limiting and rate_handler.use_stream_gate:
+            # Try to acquire gate - if we get it, we make the upstream HEAD request
+            # If another request holds the gate, we wait and then check cache again
+            gate_acquired = await acquire_stream_gate(video_url, timeout=30.0)
+            if gate_acquired:
+                # We got the gate - check cache again (another request may have populated it while we waited)
+                cached = await get_cached_head(video_url)
                 if cached:
-                    # We have cached headers, but we're in cooldown - tell client to retry
-                    logger.info(f"[handle_stream] In cooldown for {host}, returning 503 with Retry-After")
-                    return Response(
-                        status_code=503,
-                        content="Stream already active, retry shortly",
-                        headers={"Retry-After": str(rate_handler.retry_after_seconds)},
+                    await release_stream_gate(video_url)
+                    logger.info(f"[handle_stream] Serving cached HEAD response after gate wait for {host}")
+                    response_headers = prepare_response_headers(
+                        cached["headers"], proxy_headers.response, proxy_headers.remove, proxy_headers.propagate
                     )
-                # else: No cached headers AND in cooldown - must wait for gate
-            # Cooldown set (or we'll wait for gate) - proceed
+                    return Response(headers=response_headers, status_code=cached["status"])
+                # Cache still empty - we'll make the upstream request (gate is held)
+            else:
+                # Gate timeout - check cache one more time before giving up
+                cached = await get_cached_head(video_url)
+                if cached:
+                    logger.info(f"[handle_stream] Serving cached HEAD after gate timeout for {host}")
+                    response_headers = prepare_response_headers(
+                        cached["headers"], proxy_headers.response, proxy_headers.remove, proxy_headers.propagate
+                    )
+                    return Response(headers=response_headers, status_code=cached["status"])
+                logger.warning(f"[handle_stream] HEAD gate timeout for {host}, no cached headers available")
+                return Response(status_code=503, content="Upstream host is busy, try again later")
+        # No rate limiting - proceed to upstream without gate
+    else:
+        # For GET requests with rate limiting: wait for cooldown and acquire gate
+        if needs_rate_limiting and rate_handler.use_stream_gate:
+            # Wait for gate - this serializes all requests to the same URL
+            gate_acquired = await acquire_stream_gate(video_url, timeout=30.0)
+            if not gate_acquired:
+                logger.warning(f"[handle_stream] Gate timeout for {host}, upstream may be slow")
+                return Response(status_code=503, content="Upstream host is busy, try again later")
 
-    # 2. Acquire Redis gate if rate limiting enabled (serializes upstream requests across ALL workers)
-    if needs_rate_limiting and rate_handler.use_stream_gate:
-        gate_acquired = await acquire_stream_gate(video_url, timeout=30.0)
-        if not gate_acquired:
-            logger.warning(f"[handle_stream] Gate timeout for {host}, upstream may be slow or rate-limited")
-            return Response(status_code=503, content="Upstream host is busy, try again later")
+            # Got the gate - now check/set cooldown
+            # If in cooldown, wait for it to expire before proceeding
+            if rate_handler.cooldown_seconds > 0:
+                max_wait = rate_handler.cooldown_seconds + 1  # Wait slightly longer than cooldown
+                wait_start = time.time()
+
+                while not await check_and_set_cooldown(cooldown_key, rate_handler.cooldown_seconds):
+                    # Still in cooldown - wait a bit and retry
+                    elapsed = time.time() - wait_start
+                    if elapsed >= max_wait:
+                        # Cooldown still active after max wait - give up
+                        await release_stream_gate(video_url)
+                        logger.warning(f"[handle_stream] Cooldown wait timeout for {host}")
+                        return Response(
+                            status_code=503,
+                            content="Stream busy, try again later",
+                            headers={"Retry-After": str(rate_handler.retry_after_seconds)},
+                        )
+                    logger.debug(f"[handle_stream] Waiting for cooldown to expire for {host}...")
+                    await asyncio.sleep(0.5)  # Poll every 500ms
+
+                # Cooldown acquired - we can proceed to upstream
+                logger.info(f"[handle_stream] Cooldown acquired for {host} after {time.time() - wait_start:.1f}s wait")
 
     streamer = await create_streamer(video_url)
 
@@ -363,22 +406,43 @@ async def handle_stream_request(
         if needs_rate_limiting and rate_handler.use_head_cache and status_code in (200, 206):
             await set_cached_head(video_url, dict(streamer.response.headers), status_code)
 
-        # 3. Release gate after headers are cached (if rate limiting enabled)
-        if gate_acquired:
-            await release_stream_gate(video_url)
-            gate_acquired = False  # Mark as released so finally block doesn't double-release
-
         if method == "HEAD":
+            # HEAD requests always release gate immediately
+            if gate_acquired:
+                await release_stream_gate(video_url)
+                gate_acquired = False
             await streamer.close()
             return Response(headers=response_headers, status_code=status_code)
         else:
-            # For GET requests, streaming continues without holding the gate
-            return EnhancedStreamingResponse(
-                streamer.stream_content(transformer),
-                headers=response_headers,
-                status_code=status_code,
-                background=BackgroundTask(streamer.close),
-            )
+            # For GET requests: check if we need exclusive streaming
+            if gate_acquired and needs_rate_limiting and rate_handler.exclusive_stream:
+                # EXCLUSIVE MODE: Keep gate held during entire stream
+                # Release gate in background task when stream ends
+                logger.info(f"[handle_stream] Exclusive stream mode - gate held during stream for {host}")
+
+                async def cleanup_exclusive():
+                    await streamer.close()
+                    await release_stream_gate(video_url)
+                    logger.info(f"[handle_stream] Exclusive stream ended - gate released for {host}")
+
+                gate_acquired = False  # Background task will release it
+                return EnhancedStreamingResponse(
+                    streamer.stream_content(transformer),
+                    headers=response_headers,
+                    status_code=status_code,
+                    background=BackgroundTask(cleanup_exclusive),
+                )
+            else:
+                # NORMAL MODE: Release gate after headers, stream continues freely
+                if gate_acquired:
+                    await release_stream_gate(video_url)
+                    gate_acquired = False
+                return EnhancedStreamingResponse(
+                    streamer.stream_content(transformer),
+                    headers=response_headers,
+                    status_code=status_code,
+                    background=BackgroundTask(streamer.close),
+                )
     except Exception as e:
         await streamer.close()
         return handle_exceptions(e)

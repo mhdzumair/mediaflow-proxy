@@ -46,6 +46,16 @@ class RateLimitHandler:
         return False
 
     @property
+    def exclusive_stream(self) -> bool:
+        """
+        If True, the stream gate is held for the ENTIRE duration of the stream.
+        This prevents any concurrent connections to the same URL.
+        Required for hosts that 509 on ANY concurrent streams.
+        Default: False (gate released after headers received)
+        """
+        return False
+
+    @property
     def retry_after_seconds(self) -> int:
         """
         Value for Retry-After header when returning 503.
@@ -58,16 +68,19 @@ class VidozaRateLimitHandler(RateLimitHandler):
     """
     Rate limit handler for Vidoza CDN.
 
-    Vidoza aggressively rate-limits (509) if multiple connections are made
-    to the same URL within a short time window. This handler:
-    - Enforces a 5-second cooldown between upstream connections
-    - Caches HEAD responses to serve repeated probes
-    - Uses a stream gate to serialize initial connections
+    Vidoza aggressively rate-limits (509) if ANY concurrent connections exist
+    to the same URL from the same IP. This handler:
+    - Uses EXCLUSIVE stream gate: only ONE stream at a time (gate held during entire stream)
+    - Caches HEAD responses to serve repeated probes without connections
+    - ExoPlayer/clients must wait for the current stream to finish before starting a new one
+
+    WARNING: This means only one client can actively stream at a time. Other clients will
+    wait (up to timeout) and eventually get 503 if the current stream is too long.
     """
 
     @property
     def cooldown_seconds(self) -> int:
-        return 5
+        return 0  # No cooldown needed - we use exclusive streaming instead
 
     @property
     def use_head_cache(self) -> bool:
@@ -78,8 +91,17 @@ class VidozaRateLimitHandler(RateLimitHandler):
         return True
 
     @property
+    def exclusive_stream(self) -> bool:
+        """
+        If True, the stream gate is held for the ENTIRE duration of the stream,
+        not just at the start. This prevents any concurrent connections.
+        Required for hosts like Vidoza that 509 on ANY concurrent connections.
+        """
+        return True
+
+    @property
     def retry_after_seconds(self) -> int:
-        return 3
+        return 5
 
 
 class AggressiveRateLimitHandler(RateLimitHandler):
@@ -115,10 +137,16 @@ RATE_LIMIT_HANDLER_REGISTRY: dict[str, type[RateLimitHandler]] = {
 
 # Auto-detection: hostname patterns to handler IDs
 # These patterns are checked against the video URL hostname
+#
+# NOTE: Vidoza CDN DOES rate limit concurrent connections from the same IP.
+# When multiple clients request through the proxy, all requests come from
+# the proxy's IP, triggering Vidoza's rate limit (509 errors).
+# Stream-level rate limiting serializes requests to avoid this.
+#
 HOST_PATTERN_TO_HANDLER: dict[str, str] = {
     "vidoza.net": "vidoza",
     "vidoza.org": "vidoza",
-    # Add more patterns as needed, e.g.:
+    # Add more patterns as needed for hosts that rate-limit CDN streaming:
     # "example-cdn.com": "aggressive",
 }
 
@@ -161,10 +189,11 @@ def get_rate_limit_handler(
                 if pattern in hostname:
                     handler_class = RATE_LIMIT_HANDLER_REGISTRY.get(detected_handler_id)
                     if handler_class:
-                        logger.debug(f"Auto-detected rate limit handler '{detected_handler_id}' for host: {hostname}")
+                        logger.info(f"[RateLimit] Auto-detected handler '{detected_handler_id}' for host: {hostname}")
                         return handler_class()
+            logger.debug(f"[RateLimit] No handler matched for hostname: {hostname}")
         except Exception as e:
-            logger.debug(f"Error during rate limit handler auto-detection: {e}")
+            logger.warning(f"[RateLimit] Error during auto-detection: {e}")
 
     # 3. Default: no rate limiting
     return RateLimitHandler()

@@ -28,6 +28,14 @@ logger = logging.getLogger(__name__)
 # Cooldown duration for background refresh (2 minutes)
 _REFRESH_COOLDOWN = 120
 
+# Hosts where background refresh should be DISABLED
+# These hosts generate unique CDN URLs per extraction - refreshing invalidates existing streams!
+# When a new URL is extracted, the old URL becomes invalid and causes 509 errors.
+_NO_BACKGROUND_REFRESH_HOSTS = frozenset({
+    "Vidoza",
+    # Add other hosts here that generate unique per-extraction URLs
+})
+
 
 async def refresh_extractor_cache(
     cache_key: str, extractor_params: ExtractorURLParams, proxy_headers: ProxyRequestHeaders
@@ -83,13 +91,19 @@ async def _extract_url_impl(
 
         if response:
             logger.info(f"Serving from cache for key: {cache_key}")
-            # Schedule a background refresh, but only if cooldown has elapsed.
-            # This prevents flooding upstream when many requests arrive at once
-            # (e.g., ExoPlayer sends HEAD + multiple GETs within seconds).
-            # Using Redis-based cooldown for cross-worker coordination.
-            cooldown_key = f"extractor_refresh:{cache_key}"
-            if await redis_utils.check_and_set_cooldown(cooldown_key, _REFRESH_COOLDOWN):
-                background_tasks.add_task(refresh_extractor_cache, cache_key, extractor_params, proxy_headers)
+            # Schedule a background refresh, but only if:
+            # 1. The host is NOT in the no-refresh list (hosts with unique per-extraction URLs)
+            # 2. The cooldown has elapsed (prevents flooding upstream)
+            #
+            # WARNING: For hosts like Vidoza, background refresh is DANGEROUS!
+            # Each extraction generates a unique CDN URL. Refreshing invalidates the
+            # old URL, causing 509 errors for clients still using it.
+            if extractor_params.host not in _NO_BACKGROUND_REFRESH_HOSTS:
+                cooldown_key = f"extractor_refresh:{cache_key}"
+                if await redis_utils.check_and_set_cooldown(cooldown_key, _REFRESH_COOLDOWN):
+                    background_tasks.add_task(refresh_extractor_cache, cache_key, extractor_params, proxy_headers)
+            else:
+                logger.debug(f"Skipping background refresh for {extractor_params.host} (unique CDN URLs)")
         else:
             # Use Redis-based in-flight tracking for cross-worker deduplication.
             # If another worker is already extracting, wait for them to finish.

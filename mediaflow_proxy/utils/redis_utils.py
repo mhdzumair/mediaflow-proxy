@@ -227,6 +227,22 @@ async def release_stream_gate(url: str):
     logger.debug(f"[Redis] Released stream gate: {key[:50]}...")
 
 
+async def extend_stream_gate(url: str, ttl: int = GATE_TTL):
+    """
+    Extend the TTL of a stream gate to keep it held during long streams.
+
+    Should be called periodically (e.g., every 10s) while streaming.
+    No-op if Redis is not available or gate doesn't exist.
+    """
+    r = await get_redis()
+    if r is None:
+        return
+
+    key = _gate_key(url)
+    await r.expire(key, ttl)
+    logger.debug(f"[Redis] Extended stream gate TTL ({ttl}s): {key[:50]}...")
+
+
 async def is_stream_gate_held(url: str) -> bool:
     """Check if a stream gate is currently held. Returns False if Redis unavailable."""
     r = await get_redis()
