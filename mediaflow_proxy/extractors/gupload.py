@@ -57,7 +57,7 @@ class GuploadExtractor(BaseExtractor):
         if test.status >= 400:
             raise ExtractorError(f"GUPLOAD: Stream unavailable ({test.status})")
 
-        # ✅ Return MASTER playlist
+        # Return MASTER playlist
         return {
             "destination_url": hls_url,
             "request_headers": headers,

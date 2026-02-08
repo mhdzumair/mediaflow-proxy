@@ -450,7 +450,7 @@ class DLHDExtractor(BaseExtractor):
                 raise ExtractorError(f"All player links failed. Last error: {last_player_error}")
             raise ExtractorError("No valid iframe found in any player page")
 
-        # Prova ogni iframe finché uno non funziona
+        # Try each iframe until one works
         last_iframe_error = None
 
         for iframe_candidate in iframe_candidates:

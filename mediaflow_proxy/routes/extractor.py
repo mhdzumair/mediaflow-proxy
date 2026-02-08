@@ -31,10 +31,12 @@ _REFRESH_COOLDOWN = 120
 # Hosts where background refresh should be DISABLED
 # These hosts generate unique CDN URLs per extraction - refreshing invalidates existing streams!
 # When a new URL is extracted, the old URL becomes invalid and causes 509 errors.
-_NO_BACKGROUND_REFRESH_HOSTS = frozenset({
-    "Vidoza",
-    # Add other hosts here that generate unique per-extraction URLs
-})
+_NO_BACKGROUND_REFRESH_HOSTS = frozenset(
+    {
+        "Vidoza",
+        # Add other hosts here that generate unique per-extraction URLs
+    }
+)
 
 
 async def refresh_extractor_cache(
