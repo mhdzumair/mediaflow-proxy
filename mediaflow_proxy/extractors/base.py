@@ -152,7 +152,7 @@ class BaseExtractor(ABC):
                 # Do not retry on explicit HTTP status errors (they are intentional)
                 raise
             except (asyncio.TimeoutError, aiohttp.ClientError) as e:
-                # Transient network error — retry with backoff
+                # Transient network error - retry with backoff
                 last_exc = e
                 attempt += 1
                 sleep_for = backoff_factor * (2 ** (attempt - 1))
@@ -167,7 +167,7 @@ class BaseExtractor(ABC):
                 await asyncio.sleep(sleep_for)
                 continue
             except Exception as e:
-                # Unexpected exception — wrap as ExtractorError to keep interface consistent
+                # Unexpected exception - wrap as ExtractorError to keep interface consistent
                 logger.exception("Unhandled exception while requesting %s: %s", url, e)
                 raise ExtractorError(f"Request failed for URL {url}: {str(e)}")
 
