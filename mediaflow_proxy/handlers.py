@@ -13,14 +13,20 @@ from starlette.background import BackgroundTask
 from .const import SUPPORTED_RESPONSE_HEADERS
 from .mpd_processor import process_manifest, process_playlist, process_segment, process_init_segment
 from .schemas import HLSManifestParams, MPDManifestParams, MPDPlaylistParams, MPDSegmentParams, MPDInitParams
-from .utils.cache_utils import get_cached_mpd, get_cached_init_segment, get_cached_segment, set_cached_segment
+from .utils.cache_utils import (
+    get_cached_mpd,
+    get_cached_init_segment,
+    get_cached_segment,
+    set_cached_segment,
+    get_cached_processed_segment,
+    set_cached_processed_segment,
+)
 from .utils.dash_prebuffer import dash_prebuffer
 from .utils.http_utils import (
     Streamer,
     DownloadError,
     download_file_with_retry,
     request_with_retry,
-    fetch_with_retry,
     EnhancedStreamingResponse,
     ProxyRequestHeaders,
     create_streamer,
@@ -784,6 +790,19 @@ async def get_segment(
     try:
         live_cache_ttl = settings.mpd_live_init_cache_ttl if segment_params.is_live else None
         segment_url = segment_params.segment_url
+        should_remux = force_remux_ts if force_remux_ts is not None else settings.remux_to_ts
+
+        # Check processed segment cache first (avoids re-decrypting/re-remuxing)
+        is_processed = bool(segment_params.key_id or should_remux)
+        if is_processed:
+            processed_content = await get_cached_processed_segment(
+                segment_url, segment_params.key_id, should_remux
+            )
+            if processed_content:
+                logger.info(f"Serving processed segment from cache: {segment_url}")
+                mimetype = "video/mp2t" if should_remux else segment_params.mime_type
+                response_headers = apply_header_manipulation({}, proxy_headers)
+                return Response(content=processed_content, media_type=mimetype, headers=response_headers)
 
         # Use event-based coordination for segment download
         # get_or_download() handles:
@@ -862,7 +881,7 @@ async def get_segment(
     except Exception as e:
         return handle_exceptions(e)
 
-    return await process_segment(
+    response = await process_segment(
         init_content,
         segment_content,
         segment_params.mime_type,
@@ -872,6 +891,20 @@ async def get_segment(
         use_map=segment_params.use_map,
         remux_ts=force_remux_ts,
     )
+
+    # Cache processed segment for future requests (avoids re-decrypting/re-remuxing)
+    if is_processed and response.status_code == 200:
+        asyncio.create_task(
+            set_cached_processed_segment(
+                segment_url,
+                response.body,
+                segment_params.key_id,
+                should_remux,
+                ttl=settings.processed_segment_cache_ttl,
+            )
+        )
+
+    return response
 
 
 async def get_init_segment(

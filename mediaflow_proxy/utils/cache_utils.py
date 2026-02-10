@@ -170,6 +170,58 @@ async def set_cached_processed_init(
 
 
 # =============================================================================
+# Processed Segment Cache (decrypted/remuxed segments)
+# =============================================================================
+
+
+async def get_cached_processed_segment(
+    segment_url: str,
+    key_id: str = None,
+    remux: bool = False,
+) -> Optional[bytes]:
+    """Get processed (decrypted/remuxed) segment from cache.
+
+    Args:
+        segment_url: URL of the segment
+        key_id: DRM key ID if decrypted
+        remux: Whether the segment was remuxed to TS
+
+    Returns:
+        Processed segment bytes if cached, None otherwise
+    """
+    cache_key = f"proc|{segment_url}|{key_id or ''}|{remux}"
+    return await redis_utils.get_cached_segment(cache_key)
+
+
+async def set_cached_processed_segment(
+    segment_url: str,
+    content: bytes,
+    key_id: str = None,
+    remux: bool = False,
+    ttl: int = 60,
+) -> bool:
+    """Cache processed (decrypted/remuxed) segment.
+
+    Args:
+        segment_url: URL of the segment
+        content: Processed segment bytes
+        key_id: DRM key ID if decrypted
+        remux: Whether the segment was remuxed to TS
+        ttl: Time to live in seconds
+
+    Returns:
+        True if cached successfully
+    """
+    cache_key = f"proc|{segment_url}|{key_id or ''}|{remux}"
+    try:
+        await redis_utils.set_cached_segment(cache_key, content, ttl=ttl)
+        return True
+    except Exception as e:
+        logger.error(f"Error caching processed segment: {e}")
+        return False
+
+
+# =============================================================================
 # Segment Cache
 # =============================================================================
 

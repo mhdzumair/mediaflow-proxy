@@ -141,3 +141,5 @@ mediaflow_proxy/drm/*
 .vscode/
 stremio-test-addon/
 wireproxy/
+test_samples/
+logs.txt

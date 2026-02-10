@@ -535,6 +535,7 @@ async def proxy_stream_endpoint(
     return await proxy_stream(request.method, destination, proxy_headers, transformer, rate_limit_handler_id)
 
 
+@proxy_router.head("/mpd/manifest.m3u8")
 @proxy_router.get("/mpd/manifest.m3u8")
 async def mpd_manifest_proxy(
     request: Request,
@@ -570,6 +571,7 @@ async def mpd_manifest_proxy(
     return await get_manifest(request, manifest_params, proxy_headers)
 
 
+@proxy_router.head("/mpd/playlist.m3u8")
 @proxy_router.get("/mpd/playlist.m3u8")
 async def playlist_endpoint(
     request: Request,
@@ -613,6 +615,10 @@ async def segment_endpoint(
     """
     Retrieves and processes a media segment, decrypting it if necessary.
 
+    This endpoint serves fMP4 segments without TS remuxing. The playlist generator
+    already selects /segment.mp4 vs /segment.ts based on the resolved remux mode,
+    so this endpoint explicitly disables remuxing regardless of global settings.
+
     Args:
         segment_params (MPDSegmentParams): The parameters for the segment request.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
@@ -620,7 +626,7 @@ async def segment_endpoint(
     Returns:
         Response: The HTTP response with the processed segment.
     """
-    return await get_segment(segment_params, proxy_headers)
+    return await get_segment(segment_params, proxy_headers, force_remux_ts=False)
 
 
 @proxy_router.get("/mpd/segment.ts")

@@ -649,7 +649,23 @@ def convert_length_prefixed_to_annex_b(
 
     is_keyframe = has_idr
 
-    # If keyframe, prepend codec parameter sets
+    # Prepend Access Unit Delimiter (AUD) as the first NAL in each access unit.
+    # ExoPlayer's H264Reader/H265Reader uses AUDs to detect access unit boundaries.
+    # Without AUDs, ExoPlayer cannot properly delimit video frames in the elementary
+    # stream, which prevents the video decoder from receiving any samples.
+    if codec == "h264":
+        # H.264 AUD: NAL type 9, primary_pic_type in top 3 bits of second byte
+        # 0xF0 = all picture types allowed (primary_pic_type = 7, reserved bits = 0)
+        result.extend(START_CODE_4)
+        result.extend(b"\x09\xf0")
+    elif codec == "h265":
+        # H.265 AUD: NAL type 35 (AUD_NUT), encoded as 2-byte NAL header + 1 byte pic_type
+        # NAL header: (35 << 1) = 0x46, nuh_layer_id=0, nuh_temporal_id_plus1=1 → 0x46 0x01
+        # pic_type: 0x50 = pic_type 2 (I, P, B slices allowed) in top 3 bits
+        result.extend(START_CODE_4)
+        result.extend(b"\x46\x01\x50")
+
+    # If keyframe, prepend codec parameter sets (after AUD)
     if has_idr:
         if codec == "h265" and vps_list:
             for vps in vps_list:
