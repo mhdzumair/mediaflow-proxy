@@ -1398,8 +1398,14 @@ class FMP4ToTSRemuxer:
         audio_samples = []
 
         # Find moof and mdat boxes, and track their positions
+        # DASH/HLS segments typically contain a single moof+mdat pair.
+        # If multiple pairs exist (e.g., concatenated fragments), we log a warning
+        # and process only the last pair since multi-fragment support would require
+        # accumulating samples across pairs with adjusted data offsets.
         moof_offset = None
+        moof_data = None
         mdat_data = None
+        moof_count = 0
 
         offset = 0
         while offset < len(data):
@@ -1409,6 +1415,12 @@ class FMP4ToTSRemuxer:
             box_type, size, box_data = result
 
             if box_type == b"moof":
+                moof_count += 1
+                if moof_count > 1:
+                    logger.warning(
+                        "Segment contains multiple moof boxes (%d); only the last moof+mdat pair will be processed",
+                        moof_count,
+                    )
                 moof_offset = offset
                 moof_data = box_data
             elif box_type == b"mdat":
@@ -1650,8 +1662,11 @@ class FMP4ToTSRemuxer:
         pes = build_pes_packet(0xE0, video_data, pts_90k, dts_90k if include_dts else None)
 
         # Include PCR on first packet of segment and keyframes
-        # Use PTS for PCR base as it's always valid
-        pcr_base = pts_90k if (is_first or is_keyframe) else None
+        # Use DTS for PCR base when available (PCR should track the decode timeline,
+        # not the presentation timeline). When _dts_delay shifts PTS forward for
+        # B-frame content, using PTS would cause the system clock to run ahead of
+        # the decode timeline, potentially causing decoder buffer underflow.
+        pcr_base = (dts_90k if include_dts else pts_90k) if (is_first or is_keyframe) else None
 
         return self.muxer.packetize_pes(
             pes, PID_VIDEO, pcr=pcr_base, is_keyframe=is_keyframe, discontinuity=discontinuity
