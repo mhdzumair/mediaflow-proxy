@@ -1464,7 +1464,7 @@ class MP4Decrypter:
                 kid = bytes(data[kid_offset : kid_offset + 16])
                 track_settings["kid"] = kid
                 # Also store globally for backward compatibility
-                if not hasattr(self, 'extracted_kids'):
+                if not hasattr(self, "extracted_kids"):
                     self.extracted_kids = {}
                 if self.current_track_id > 0:
                     self.extracted_kids[self.current_track_id] = kid

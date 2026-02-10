@@ -795,9 +795,7 @@ async def get_segment(
         # Check processed segment cache first (avoids re-decrypting/re-remuxing)
         is_processed = bool(segment_params.key_id or should_remux)
         if is_processed:
-            processed_content = await get_cached_processed_segment(
-                segment_url, segment_params.key_id, should_remux
-            )
+            processed_content = await get_cached_processed_segment(segment_url, segment_params.key_id, should_remux)
             if processed_content:
                 logger.info(f"Serving processed segment from cache: {segment_url}")
                 mimetype = "video/mp2t" if should_remux else segment_params.mime_type

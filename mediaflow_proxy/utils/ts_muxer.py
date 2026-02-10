@@ -320,7 +320,7 @@ def _parse_sample_entry(
     """Parse a sample entry for codec configuration."""
 
     # Video sample entries
-    if entry_type in (b"avc1", b"avc3", b"encv"):
+    if entry_type in (b"avc1", b"avc3"):
         config.video_codec = "h264"
         config.video_track_id = track_id
         config.video_timescale = timescale
@@ -334,6 +334,23 @@ def _parse_sample_entry(
 
         # Find avcC box within the sample entry
         _find_avcc(entry_data, config)
+
+    elif entry_type == b"encv":
+        # Encrypted video — determine original codec from sinf/frma or by probing
+        config.video_track_id = track_id
+        config.video_timescale = timescale
+        if len(entry_data) >= 70:
+            config.width = struct.unpack_from(">H", entry_data, 24)[0]
+            config.height = struct.unpack_from(">H", entry_data, 26)[0]
+
+        # Try to determine original codec: check for avcC first, then hvcC
+        _find_avcc(entry_data, config)
+        if config.sps_list:
+            config.video_codec = "h264"
+        else:
+            _find_hvcc(entry_data, config)
+            if config.vps_list or config.sps_list:
+                config.video_codec = "h265"
 
     elif entry_type in (b"hev1", b"hvc1"):
         config.video_codec = "h265"
@@ -451,6 +468,14 @@ def _find_hvcc(data: memoryview, config: CodecConfig):
         if box_type == b"hvcC":
             _parse_hvcc(box_data, config)
             return
+        elif box_type == b"sinf":
+            # Encrypted - look for hvcC inside sinf/schi
+            for sinf_type, sinf_data in iter_boxes(box_data):
+                if sinf_type == b"schi":
+                    for schi_type, schi_data in iter_boxes(sinf_data):
+                        if schi_type == b"hvcC":
+                            _parse_hvcc(schi_data, config)
+                            return
 
 
 def _parse_hvcc(hvcc_data: memoryview, config: CodecConfig):
@@ -1155,9 +1180,7 @@ class TSMuxer:
 
         return packets
 
-    def _build_adaptation_field(
-        self, pcr: int, is_keyframe: bool, discontinuity: bool = False
-    ) -> bytes:
+    def _build_adaptation_field(self, pcr: int, is_keyframe: bool, discontinuity: bool = False) -> bytes:
         """Build an adaptation field with PCR.
 
         Args:
@@ -1354,9 +1377,7 @@ class FMP4ToTSRemuxer:
                 )
                 first_video = False
             else:
-                packets = self._process_audio_sample(
-                    sample, discontinuity=preserve_timestamps and first_audio
-                )
+                packets = self._process_audio_sample(sample, discontinuity=preserve_timestamps and first_audio)
                 first_audio = False
 
             for packet in packets:
@@ -1378,7 +1399,6 @@ class FMP4ToTSRemuxer:
 
         # Find moof and mdat boxes, and track their positions
         moof_offset = None
-        mdat_offset = None
         mdat_data = None
 
         offset = 0
@@ -1398,7 +1418,6 @@ class FMP4ToTSRemuxer:
                 moof_offset = offset
                 moof_data = data[offset + 8 : offset + size]
             elif box_type == b"mdat":
-                # mdat_offset = offset
                 mdat_data = data[offset + 8 : offset + size]
 
             offset += size
@@ -1498,7 +1517,9 @@ class FMP4ToTSRemuxer:
         if len(data) < 8:
             return
 
-        flags = struct.unpack_from(">I", data, 0)[0] & 0xFFFFFF
+        version_and_flags = struct.unpack_from(">I", data, 0)[0]
+        trun_version = (version_and_flags >> 24) & 0xFF
+        flags = version_and_flags & 0xFFFFFF
         sample_count = struct.unpack_from(">I", data, 4)[0]
 
         offset = 8
@@ -1535,17 +1556,18 @@ class FMP4ToTSRemuxer:
 
             if flags & 0x000800:  # sample-composition-time-offset-present
                 if offset + 4 <= len(data):
-                    # Can be signed (version 1) or unsigned (version 0)
-                    cts_offset = struct.unpack_from(">i", data, offset)[0]
+                    # Per ISO 14496-12: unsigned (uint32) in version 0, signed (int32) in version 1
+                    if trun_version == 0:
+                        cts_offset = struct.unpack_from(">I", data, offset)[0]
+                    else:
+                        cts_offset = struct.unpack_from(">i", data, offset)[0]
                 offset += 4
 
             samples.append((sample_size, sample_duration, sample_flags, cts_offset))
 
         track_info["samples"] = samples
 
-    def _extract_samples(
-        self, segment_data: memoryview, track_info: dict, moof_offset: int
-    ) -> list[Sample]:
+    def _extract_samples(self, segment_data: memoryview, track_info: dict, moof_offset: int) -> list[Sample]:
         """Extract samples from segment data based on track info.
 
         Args:
@@ -1593,9 +1615,7 @@ class FMP4ToTSRemuxer:
 
         return samples
 
-    def _process_video_sample(
-        self, sample: Sample, is_first: bool, discontinuity: bool = False
-    ) -> list[bytes]:
+    def _process_video_sample(self, sample: Sample, is_first: bool, discontinuity: bool = False) -> list[bytes]:
         """Process a video sample and return TS packets."""
         # Convert NAL units to Annex B format
         video_data, detected_keyframe = convert_length_prefixed_to_annex_b(
@@ -1617,21 +1637,19 @@ class FMP4ToTSRemuxer:
         pts_90k += self._ts_offset
         dts_90k += self._ts_offset
 
+        # Apply DTS delay to ensure PTS >= DTS for B-frame content.
+        # The delay shifts all DTS values so that even the most reordered B-frame
+        # will have PTS >= DTS, which is required by the MPEG-TS spec.
+        dts_90k += self._dts_delay
+
         # Ensure timestamps are non-negative
         if pts_90k < 0:
             pts_90k = 0
         if dts_90k < 0:
             dts_90k = 0
 
-        # For B-frame content, we have two choices:
-        # 1. Include only PTS (simpler, works for most players)
-        # 2. Include both PTS and DTS but ensure DTS <= PTS
-        #
-        # When B-frames are present (self._dts_delay > 0), some frames have PTS < DTS
-        # in the original source. In MPEG-TS this is invalid. To handle this properly,
-        # we only include DTS when PTS > DTS, otherwise only include PTS.
-        # This is valid per MPEG-TS spec and works with most players.
-        include_dts = dts_90k != pts_90k and dts_90k <= pts_90k
+        # Include DTS when it differs from PTS (B-frame reordering)
+        include_dts = dts_90k != pts_90k
 
         # Build PES packet
         pes = build_pes_packet(0xE0, video_data, pts_90k, dts_90k if include_dts else None)
@@ -1666,9 +1684,7 @@ class FMP4ToTSRemuxer:
         # so the adaptation field is created to carry the discontinuity flag
         pcr = pts_90k if discontinuity else None
 
-        return self.muxer.packetize_pes(
-            pes, PID_AUDIO, pcr=pcr, is_keyframe=False, discontinuity=discontinuity
-        )
+        return self.muxer.packetize_pes(pes, PID_AUDIO, pcr=pcr, is_keyframe=False, discontinuity=discontinuity)
 
 
 # ============================================================================
@@ -1676,9 +1692,7 @@ class FMP4ToTSRemuxer:
 # ============================================================================
 
 
-def remux_fmp4_to_ts(
-    init_segment: bytes, media_segment: bytes, preserve_timestamps: bool = False
-) -> bytes:
+def remux_fmp4_to_ts(init_segment: bytes, media_segment: bytes, preserve_timestamps: bool = False) -> bytes:
     """
     Remux a fragmented MP4 segment to MPEG-TS.
 

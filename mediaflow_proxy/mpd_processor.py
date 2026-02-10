@@ -174,7 +174,7 @@ async def process_segment(
             # fMP4 segment, ensuring continuous playback across HLS segments
             ts_content = remux_fmp4_to_ts(
                 init_content,
-                segment_content if use_map else decrypted_content,
+                decrypted_content,
                 preserve_timestamps=True,
             )
             decrypted_content = ts_content
@@ -306,7 +306,7 @@ def build_hls(
         is_default = "YES" if i == 0 else "NO"  # Set the first audio track as default
         lang = profile.get("lang", "und")
         bandwidth = profile.get("bandwidth", "128000")
-        name = f"Audio {lang} ({bandwidth})" if lang != "und" else f"Audio {i+1} ({bandwidth})"
+        name = f"Audio {lang} ({bandwidth})" if lang != "und" else f"Audio {i + 1} ({bandwidth})"
         hls.append(
             f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="{name}",DEFAULT={is_default},AUTOSELECT=YES,LANGUAGE="{lang}",URI="{playlist_url}"'
         )
