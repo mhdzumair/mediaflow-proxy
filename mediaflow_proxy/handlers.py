@@ -13,7 +13,14 @@ from starlette.background import BackgroundTask
 from .const import SUPPORTED_RESPONSE_HEADERS
 from .mpd_processor import process_manifest, process_playlist, process_segment, process_init_segment
 from .schemas import HLSManifestParams, MPDManifestParams, MPDPlaylistParams, MPDSegmentParams, MPDInitParams
-from .utils.cache_utils import get_cached_mpd, get_cached_init_segment, get_cached_segment, set_cached_segment
+from .utils.cache_utils import (
+    get_cached_mpd,
+    get_cached_init_segment,
+    get_cached_segment,
+    set_cached_segment,
+    get_cached_processed_segment,
+    set_cached_processed_segment,
+)
 from .utils.dash_prebuffer import dash_prebuffer
 from .utils.http_utils import (
     Streamer,
@@ -643,11 +650,36 @@ async def handle_drm_key_data(key_id, key, drm_info):
             key_id = drm_info["keyId"]
             key = drm_info["key"]
         elif "laUrl" in drm_info and "keyId" in drm_info:
-            raise HTTPException(status_code=400, detail="LA URL is not supported yet")
+            # License URL with keyId - license acquisition should have been attempted already
+            # If we still don't have a key, it means acquisition failed
+            pass
         else:
-            raise HTTPException(
-                status_code=400, detail="Unable to determine key_id and key, and they were not provided"
-            )
+            # Try to use extracted KID if available (from MPD/init segment analysis)
+            if not key_id and drm_info.get("extracted_kids"):
+                # Use the first extracted KID
+                extracted_kids = drm_info["extracted_kids"]
+                if extracted_kids:
+                    key_id = extracted_kids[0]
+                    logger.info(f"Using extracted KID from MPD/init segment: {key_id}")
+
+            # Still require the actual decryption key
+            if not key:
+                if drm_info.get("extracted_kids"):
+                    license_urls = drm_info.get("license_urls", [])
+                    license_url_msg = f" License server: {license_urls[0]}" if license_urls else ""
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Key ID (KID) was automatically extracted: {key_id}. "
+                            f"However, the actual decryption key must be provided via the 'key' parameter. "
+                            f"The key cannot be extracted from the MPD or init segment and must be obtained "
+                            f"from the license server or source website.{license_url_msg}"
+                        ),
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=400, detail="Unable to determine key_id and key, and they were not provided"
+                    )
 
     return key_id, key
 
@@ -737,6 +769,7 @@ async def get_playlist(
 async def get_segment(
     segment_params: MPDSegmentParams,
     proxy_headers: ProxyRequestHeaders,
+    force_remux_ts: bool = None,
 ):
     """
     Retrieves and processes a media segment, decrypting it if necessary.
@@ -748,6 +781,8 @@ async def get_segment(
     Args:
         segment_params (MPDSegmentParams): The parameters for the segment request.
         proxy_headers (ProxyRequestHeaders): The headers to include in the request.
+        force_remux_ts (bool, optional): If True, force remuxing to MPEG-TS regardless
+            of global settings. Used by /mpd/segment.ts endpoint. Defaults to None.
 
     Returns:
         Response: The HTTP response with the processed segment.
@@ -755,6 +790,17 @@ async def get_segment(
     try:
         live_cache_ttl = settings.mpd_live_init_cache_ttl if segment_params.is_live else None
         segment_url = segment_params.segment_url
+        should_remux = force_remux_ts if force_remux_ts is not None else settings.remux_to_ts
+
+        # Check processed segment cache first (avoids re-decrypting/re-remuxing)
+        is_processed = bool(segment_params.key_id or should_remux)
+        if is_processed:
+            processed_content = await get_cached_processed_segment(segment_url, segment_params.key_id, should_remux)
+            if processed_content:
+                logger.info(f"Serving processed segment from cache: {segment_url}")
+                mimetype = "video/mp2t" if should_remux else segment_params.mime_type
+                response_headers = apply_header_manipulation({}, proxy_headers)
+                return Response(content=processed_content, media_type=mimetype, headers=response_headers)
 
         # Use event-based coordination for segment download
         # get_or_download() handles:
@@ -762,18 +808,47 @@ async def get_segment(
         # - Waiting for existing downloads (via asyncio.Event)
         # - Starting new download if needed
         # - Caching the result
+        # Use a short timeout (1s) for player requests to avoid blocking if prebuffer is busy
+        # This ensures players get fast responses even when background prefetching is active
         if settings.enable_dash_prebuffer:
-            segment_content = await dash_prebuffer.get_or_download(segment_url, proxy_headers.request)
+            segment_content = await dash_prebuffer.get_or_download(segment_url, proxy_headers.request, timeout=1.0)
         else:
             # Prebuffer disabled - check cache then download directly
             segment_content = await get_cached_segment(segment_url)
             if not segment_content:
-                segment_content = await download_file_with_retry(segment_url, proxy_headers.request)
-                # Cache for future requests
-                if segment_content and segment_params.is_live:
-                    asyncio.create_task(
-                        set_cached_segment(segment_url, segment_content, ttl=settings.dash_segment_cache_ttl)
-                    )
+                try:
+                    segment_content = await download_file_with_retry(segment_url, proxy_headers.request)
+                    # Cache for future requests (synchronous to ensure it's cached before returning)
+                    if segment_content and segment_params.is_live:
+                        # Use create_task for non-blocking cache write, but segment is already downloaded
+                        asyncio.create_task(
+                            set_cached_segment(segment_url, segment_content, ttl=settings.dash_segment_cache_ttl)
+                        )
+                except Exception as dl_err:
+                    logger.warning(f"Direct download failed when prebuffer disabled: {dl_err}")
+                    segment_content = None
+
+        # If prebuffer returned None (lock timeout or coordination failure),
+        # check cache one more time - the download may have completed while we waited
+        # Then fall back to a direct download if still not cached.
+        # This is critical for live streams where the prebuffer may be busy
+        # downloading other segments/profiles.
+        if not segment_content:
+            # Final cache check - download may have completed during lock wait
+            segment_content = await get_cached_segment(segment_url)
+            if segment_content:
+                logger.info(f"Segment found in cache after prebuffer timeout: {segment_url}")
+            else:
+                logger.info(f"Prebuffer returned no content, falling back to direct download: {segment_url}")
+                try:
+                    segment_content = await download_file_with_retry(segment_url, proxy_headers.request)
+                    # Cache on success for future requests
+                    if segment_content and segment_params.is_live:
+                        asyncio.create_task(
+                            set_cached_segment(segment_url, segment_content, ttl=settings.dash_segment_cache_ttl)
+                        )
+                except Exception as dl_err:
+                    logger.warning(f"Direct download fallback also failed: {dl_err}")
 
         if not segment_content:
             # Return 404 instead of 502 so players can skip and continue
@@ -804,15 +879,33 @@ async def get_segment(
     except Exception as e:
         return handle_exceptions(e)
 
-    return await process_segment(
-        init_content,
-        segment_content,
-        segment_params.mime_type,
-        proxy_headers,
-        segment_params.key_id,
-        segment_params.key,
-        use_map=segment_params.use_map,
-    )
+    try:
+        response = await process_segment(
+            init_content,
+            segment_content,
+            segment_params.mime_type,
+            proxy_headers,
+            segment_params.key_id,
+            segment_params.key,
+            use_map=segment_params.use_map,
+            remux_ts=force_remux_ts,
+        )
+    except Exception as e:
+        return handle_exceptions(e)
+
+    # Cache processed segment for future requests (avoids re-decrypting/re-remuxing)
+    if is_processed and response.status_code == 200:
+        asyncio.create_task(
+            set_cached_processed_segment(
+                segment_url,
+                response.body,
+                segment_params.key_id,
+                should_remux,
+                ttl=settings.processed_segment_cache_ttl,
+            )
+        )
+
+    return response
 
 
 async def get_init_segment(

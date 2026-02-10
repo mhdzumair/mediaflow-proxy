@@ -210,6 +210,8 @@ class MP4Decrypter:
         self.constant_iv: Optional[bytes] = None
         # Per-track encryption settings (track_id -> {crypt, skip, iv})
         self.track_encryption_settings: dict[int, dict] = {}
+        # Extracted KIDs from tenc boxes (track_id -> kid)
+        self.extracted_kids: dict[int, bytes] = {}
         # Current track ID being processed
         self.current_track_id: int = 0
 
@@ -646,6 +648,8 @@ class MP4Decrypter:
     def _get_key_for_track(self, track_id: int) -> bytes:
         """
         Retrieves the decryption key for a given track ID from the key map.
+        Uses the KID extracted from the tenc box if available, otherwise falls back to
+        using the first key if only one key is provided.
 
         Args:
             track_id (int): The track ID.
@@ -653,9 +657,32 @@ class MP4Decrypter:
         Returns:
             bytes: The decryption key for the specified track ID.
         """
+        # If we have an extracted KID for this track, use it to look up the key
+        if track_id in self.extracted_kids:
+            extracted_kid = self.extracted_kids[track_id]
+            # If KID is all zeros, it's a placeholder - use the provided key_id directly
+            # Check if all bytes are zero
+            is_all_zeros = all(b == 0 for b in extracted_kid) and len(extracted_kid) == 16
+            if is_all_zeros:
+                # All zeros KID means use the provided key_id (first key in map)
+                if len(self.key_map) == 1:
+                    return next(iter(self.key_map.values()))
+            else:
+                # Use the extracted KID to look up the key
+                key = self.key_map.get(extracted_kid)
+                if key:
+                    return key
+                # If KID doesn't match, try fallback
+                # Note: This is expected when KID in file doesn't match provided key_id
+                # The provided key_id should still work if it's the correct decryption key
+
+        # Fallback: if only one key provided, use it (backward compatibility)
         if len(self.key_map) == 1:
             return next(iter(self.key_map.values()))
-        key = self.key_map.get(track_id.pack(4, "big"))
+
+        # Try using track_id as KID (for multi-key scenarios)
+        track_id_bytes = track_id.to_bytes(4, "big")
+        key = self.key_map.get(track_id_bytes)
         if not key:
             raise ValueError(f"No key found for track ID {track_id}")
         return key
@@ -1418,6 +1445,7 @@ class MP4Decrypter:
                 "skip_byte_block": 9,  # Default
                 "constant_iv": None,
                 "iv_size": 8,
+                "kid": None,  # KID from tenc box
             }
 
             # Extract pattern encryption parameters for version > 0 (used in cbcs)
@@ -1429,6 +1457,17 @@ class MP4Decrypter:
                 # Also update global defaults (for backward compatibility)
                 self.crypt_byte_block = track_settings["crypt_byte_block"]
                 self.skip_byte_block = track_settings["skip_byte_block"]
+
+            # Extract KID (default_KID is at offset 8, 16 bytes)
+            kid_offset = 8
+            if len(data) >= kid_offset + 16:
+                kid = bytes(data[kid_offset : kid_offset + 16])
+                track_settings["kid"] = kid
+                # Also store globally for backward compatibility
+                if not hasattr(self, "extracted_kids"):
+                    self.extracted_kids = {}
+                if self.current_track_id > 0:
+                    self.extracted_kids[self.current_track_id] = kid
 
             # IV size is at offset 7 for both versions
             iv_size_offset = 7

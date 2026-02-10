@@ -203,6 +203,10 @@ class MPDManifestParams(GenericParams):
         None,
         description="Injects #EXT-X-START:TIME-OFFSET into live playlists. Use negative values for live streams to start behind the live edge (e.g., -18 to start 18 seconds behind). Enables prebuffer to work on live streams.",
     )
+    remux_to_ts: Optional[bool] = Field(
+        None,
+        description="Override global REMUX_TO_TS setting per-request. true = force TS remuxing, false = force fMP4 passthrough, omit = use server default.",
+    )
 
     @field_validator("resolution", mode="before")
     @classmethod
@@ -230,6 +234,10 @@ class MPDPlaylistParams(GenericParams):
     start_offset: Optional[float] = Field(
         None,
         description="Injects #EXT-X-START:TIME-OFFSET into the playlist. Use negative values for live streams to start behind the live edge (e.g., -18 to start 18 seconds behind). Enables prebuffer to work on live streams.",
+    )
+    remux_to_ts: Optional[bool] = Field(
+        None,
+        description="Override global REMUX_TO_TS setting per-request. true = force TS remuxing, false = force fMP4 passthrough, omit = use server default.",
     )
 
     def get_skip_segments(self) -> Optional[list[dict]]:
