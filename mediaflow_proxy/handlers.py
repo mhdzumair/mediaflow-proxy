@@ -879,16 +879,19 @@ async def get_segment(
     except Exception as e:
         return handle_exceptions(e)
 
-    response = await process_segment(
-        init_content,
-        segment_content,
-        segment_params.mime_type,
-        proxy_headers,
-        segment_params.key_id,
-        segment_params.key,
-        use_map=segment_params.use_map,
-        remux_ts=force_remux_ts,
-    )
+    try:
+        response = await process_segment(
+            init_content,
+            segment_content,
+            segment_params.mime_type,
+            proxy_headers,
+            segment_params.key_id,
+            segment_params.key,
+            use_map=segment_params.use_map,
+            remux_ts=force_remux_ts,
+        )
+    except Exception as e:
+        return handle_exceptions(e)
 
     # Cache processed segment for future requests (avoids re-decrypting/re-remuxing)
     if is_processed and response.status_code == 200:

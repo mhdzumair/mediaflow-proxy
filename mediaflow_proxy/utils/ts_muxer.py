@@ -1299,17 +1299,17 @@ class FMP4ToTSRemuxer:
             for packet in self.muxer.packetize_section(pmt, PID_PMT):
                 result.extend(packet)
 
-        # Calculate timestamp offset to ensure DTS is monotonic and PTS >= DTS
+        # Calculate PTS delay to ensure PTS >= DTS for B-frame content.
         # In the source, B-frames can have PTS < DTS (negative CTS offset).
-        # We need to find the minimum (PTS - DTS) and shift DTS values to compensate.
         #
         # For MPEG-TS:
         # - DTS must be monotonically increasing
         # - PTS must be >= DTS for each packet
         #
-        # Strategy: Find the most negative (PTS - DTS) difference and add that
-        # as an offset to all DTS values. This effectively delays DTS while keeping
-        # PTS the same, ensuring PTS >= DTS for all frames.
+        # Strategy (matches FFmpeg): Find the most negative (PTS - DTS) difference
+        # and shift all PTS values forward by that amount. This keeps DTS untouched
+        # (preserving decode order) while ensuring PTS >= DTS for all frames.
+        # The same shift is applied to audio PTS to maintain A/V sync.
 
         min_pts_dts_diff_90k = 0  # Will track most negative (PTS - DTS)
         for sample in video_samples:
@@ -1319,9 +1319,9 @@ class FMP4ToTSRemuxer:
             if diff < min_pts_dts_diff_90k:
                 min_pts_dts_diff_90k = diff
 
-        # The DTS delay is the absolute value of the most negative difference
-        # This shifts all DTS values so that even the most reordered B-frame
-        # will have PTS >= DTS
+        # The PTS delay is the absolute value of the most negative difference.
+        # This shifts all PTS values forward so that even the most reordered
+        # B-frame will have PTS >= DTS.
         self._dts_delay = -min_pts_dts_diff_90k if min_pts_dts_diff_90k < 0 else 0
 
         if preserve_timestamps:
@@ -1637,10 +1637,11 @@ class FMP4ToTSRemuxer:
         pts_90k += self._ts_offset
         dts_90k += self._ts_offset
 
-        # Apply DTS delay to ensure PTS >= DTS for B-frame content.
-        # The delay shifts all DTS values so that even the most reordered B-frame
-        # will have PTS >= DTS, which is required by the MPEG-TS spec.
-        dts_90k += self._dts_delay
+        # Apply PTS delay to ensure PTS >= DTS for B-frame content.
+        # The delay shifts all PTS values forward so that even the most reordered
+        # B-frame will have PTS >= DTS, which is required by the MPEG-TS spec.
+        # This matches FFmpeg's approach of shifting PTS rather than DTS.
+        pts_90k += self._dts_delay
 
         # Ensure timestamps are non-negative
         if pts_90k < 0:
@@ -1672,6 +1673,9 @@ class FMP4ToTSRemuxer:
 
         # Apply timestamp offset (same as video for sync)
         pts_90k += self._ts_offset
+
+        # Apply same PTS delay as video to maintain A/V sync
+        pts_90k += self._dts_delay
 
         # Ensure timestamp is non-negative
         if pts_90k < 0:
