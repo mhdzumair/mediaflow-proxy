@@ -1403,22 +1403,16 @@ class FMP4ToTSRemuxer:
 
         offset = 0
         while offset < len(data):
-            if offset + 8 > len(data):
+            result = read_box(data, offset)
+            if result is None:
                 break
-            size = struct.unpack_from(">I", data, offset)[0]
-            box_type = bytes(data[offset + 4 : offset + 8])
-            if size == 0:
-                break
-            if size == 1:  # Extended size
-                if offset + 16 > len(data):
-                    break
-                size = struct.unpack_from(">Q", data, offset + 8)[0]
+            box_type, size, box_data = result
 
             if box_type == b"moof":
                 moof_offset = offset
-                moof_data = data[offset + 8 : offset + size]
+                moof_data = box_data
             elif box_type == b"mdat":
-                mdat_data = data[offset + 8 : offset + size]
+                mdat_data = box_data
 
             offset += size
 
