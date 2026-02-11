@@ -143,13 +143,6 @@ def rewrite_m3u_links_streaming(
                 if key:
                     processed_url_content += f"&key={key}"
 
-            # Aggiungi chiavi da #KODIPROP se presenti
-            license_key = current_kodi_props.get("inputstream.adaptive.license_key")
-            if license_key and ":" in license_key:
-                key_id_kodi, key_kodi = license_key.split(":", 1)
-                processed_url_content += f"&key_id={key_id_kodi}"
-                processed_url_content += f"&key={key_kodi}"
-
             elif ".php" in logical_line:
                 encoded_url = urllib.parse.quote(logical_line, safe="")
                 processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}"
@@ -157,6 +150,16 @@ def rewrite_m3u_links_streaming(
                 # Per tutti gli altri link senza estensioni specifiche, trattali come .m3u8 con codifica
                 encoded_url = urllib.parse.quote(logical_line, safe="")
                 processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}"
+
+            # Aggiungi chiavi da #KODIPROP se presenti
+            license_key = current_kodi_props.get("inputstream.adaptive.license_key")
+            if license_key and ":" in license_key:
+                key_id_kodi, key_kodi = license_key.split(":", 1)
+                # Aggiungi key_id e key solo se non sono già stati aggiunti (es. dall'URL MPD)
+                if "&key_id=" not in processed_url_content:
+                    processed_url_content += f"&key_id={key_id_kodi}"
+                if "&key=" not in processed_url_content:
+                    processed_url_content += f"&key={key_kodi}"
 
             # Applica gli header raccolti prima di api_password
             if current_ext_headers:
@@ -256,7 +259,7 @@ async def async_generate_combined_playlist(playlist_definitions: list[str], base
     )
 
     # Raggruppa le playlist da ordinare e quelle da non ordinare
-    sorted_playlist_lines = []
+    channel_entries_to_sort = []
     unsorted_playlists_data = []
 
     for idx, result in enumerate(results):
@@ -269,7 +272,10 @@ async def async_generate_combined_playlist(playlist_definitions: list[str], base
             continue
 
         if task_info.get("sort", False):
-            sorted_playlist_lines.extend(result)
+            # Se la playlist deve essere ordinata, estraiamo i canali e li mettiamo nel pool globale da ordinare
+            entries = parse_channel_entries(result)
+            for entry_lines in entries:
+                channel_entries_to_sort.append((entry_lines, task_info["proxy"]))
         else:
             unsorted_playlists_data.append({"lines": result, "proxy": task_info["proxy"]})
 
@@ -292,20 +298,10 @@ async def async_generate_combined_playlist(playlist_definitions: list[str], base
             first_playlist_header_handled = True
 
     # 1. Processa e ordina le playlist marcate con 'sort'
-    if sorted_playlist_lines:
-        # Extract channel entries and keep proxy info
-        channel_entries_with_proxy_info = []
-        for idx, result in enumerate(results):
-            task_info = download_tasks[idx]
-            if task_info.get("sort") and isinstance(result, list):
-                entries = parse_channel_entries(result)  # result is the list of playlist lines
-                for entry_lines in entries:
-                    # The proxy option applies to the entire channel block
-                    channel_entries_with_proxy_info.append((entry_lines, task_info["proxy"]))
-
-        # Sort entries by channel name (from #EXTINF)
+    if channel_entries_to_sort:
+        # Sort all entries from ALL sorted playlists together by channel name (from #EXTINF)
         # The first line of each entry is always #EXTINF
-        channel_entries_with_proxy_info.sort(key=lambda x: x[0][0].split(",")[-1].strip())
+        channel_entries_to_sort.sort(key=lambda x: x[0][0].split(",")[-1].strip().lower())
 
         # Handle the header only once for the sorted block
         if not first_playlist_header_handled:
@@ -313,7 +309,7 @@ async def async_generate_combined_playlist(playlist_definitions: list[str], base
             first_playlist_header_handled = True
 
         # Apply link rewriting selectively
-        for entry_lines, should_proxy in channel_entries_with_proxy_info:
+        for entry_lines, should_proxy in channel_entries_to_sort:
             # The URL is the last line of the entry
             url = entry_lines[-1]
             # Yield tutte le righe prima dell'URL
