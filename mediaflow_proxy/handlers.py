@@ -387,6 +387,11 @@ async def handle_stream_request(
         range_header = proxy_headers.request.get("range", "not set")
         logger.info(f"[handle_stream] Starting upstream {method} request - range: {range_header}")
 
+        # Track if this is an auto-added "bytes=0-" range (client didn't send range)
+        # We detect this by checking if range equals exactly "bytes=0-" which indicates
+        # a proxy-added default range, not a client seeking request
+        auto_added_range = proxy_headers.request.get("range") == "bytes=0-"
+
         # Use the same HTTP method for upstream request (HEAD for HEAD, GET for GET)
         # This prevents unnecessary data download when client just wants headers
         await streamer.create_streaming_response(video_url, proxy_headers.request, method=method)
@@ -400,11 +405,29 @@ async def handle_stream_request(
         )
         logger.debug(f"Prepared response headers: {response_headers}")
 
-        # If we're removing content-range but upstream returned 206, change to 200
-        # (206 Partial Content requires Content-Range header per HTTP spec)
+        # When client didn't send a Range header but upstream returns 206 Partial Content:
+        # - Convert status to 200 (full content, not partial)
+        # - Remove content-range header to avoid confusing the client
+        # This handles cases where we added bytes=0- range but upstream still treats it as a range request
         status_code = streamer.response.status
-        if status_code == 206 and "content-range" in [h.lower() for h in proxy_headers.remove]:
-            status_code = 200
+        if status_code == 206:
+            if "content-range" in [h.lower() for h in proxy_headers.remove]:
+                # Explicitly requested to remove content-range
+                status_code = 200
+                # Also remove content-range from response headers if present
+                response_headers.pop("content-range", None)
+            elif auto_added_range:
+                # We auto-added bytes=0- range but got 206 - convert to 200
+                # This happens when client didn't send a range but upstream responds with 206
+                status_code = 200
+                # Remove content-range to avoid confusing client
+                response_headers.pop("content-range", None)
+                # Update content-length to total size (remove range suffix if present)
+                content_range = streamer.response.headers.get("Content-Range", "")
+                if "/" in content_range:
+                    # Extract total size from "bytes X-Y/total"
+                    total_size = content_range.split("/")[-1].strip()
+                    response_headers["content-length"] = total_size
 
         # Get transformer instance if specified
         transformer = get_transformer(transformer_id)
