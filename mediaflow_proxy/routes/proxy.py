@@ -181,6 +181,10 @@ async def hls_manifest_proxy(
         if dlhd_result.get("mediaflow_endpoint") == "hls_key_proxy":
             hls_params.key_only_proxy = True
 
+        # Check if extractor wants to force playlist proxy (needed for .css disguised m3u8)
+        if dlhd_result.get("force_playlist_proxy"):
+            hls_params.force_playlist_proxy = True
+
         # Also add headers to query params so they propagate to key/segment requests
         # This is necessary because M3U8Processor encodes headers as h_* query params
         query_dict = dict(request.query_params)
@@ -190,6 +194,13 @@ async def hls_manifest_proxy(
         # Add DLHD original URL to track for cache invalidation
         if dlhd_original_url:
             query_dict["dlhd_original"] = dlhd_original_url
+        # Add DLHD key params if present (for dynamic key header computation)
+        if dlhd_result.get("dlhd_channel_salt"):
+            query_dict["dlhd_salt"] = dlhd_result["dlhd_channel_salt"]
+        if dlhd_result.get("dlhd_auth_token"):
+            query_dict["dlhd_token"] = dlhd_result["dlhd_auth_token"]
+        if dlhd_result.get("dlhd_iframe_url"):
+            query_dict["dlhd_iframe"] = dlhd_result["dlhd_iframe_url"]
         # Remove retry flag from subsequent requests
         query_dict.pop("dlhd_retry", None)
         # Update request query params
@@ -499,6 +510,27 @@ async def proxy_stream_endpoint(
 
     # Sanitize destination URL to fix common encoding issues
     destination = sanitize_url(destination)
+
+    # Check if this is a DLHD key URL request with key params in query
+    dlhd_salt = request.query_params.get("dlhd_salt")
+    dlhd_token = request.query_params.get("dlhd_token")
+    if dlhd_salt and "/key/" in destination:
+        # This is a DLHD key URL - compute dynamic headers
+        from mediaflow_proxy.extractors.dlhd import compute_key_headers, compute_fingerprint
+
+        key_headers = compute_key_headers(destination, dlhd_salt)
+        if key_headers:
+            ts, nonce, key_path = key_headers
+            fingerprint = compute_fingerprint()
+            proxy_headers.request.update({
+                "X-Key-Timestamp": str(ts),
+                "X-Key-Nonce": str(nonce),
+                "X-Fingerprint": fingerprint,
+                "X-Key-Path": key_path,
+            })
+            if dlhd_token:
+                proxy_headers.request["Authorization"] = f"Bearer {dlhd_token}"
+            logger.info(f"[proxy_stream] Computed DLHD key headers for: {destination}")
 
     # Check if destination contains DLHD pattern and extract stream directly
     dlhd_result = await check_and_extract_dlhd_stream(request, destination, proxy_headers)
