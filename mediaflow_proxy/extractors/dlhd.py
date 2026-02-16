@@ -567,8 +567,6 @@ class DLHDExtractor(BaseExtractor):
             "lefttoplay.xyz"
         ]
 
-        channel_key = f"premium{channel_id}"
-
         for iframe_domain in iframe_domains:
             try:
                 iframe_url = f"https://{iframe_domain}/premiumtv/daddyhd.php?id={channel_id}"

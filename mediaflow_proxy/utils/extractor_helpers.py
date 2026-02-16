@@ -8,7 +8,7 @@ and Sportsonline/Sportzonline streams that are auto-detected in proxy routes.
 import logging
 import re
 import time
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse
 
 from fastapi import Request, HTTPException
 
@@ -85,7 +85,7 @@ async def check_and_extract_dlhd_stream(
             result["dlhd_channel_salt"] = key_params.get("channel_salt", "")
             result["dlhd_auth_token"] = key_params.get("auth_token", "")
             result["dlhd_iframe_url"] = key_params.get("iframe_url", "")
-            logger.info(f"DLHD key params extracted for dynamic header computation")
+            logger.info("DLHD key params extracted for dynamic header computation")
 
         # Cache the result
         _dlhd_extraction_cache[destination] = {"data": result, "timestamp": current_time}
