@@ -51,9 +51,7 @@ def compute_fingerprint(
     return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:16]
 
 
-def compute_key_path(
-    resource: str, number: str, timestamp: int, fingerprint: str, secret_key: str
-) -> str:
+def compute_key_path(resource: str, number: str, timestamp: int, fingerprint: str, secret_key: str) -> str:
     """
     Compute the X-Key-Path header value.
 
@@ -71,9 +69,7 @@ def compute_key_path(
         The 16-character key path
     """
     combined = f"{resource}|{number}|{timestamp}|{fingerprint}"
-    hmac_hash = hmac.new(
-        secret_key.encode("utf-8"), combined.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
+    hmac_hash = hmac.new(secret_key.encode("utf-8"), combined.encode("utf-8"), hashlib.sha256).hexdigest()
     return hmac_hash[:16]
 
 
@@ -109,9 +105,7 @@ def compute_key_headers(key_url: str, secret_key: str) -> tuple[int, int, str, s
     ts = int(time.time())
 
     # Compute HMAC-SHA256
-    hmac_hash = hmac.new(
-        secret_key.encode("utf-8"), resource.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
+    hmac_hash = hmac.new(secret_key.encode("utf-8"), resource.encode("utf-8"), hashlib.sha256).hexdigest()
 
     # Proof-of-work loop
     nonce = 0
@@ -563,9 +557,7 @@ class DLHDExtractor(BaseExtractor):
         This extracts auth_token, channel_key, channel_salt and computes key headers.
         """
         # Common iframe domains for DLHD
-        iframe_domains = [
-            "lefttoplay.xyz"
-        ]
+        iframe_domains = ["lefttoplay.xyz"]
 
         for iframe_domain in iframe_domains:
             try:

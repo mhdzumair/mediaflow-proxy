@@ -521,12 +521,14 @@ async def proxy_stream_endpoint(
         key_headers = await asyncio.to_thread(compute_key_headers, destination, dlhd_salt)
         if key_headers:
             ts, nonce, key_path, fingerprint = key_headers
-            proxy_headers.request.update({
-                "X-Key-Timestamp": str(ts),
-                "X-Key-Nonce": str(nonce),
-                "X-Fingerprint": fingerprint,
-                "X-Key-Path": key_path,
-            })
+            proxy_headers.request.update(
+                {
+                    "X-Key-Timestamp": str(ts),
+                    "X-Key-Nonce": str(nonce),
+                    "X-Fingerprint": fingerprint,
+                    "X-Key-Path": key_path,
+                }
+            )
             if dlhd_token:
                 proxy_headers.request["Authorization"] = f"Bearer {dlhd_token}"
             logger.info(f"[proxy_stream] Computed DLHD key headers for: {destination}")

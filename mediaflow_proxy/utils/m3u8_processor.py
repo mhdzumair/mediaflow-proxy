@@ -692,7 +692,9 @@ class M3U8Processor:
             query_params = dict(self.request.query_params)
             is_dlhd_key_request = "dlhd_salt" in query_params and "/key/" in uri.geturl()
             # Use stream endpoint for DLHD key URLs, manifest endpoint for others
-            new_uri = await self.proxy_url(uri.geturl(), base_url, use_full_url=True, is_playlist=not is_dlhd_key_request)
+            new_uri = await self.proxy_url(
+                uri.geturl(), base_url, use_full_url=True, is_playlist=not is_dlhd_key_request
+            )
             line = line.replace(f'URI="{original_uri}"', f'URI="{new_uri}"')
         return line
 
