@@ -337,43 +337,6 @@ class DLHDExtractor(BaseExtractor):
         else:
             return f"https://{server_key}new.dvalna.ru/{server_key}/{channel_key}/mono.css"
 
-    async def _extract_key_url(self, m3u8_url: str, iframe_url: str) -> str | None:
-        """
-        Fetch the m3u8 URL and extract the encryption key URL.
-
-        Args:
-            m3u8_url: The m3u8 playlist URL
-            iframe_url: The iframe URL for extracting the host for headers
-
-        Returns:
-            The key URL or None if not found
-        """
-        parsed = urlparse(iframe_url)
-        iframe_host = parsed.netloc
-
-        headers = {
-            "User-Agent": self._flaresolverr_user_agent or DEFAULT_DLHD_USER_AGENT,
-            "Referer": f"https://{iframe_host}/",
-            "Origin": f"https://{iframe_host}",
-        }
-
-        try:
-            resp = await self._make_request(m3u8_url, headers=headers, timeout=10)
-            content = resp.text
-        except Exception as e:
-            logger.warning(f"Error fetching m3u8 URL: {e}")
-            return None
-
-        # Pattern to extract the URI from #EXT-X-KEY line
-        key_pattern = r'#EXT-X-KEY:[^,]*,URI="([^"]+)"'
-
-        match = re.search(key_pattern, content)
-
-        if match:
-            return match.group(1)
-
-        return None
-
     async def _extract_new_auth_flow(self, iframe_url: str, iframe_content: str, headers: dict) -> Dict[str, Any]:
         """Handles the new authentication flow found in recent updates."""
 
@@ -588,11 +551,6 @@ class DLHDExtractor(BaseExtractor):
                 # Build m3u8 URL
                 m3u8_url = self._build_m3u8_url(server_key, session_data["channel_key"])
                 logger.info(f"M3U8 URL: {m3u8_url}")
-
-                # Extract key URL to verify encryption
-                key_url = await self._extract_key_url(m3u8_url, iframe_url)
-                if key_url:
-                    logger.info(f"Key URL found: {key_url}")
 
                 # Build stream headers with auth
                 iframe_origin = f"https://{iframe_domain}"
