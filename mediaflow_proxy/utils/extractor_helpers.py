@@ -87,8 +87,8 @@ async def check_and_extract_dlhd_stream(
             result["dlhd_iframe_url"] = key_params.get("iframe_url", "")
             logger.info("DLHD key params extracted for dynamic header computation")
 
-        # Cache the result
-        _dlhd_extraction_cache[destination] = {"data": result, "timestamp": current_time}
+        # Cache a copy of result to prevent downstream mutations from corrupting the cache
+        _dlhd_extraction_cache[destination] = {"data": result.copy(), "timestamp": current_time}
         logger.info(f"DLHD data cached for {_dlhd_cache_duration}s")
 
         return result
