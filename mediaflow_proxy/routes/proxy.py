@@ -515,13 +515,12 @@ async def proxy_stream_endpoint(
     dlhd_salt = request.query_params.get("dlhd_salt")
     dlhd_token = request.query_params.get("dlhd_token")
     if dlhd_salt and "/key/" in destination:
-        # This is a DLHD key URL - compute dynamic headers
-        from mediaflow_proxy.extractors.dlhd import compute_key_headers, compute_fingerprint
+        # This is a DLHD key URL - compute dynamic headers via executor to avoid blocking
+        from mediaflow_proxy.extractors.dlhd import compute_key_headers
 
-        key_headers = compute_key_headers(destination, dlhd_salt)
+        key_headers = await asyncio.to_thread(compute_key_headers, destination, dlhd_salt)
         if key_headers:
-            ts, nonce, key_path = key_headers
-            fingerprint = compute_fingerprint()
+            ts, nonce, key_path, fingerprint = key_headers
             proxy_headers.request.update({
                 "X-Key-Timestamp": str(ts),
                 "X-Key-Nonce": str(nonce),

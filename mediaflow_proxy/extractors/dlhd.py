@@ -77,9 +77,9 @@ def compute_key_path(
     return hmac_hash[:16]
 
 
-def compute_key_headers(key_url: str, secret_key: str) -> tuple[int, int, str] | None:
+def compute_key_headers(key_url: str, secret_key: str) -> tuple[int, int, str, str] | None:
     """
-    Compute X-Key-Timestamp, X-Key-Nonce, and X-Key-Path for a /key/ URL.
+    Compute X-Key-Timestamp, X-Key-Nonce, X-Key-Path, and X-Fingerprint for a /key/ URL.
 
     Algorithm:
     1. Extract resource and number from URL pattern /key/{resource}/{number}
@@ -94,7 +94,7 @@ def compute_key_headers(key_url: str, secret_key: str) -> tuple[int, int, str] |
         secret_key: The HMAC secret key (channel_salt)
 
     Returns:
-        Tuple of (timestamp, nonce, key_path) or None if URL doesn't match pattern
+        Tuple of (timestamp, nonce, key_path, fingerprint) or None if URL doesn't match pattern
     """
     # Extract resource and number from URL
     pattern = r"/key/([^/]+)/(\d+)"
@@ -127,7 +127,7 @@ def compute_key_headers(key_url: str, secret_key: str) -> tuple[int, int, str] |
     fingerprint = compute_fingerprint()
     key_path = compute_key_path(resource, number, ts, fingerprint, secret_key)
 
-    return ts, nonce, key_path
+    return ts, nonce, key_path, fingerprint
 
 
 class DLHDExtractor(BaseExtractor):
