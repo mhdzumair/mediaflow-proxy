@@ -198,8 +198,7 @@ class MKVDemuxer:
         data = self._buf.get_all()
         if len(data) < 4:
             raise ValueError(
-                f"Source ended prematurely: got {len(data)} bytes, "
-                "need at least an EBML header (source disconnected?)"
+                f"Source ended prematurely: got {len(data)} bytes, need at least an EBML header (source disconnected?)"
             )
         pos = 0
 
@@ -364,15 +363,16 @@ class MKVDemuxer:
                     is_kf = bool(flags & 0x80)
                     abs_ts_ms = (cluster_timecode + rel_tc) * self._scale_ms
                     for frame_data in frame_list:
-                        frames.append(MKVFrame(
-                            track_number=track_num,
-                            timestamp_ms=abs_ts_ms,
-                            is_keyframe=is_kf,
-                            data=frame_data,
-                        ))
+                        frames.append(
+                            MKVFrame(
+                                track_number=track_num,
+                                timestamp_ms=abs_ts_ms,
+                                is_keyframe=is_kf,
+                                data=frame_data,
+                            )
+                        )
             elif eid == BLOCK_GROUP:
-                _parse_block_group(data, data_off, data_off + size,
-                                   cluster_timecode, self._scale_ms, frames)
+                _parse_block_group(data, data_off, data_off + size, cluster_timecode, self._scale_ms, frames)
 
         return frames
 
@@ -426,8 +426,7 @@ class MKVDemuxer:
                         )
             elif eid == BLOCK_GROUP:
                 bg_frames = []
-                _parse_block_group(data, pos3, pos3 + size,
-                                   cluster_timecode, self._scale_ms, bg_frames)
+                _parse_block_group(data, pos3, pos3 + size, cluster_timecode, self._scale_ms, bg_frames)
                 for frame in bg_frames:
                     yield frame
 

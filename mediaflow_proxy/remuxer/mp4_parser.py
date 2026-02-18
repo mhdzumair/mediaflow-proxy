@@ -27,10 +27,27 @@ logger = logging.getLogger(__name__)
 _BOX_HEADER_SIZE = 8
 
 # ftyp brands that identify MP4/MOV containers
-_MP4_BRANDS = {b"isom", b"iso2", b"iso3", b"iso4", b"iso5", b"iso6",
-               b"mp41", b"mp42", b"M4V ", b"M4A ", b"f4v ", b"kddi",
-               b"avc1", b"qt  ", b"MSNV", b"dash", b"3gp4", b"3gp5",
-               b"3gp6"}
+_MP4_BRANDS = {
+    b"isom",
+    b"iso2",
+    b"iso3",
+    b"iso4",
+    b"iso5",
+    b"iso6",
+    b"mp41",
+    b"mp42",
+    b"M4V ",
+    b"M4A ",
+    b"f4v ",
+    b"kddi",
+    b"avc1",
+    b"qt  ",
+    b"MSNV",
+    b"dash",
+    b"3gp4",
+    b"3gp5",
+    b"3gp6",
+}
 
 
 def is_mp4_header(data: bytes) -> bool:
@@ -108,6 +125,7 @@ def iter_boxes(data: bytes):
 # =============================================================================
 # Sample Table Parsers (inverse of mp4_muxer.py builders)
 # =============================================================================
+
 
 def parse_full_box_header(data: bytes) -> tuple[int, int, int]:
     """
@@ -332,6 +350,7 @@ def parse_stsd_codec(data: bytes) -> str:
 # MP4 Index (parallel to MKVCueIndex)
 # =============================================================================
 
+
 @dataclass
 class MP4Index:
     """
@@ -345,12 +364,12 @@ class MP4Index:
     duration_ms: float = 0.0
     timescale: int = 0
     cue_points: list[tuple[float, int]] = field(default_factory=list)  # [(time_ms, byte_offset), ...]
-    moov_offset: int = 0   # Absolute file offset where moov atom starts
-    moov_size: int = 0     # Total size of the moov atom (header + body)
+    moov_offset: int = 0  # Absolute file offset where moov atom starts
+    moov_size: int = 0  # Total size of the moov atom (header + body)
     moov_data: bytes = b""  # Raw moov atom bytes (for prepending to mdat pipe)
     ftyp_data: bytes = b""  # Raw ftyp atom bytes (for prepending before moov)
-    mdat_offset: int = 0   # Absolute file offset where mdat atom starts
-    mdat_size: int = 0     # Total size of the mdat atom
+    mdat_offset: int = 0  # Absolute file offset where mdat atom starts
+    mdat_size: int = 0  # Total size of the mdat atom
     video_codec: str = ""  # e.g. "avc1", "hvc1", "mp4v"
     audio_codec: str = ""  # e.g. "mp4a", "ac-3"
 
@@ -377,6 +396,7 @@ class MP4Index:
 # Moov -> Cue Points Builder
 # =============================================================================
 
+
 def _find_nested_box(data: bytes, *path: bytes) -> bytes | None:
     """Walk a box hierarchy: find_nested_box(data, b"trak", b"mdia") etc."""
     current = data
@@ -388,9 +408,7 @@ def _find_nested_box(data: bytes, *path: bytes) -> bytes | None:
     return current
 
 
-def build_cue_points_from_moov(moov_body: bytes) -> tuple[
-    list[tuple[float, int]], float, int, str, str
-]:
+def build_cue_points_from_moov(moov_body: bytes) -> tuple[list[tuple[float, int]], float, int, str, str]:
     """
     Parse a moov body to build keyframe-indexed cue points.
 
@@ -434,23 +452,17 @@ def build_cue_points_from_moov(moov_body: bytes) -> tuple[
                 handler_type = hdlr_data[8:12]
 
             if handler_type == b"vide" and video_stbl is None:
-                video_stbl = _find_nested_box(
-                    trak_body, b"mdia", b"minf", b"stbl"
-                )
+                video_stbl = _find_nested_box(trak_body, b"mdia", b"minf", b"stbl")
                 video_mdhd_data = _find_nested_box(trak_body, b"mdia", b"mdhd")
                 if video_mdhd_data:
                     video_mdhd = video_mdhd_data
 
-                stsd_data = _find_nested_box(
-                    trak_body, b"mdia", b"minf", b"stbl", b"stsd"
-                )
+                stsd_data = _find_nested_box(trak_body, b"mdia", b"minf", b"stbl", b"stsd")
                 if stsd_data:
                     video_codec = parse_stsd_codec(stsd_data)
 
             elif handler_type == b"soun" and not audio_codec:
-                stsd_data = _find_nested_box(
-                    trak_body, b"mdia", b"minf", b"stbl", b"stsd"
-                )
+                stsd_data = _find_nested_box(trak_body, b"mdia", b"minf", b"stbl", b"stsd")
                 if stsd_data:
                     audio_codec = parse_stsd_codec(stsd_data)
 
@@ -497,9 +509,7 @@ def build_cue_points_from_moov(moov_body: bytes) -> tuple[
     stsc_data = find_box(video_stbl, b"stsc")
 
     # Chunk offsets
-    chunk_offsets = parse_co64(co64_data) if co64_data else (
-        parse_stco(stco_data) if stco_data else []
-    )
+    chunk_offsets = parse_co64(co64_data) if co64_data else (parse_stco(stco_data) if stco_data else [])
 
     # Keyframe sample numbers (1-based)
     keyframe_samples = set(parse_stss(stss_data)) if stss_data else set()
@@ -517,7 +527,8 @@ def build_cue_points_from_moov(moov_body: bytes) -> tuple[
     if not chunk_offsets or timescale == 0:
         logger.warning(
             "[mp4_parser] Missing data: chunks=%d, timescale=%d",
-            len(chunk_offsets), timescale,
+            len(chunk_offsets),
+            timescale,
         )
         return cue_points, duration_ms, timescale, video_codec, audio_codec
 
@@ -582,10 +593,12 @@ def build_cue_points_from_moov(moov_body: bytes) -> tuple[
             current_sample += 1
 
     logger.info(
-        "[mp4_parser] Built %d cue points from %d samples, duration=%.1fs, "
-        "video=%s, audio=%s",
-        len(cue_points), total_samples, duration_ms / 1000.0,
-        video_codec, audio_codec,
+        "[mp4_parser] Built %d cue points from %d samples, duration=%.1fs, video=%s, audio=%s",
+        len(cue_points),
+        total_samples,
+        duration_ms / 1000.0,
+        video_codec,
+        audio_codec,
     )
 
     return cue_points, duration_ms, timescale, video_codec, audio_codec
@@ -594,6 +607,7 @@ def build_cue_points_from_moov(moov_body: bytes) -> tuple[
 # =============================================================================
 # Moov Offset Rewriting (for faststart pipe construction)
 # =============================================================================
+
 
 def _rewrite_stco_in_place(data: bytearray, box_start: int, box_size: int, delta: int) -> int:
     """Rewrite stco chunk offsets by adding delta. Returns number of entries fixed."""
@@ -713,9 +727,7 @@ def extract_video_track_from_moov(moov_data: bytes):
 
             if handler_type == b"vide":
                 # Found video trak -- extract stsd for codec config
-                stsd_data = _find_nested_box(
-                    trak_body, b"mdia", b"minf", b"stbl", b"stsd"
-                )
+                stsd_data = _find_nested_box(trak_body, b"mdia", b"minf", b"stbl", b"stsd")
                 if not stsd_data or len(stsd_data) < 16:
                     offset += total_size
                     continue
@@ -776,9 +788,7 @@ def extract_video_track_from_moov(moov_data: bytes):
                         ts = struct.unpack_from(">I", mdhd_data, 12)[0]
                         dur = struct.unpack_from(">I", mdhd_data, 16)[0]
                     if ts > 0 and dur > 0:
-                        # Estimate frame duration from total duration / typical fps
-                        total_secs = dur / ts
-                        # Rough estimate: assume 24fps if we can't determine
+                        # Rough estimate: assume 24fps if we can't determine.
                         default_duration_ns = int(1_000_000_000 / 24)
 
                 return MKVTrack(

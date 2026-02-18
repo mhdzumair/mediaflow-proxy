@@ -511,7 +511,9 @@ class _SingleSenderPool:
         self._auth_keys: dict[int, AuthKey] = {}
 
     async def acquire(
-        self, client: TelegramClient, dc_id: int,
+        self,
+        client: TelegramClient,
+        dc_id: int,
     ) -> tuple[MTProtoSender, AuthKey]:
         """
         Borrow a connected ``MTProtoSender`` for *dc_id*.
@@ -552,7 +554,9 @@ class _SingleSenderPool:
         return await self._create_sender(client, dc_id)
 
     async def _create_sender(
-        self, client: TelegramClient, dc_id: int,
+        self,
+        client: TelegramClient,
+        dc_id: int,
     ) -> tuple[MTProtoSender, AuthKey]:
         """Create a new ``MTProtoSender`` with auth export if needed."""
         auth_key = self._auth_keys.get(dc_id)
@@ -581,7 +585,10 @@ class _SingleSenderPool:
         return sender, auth_key
 
     async def release(
-        self, dc_id: int, sender: MTProtoSender, auth_key: AuthKey,
+        self,
+        dc_id: int,
+        sender: MTProtoSender,
+        auth_key: AuthKey,
     ) -> None:
         """Return a sender to the pool for reuse."""
         import time as _time
@@ -799,6 +806,7 @@ class TelegramSessionManager:
         """
         # Check in-memory cache first
         import time
+
         ck = self._media_info_cache_key(ref)
         if ck:
             cached = self._media_info_cache.get(ck)
@@ -818,7 +826,9 @@ class TelegramSessionManager:
         return info
 
     async def _get_media_info_uncached(
-        self, ref: TelegramMediaRef, file_size: Optional[int] = None,
+        self,
+        ref: TelegramMediaRef,
+        file_size: Optional[int] = None,
     ) -> MediaInfo:
         """Uncached implementation of get_media_info."""
         # Handle file_id reference
@@ -1133,7 +1143,10 @@ class TelegramSessionManager:
         transferrer = ParallelTransferrer(client, dc_id)
         try:
             async for chunk in transferrer.download(
-                file_location, actual_file_size, offset=offset, limit=limit,
+                file_location,
+                actual_file_size,
+                offset=offset,
+                limit=limit,
             ):
                 yield chunk
         finally:
@@ -1179,7 +1192,11 @@ class TelegramSessionManager:
 
         logger.debug(
             "[single] DC %d: offset=%d, limit=%d, parts=%d, part_size=%d",
-            dc_id, offset, limit, part_count, part_size,
+            dc_id,
+            offset,
+            limit,
+            part_count,
+            part_size,
         )
 
         sender, auth_key = await self._sender_pool.acquire(client, dc_id)

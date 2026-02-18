@@ -732,9 +732,9 @@ HLS_SEG_PREFIX = b"mfp:hls_seg:"
 HLS_INIT_PREFIX = b"mfp:hls_init:"
 HLS_SEG_META_PREFIX = "mfp:hls_smeta:"
 
-HLS_SEG_TTL = 60          # 60 s -- short-lived; only for immediate retry/re-request
-HLS_INIT_TTL = 3600       # 1 hour -- stable for the viewing session
-HLS_SEG_META_TTL = 3600   # 1 hour -- needed for next-segment continuity
+HLS_SEG_TTL = 60  # 60 s -- short-lived; only for immediate retry/re-request
+HLS_INIT_TTL = 3600  # 1 hour -- stable for the viewing session
+HLS_SEG_META_TTL = 3600  # 1 hour -- needed for next-segment continuity
 
 
 def _hls_seg_key(cache_key: str, seg_index: int) -> bytes:

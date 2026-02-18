@@ -96,9 +96,11 @@ async def _get_probe_lock(cache_key: str) -> asyncio.Lock:
 # Shared probe result
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _ProbeResult:
     """Intermediate result from ``_probe_source``."""
+
     cue_index: MKVCueIndex | None = None
     mp4_index: MP4Index | None = None
     needs_video_transcode: bool = False
@@ -185,7 +187,10 @@ async def _do_probe(source: MediaSource, file_size: int, cache_key: str) -> _Pro
 
     logger.info(
         "[transcode_handler] Format detection: hint=%r, magic_mkv=%s, magic_mp4=%s, order=%s",
-        hint, magic_is_mkv, magic_is_mp4, probe_order,
+        hint,
+        magic_is_mkv,
+        magic_is_mp4,
+        probe_order,
     )
 
     cue_index = None
@@ -193,19 +198,31 @@ async def _do_probe(source: MediaSource, file_size: int, cache_key: str) -> _Pro
 
     if probe_order == "mkv_first":
         cue_index = await probe_mkv_cues(
-            source, file_size=file_size, cache_key=cache_key, header_data=header_data,
+            source,
+            file_size=file_size,
+            cache_key=cache_key,
+            header_data=header_data,
         )
         if cue_index is None and not magic_is_mkv:
             mp4_index = await probe_mp4_moov(
-                source, file_size=file_size, cache_key=cache_key, header_data=header_data,
+                source,
+                file_size=file_size,
+                cache_key=cache_key,
+                header_data=header_data,
             )
     else:
         mp4_index = await probe_mp4_moov(
-            source, file_size=file_size, cache_key=cache_key, header_data=header_data,
+            source,
+            file_size=file_size,
+            cache_key=cache_key,
+            header_data=header_data,
         )
         if mp4_index is None and not magic_is_mp4:
             cue_index = await probe_mkv_cues(
-                source, file_size=file_size, cache_key=cache_key, header_data=header_data,
+                source,
+                file_size=file_size,
+                cache_key=cache_key,
+                header_data=header_data,
             )
 
     return _build_probe_result(cue_index=cue_index, mp4_index=mp4_index)
@@ -290,7 +307,8 @@ async def handle_transcode(
         logger.info(
             "[transcode_handler] MKV Cues: duration=%.1fs, %d cue points, "
             "audio=%s @%dkbps, video=%s, estimated_fmp4=%s",
-            duration_seconds, len(cue_index.cue_points),
+            duration_seconds,
+            len(cue_index.cue_points),
             cue_index.audio_codec_id or "unknown",
             cue_index.audio_bitrate // 1000 if cue_index.audio_bitrate else 0,
             video_codec or "unknown",
@@ -315,9 +333,11 @@ async def handle_transcode(
                 seek_header = cue_index.seek_header
 
             logger.info(
-                "[transcode_handler] Seeking to %.1fs: keyframe at %.1fs (offset %d), "
-                "seek_header=%d bytes",
-                start_time, keyframe_time_ms / 1000.0, absolute_offset, len(seek_header),
+                "[transcode_handler] Seeking to %.1fs: keyframe at %.1fs (offset %d), seek_header=%d bytes",
+                start_time,
+                keyframe_time_ms / 1000.0,
+                absolute_offset,
+                len(seek_header),
             )
 
     elif mp4_index:
@@ -329,10 +349,12 @@ async def handle_transcode(
         logger.info(
             "[transcode_handler] MP4 index: duration=%.1fs, %d cue points, "
             "video=%s, audio=%s, moov=%d bytes, mdat_offset=%d",
-            duration_seconds, len(mp4_index.cue_points),
+            duration_seconds,
+            len(mp4_index.cue_points),
             mp4_index.video_codec or "unknown",
             mp4_index.audio_codec or "unknown",
-            len(mp4_index.moov_data), mp4_index.mdat_offset,
+            len(mp4_index.moov_data),
+            mp4_index.mdat_offset,
         )
 
         # Time-based seeking for MP4
@@ -343,7 +365,9 @@ async def handle_transcode(
                 stream_offset = byte_offset
                 logger.info(
                     "[transcode_handler] MP4 seeking to %.1fs: keyframe at %.1fs (offset %d)",
-                    start_time, keyframe_time_ms / 1000.0, byte_offset,
+                    start_time,
+                    keyframe_time_ms / 1000.0,
+                    byte_offset,
                 )
     else:
         logger.info("[transcode_handler] No MKV Cues or MP4 moov, streaming from beginning")
@@ -401,7 +425,8 @@ async def handle_transcode(
 
                 logger.info(
                     "[transcode_handler] Streaming mdat from offset=%d, limit=%s",
-                    data_offset, data_limit,
+                    data_offset,
+                    data_limit,
                 )
 
                 async for chunk in source.stream(offset=data_offset, limit=data_limit):
@@ -439,10 +464,13 @@ async def handle_transcode(
     pipeline_name = "MKV fast-path" if use_mkv_fast_path else "universal PyAV"
 
     logger.info(
-        "[transcode_handler] Starting %s pipeline (offset=%d, limit=%s, "
-        "seek_header=%d, video_reencode=%s, mp4=%s)",
-        pipeline_name, stream_offset, stream_limit, len(seek_header),
-        needs_video_transcode, is_mp4,
+        "[transcode_handler] Starting %s pipeline (offset=%d, limit=%s, seek_header=%d, video_reencode=%s, mp4=%s)",
+        pipeline_name,
+        stream_offset,
+        stream_limit,
+        len(seek_header),
+        needs_video_transcode,
+        is_mp4,
     )
 
     if use_mkv_fast_path:
@@ -544,13 +572,15 @@ def _compute_segment_boundaries(
         else:
             byte_end = file_size
 
-        segments.append(HLSSegmentInfo(
-            index=i,
-            start_ms=start_ms,
-            end_ms=end_ms,
-            byte_offset=byte_offset,
-            byte_end=byte_end,
-        ))
+        segments.append(
+            HLSSegmentInfo(
+                index=i,
+                start_ms=start_ms,
+                end_ms=end_ms,
+                byte_offset=byte_offset,
+                byte_end=byte_end,
+            )
+        )
     return segments
 
 
@@ -613,9 +643,18 @@ async def _build_segment_source(
 # ---------------------------------------------------------------------------
 
 
-async def _extract_probe_data(source: MediaSource) -> tuple[
-    _ProbeResult, list[tuple[float, int]], float, int, int,
-] | None:
+async def _extract_probe_data(
+    source: MediaSource,
+) -> (
+    tuple[
+        _ProbeResult,
+        list[tuple[float, int]],
+        float,
+        int,
+        int,
+    ]
+    | None
+):
     """
     Probe the source and extract cue points, duration, file_size, and
     the MKV segment_data_offset (0 for MP4).
@@ -678,7 +717,9 @@ async def handle_transcode_hls_playlist(
 
     logger.info(
         "[hls] Playlist generated: %d segments (merged from %d cue points), duration=%.1fs",
-        len(merged), len(cue_points), duration_ms / 1000.0,
+        len(merged),
+        len(cue_points),
+        duration_ms / 1000.0,
     )
 
     return PlainTextResponse(
@@ -792,7 +833,11 @@ def _generate_init_segment(
 
     logger.info(
         "[hls_init] Built init segment: %dx%d @%.1ffps, extradata=%d bytes, init=%d bytes",
-        enc_width, enc_height, fps, len(video_codec_private), len(init_data),
+        enc_width,
+        enc_height,
+        fps,
+        len(video_codec_private),
+        len(init_data),
     )
     return init_data
 
@@ -876,7 +921,10 @@ async def handle_transcode_hls_init(
 
     try:
         init_data = _generate_init_segment(
-            width, height, fps, duration_ms,
+            width,
+            height,
+            fps,
+            duration_ms,
             source_video_codec_private=source_video_codec_private,
             source_default_duration_ns=source_default_duration_ns,
         )
@@ -940,7 +988,10 @@ async def handle_transcode_hls_segment(
     probe, cue_points, duration_ms, file_size, seg_data_offset = result
 
     boundaries = _compute_segment_boundaries(
-        cue_points, duration_ms, file_size, seg_data_offset,
+        cue_points,
+        duration_ms,
+        file_size,
+        seg_data_offset,
     )
 
     seg_info = _find_segment(boundaries, start_time_ms)
@@ -971,9 +1022,12 @@ async def handle_transcode_hls_segment(
     seg_duration_ms = seg_info.end_ms - seg_info.start_ms
     logger.info(
         "[hls_segment] %s transcoding: time=%.1f-%.1fs (dur=%.0fms), bytes=%d-%d (%d bytes)",
-        seg_label, seg_info.start_ms / 1000.0, seg_info.end_ms / 1000.0,
+        seg_label,
+        seg_info.start_ms / 1000.0,
+        seg_info.end_ms / 1000.0,
         seg_duration_ms,
-        seg_info.byte_offset, seg_info.byte_end,
+        seg_info.byte_offset,
+        seg_info.byte_end,
         seg_info.byte_end - seg_info.byte_offset,
     )
 
@@ -993,7 +1047,8 @@ async def handle_transcode_hls_segment(
         if use_mkv_fastpath:
             logger.info(
                 "[hls_segment] %s using MKV fast-path (video=%s passthrough)",
-                seg_label, probe.cue_index.video_codec_id,
+                seg_label,
+                probe.cue_index.video_codec_id,
             )
             async for chunk in stream_segment_fmp4(
                 source_gen,
@@ -1034,10 +1089,14 @@ async def handle_transcode_hls_segment(
         # Store output metadata for the next segment's continuity.
         # The key fields are the segment end time and sequence info so
         # the next segment can set its start_decode_time_ms correctly.
-        await hls_set_segment_meta(cache_key, seg_idx, {
-            "end_ms": seg_info.end_ms,
-            "seg_index": seg_idx,
-        })
+        await hls_set_segment_meta(
+            cache_key,
+            seg_idx,
+            {
+                "end_ms": seg_info.end_ms,
+                "seg_index": seg_idx,
+            },
+        )
 
     logger.info("[hls_segment] %s served: %d bytes", seg_label, len(seg_data))
 

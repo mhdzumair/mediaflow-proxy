@@ -106,10 +106,7 @@ def build_mvhd(timescale: int, duration: int) -> bytes:
     payload.extend(struct.pack(">H", 0x0100))  # volume = 1.0
     payload.extend(b"\x00" * 10)  # reserved
     # Unity matrix (3x3, each 4 bytes, 9 values = 36 bytes)
-    payload.extend(struct.pack(">9I",
-                               0x00010000, 0, 0,
-                               0, 0x00010000, 0,
-                               0, 0, 0x40000000))
+    payload.extend(struct.pack(">9I", 0x00010000, 0, 0, 0, 0x00010000, 0, 0, 0, 0x40000000))
     payload.extend(b"\x00" * 24)  # pre_defined
     payload.extend(struct.pack(">I", 3))  # next_track_ID (1=video, 2=audio, next=3)
     return build_full_box(b"mvhd", 0, 0, bytes(payload))
@@ -130,10 +127,7 @@ def build_tkhd(track_id: int, duration: int, width: int = 0, height: int = 0, is
     payload.extend(struct.pack(">H", 0x0100 if is_audio else 0))  # volume
     payload.extend(b"\x00" * 2)  # reserved
     # Unity matrix
-    payload.extend(struct.pack(">9I",
-                               0x00010000, 0, 0,
-                               0, 0x00010000, 0,
-                               0, 0, 0x40000000))
+    payload.extend(struct.pack(">9I", 0x00010000, 0, 0, 0, 0x00010000, 0, 0, 0, 0x40000000))
     # Width and height as 16.16 fixed-point
     payload.extend(struct.pack(">I", width << 16))
     payload.extend(struct.pack(">I", height << 16))
@@ -553,8 +547,7 @@ def build_minf(is_audio: bool, stbl: bytes) -> bytes:
     return build_box(b"minf", bytes(children))
 
 
-def build_mdia(timescale: int, duration: int, handler_type: bytes,
-               handler_name: str, minf: bytes) -> bytes:
+def build_mdia(timescale: int, duration: int, handler_type: bytes, handler_name: str, minf: bytes) -> bytes:
     """Build Media box (mdia)."""
     children = bytearray()
     children.extend(build_mdhd(timescale, duration))
@@ -578,8 +571,7 @@ def build_video_trak(
     else:
         duration_in_movie = 0
 
-    tkhd = build_tkhd(track_id, duration_in_movie,
-                       width=track.pixel_width, height=track.pixel_height)
+    tkhd = build_tkhd(track_id, duration_in_movie, width=track.pixel_width, height=track.pixel_height)
     stsd = build_stsd_video(track)
     stbl = build_stbl(track_samples, stsd)
     minf = build_minf(is_audio=False, stbl=stbl)
@@ -659,18 +651,27 @@ def build_moov(
     children = bytearray()
     children.extend(build_mvhd(movie_timescale, movie_duration))
 
-    children.extend(build_video_trak(
-        video_track, track_id=1, timescale=video_timescale,
-        track_samples=video_samples, movie_timescale=movie_timescale,
-    ))
+    children.extend(
+        build_video_trak(
+            video_track,
+            track_id=1,
+            timescale=video_timescale,
+            track_samples=video_samples,
+            movie_timescale=movie_timescale,
+        )
+    )
 
-    children.extend(build_audio_trak(
-        track_id=2, timescale=audio_timescale,
-        track_samples=audio_samples, movie_timescale=movie_timescale,
-        sample_rate=audio_track_info["sample_rate"],
-        channels=audio_track_info["channels"],
-        audio_specific_config=audio_track_info["audio_specific_config"],
-    ))
+    children.extend(
+        build_audio_trak(
+            track_id=2,
+            timescale=audio_timescale,
+            track_samples=audio_samples,
+            movie_timescale=movie_timescale,
+            sample_rate=audio_track_info["sample_rate"],
+            channels=audio_track_info["channels"],
+            audio_specific_config=audio_track_info["audio_specific_config"],
+        )
+    )
 
     return build_box(b"moov", bytes(children))
 
@@ -789,8 +790,10 @@ class MP4Builder:
         # Pass 1: Build moov with placeholder (0) offsets to measure its size
         self._compute_chunk_offsets(0)  # Placeholder base
         moov_pass1 = build_moov(
-            self._video_track, self._audio_info,
-            self._video_samples, self._audio_samples,
+            self._video_track,
+            self._audio_info,
+            self._video_samples,
+            self._audio_samples,
             mdat_offset=0,
             video_timescale=self._video_timescale,
             audio_timescale=self._audio_timescale,
@@ -803,8 +806,10 @@ class MP4Builder:
         # Pass 2: Rebuild moov with correct chunk offsets
         self._compute_chunk_offsets(mdat_data_start)
         moov_final = build_moov(
-            self._video_track, self._audio_info,
-            self._video_samples, self._audio_samples,
+            self._video_track,
+            self._audio_info,
+            self._video_samples,
+            self._audio_samples,
             mdat_offset=mdat_data_start,
             video_timescale=self._video_timescale,
             audio_timescale=self._audio_timescale,
@@ -816,8 +821,10 @@ class MP4Builder:
             mdat_data_start = len(ftyp) + len(moov_final) + len(mdat_hdr)
             self._compute_chunk_offsets(mdat_data_start)
             moov_final = build_moov(
-                self._video_track, self._audio_info,
-                self._video_samples, self._audio_samples,
+                self._video_track,
+                self._audio_info,
+                self._video_samples,
+                self._audio_samples,
                 mdat_offset=mdat_data_start,
                 video_timescale=self._video_timescale,
                 audio_timescale=self._audio_timescale,
@@ -826,10 +833,13 @@ class MP4Builder:
         header_bytes = ftyp + moov_final
 
         logger.info(
-            "[mp4_muxer] Finalized: ftyp=%d moov=%d mdat=%d (header=%d) "
-            "video=%d samples audio=%d samples",
-            len(ftyp), len(moov_final), self._mdat_size, len(mdat_hdr),
-            len(self._video_samples.samples), len(self._audio_samples.samples),
+            "[mp4_muxer] Finalized: ftyp=%d moov=%d mdat=%d (header=%d) video=%d samples audio=%d samples",
+            len(ftyp),
+            len(moov_final),
+            self._mdat_size,
+            len(mdat_hdr),
+            len(self._video_samples.samples),
+            len(self._audio_samples.samples),
         )
 
         return header_bytes, mdat_hdr, self._mdat_chunks
@@ -850,8 +860,7 @@ class MP4Builder:
             chunk_size = len(chunk)
             # Determine if this chunk is video or audio based on sample order
             if vi < len(self._video_samples.samples) and (
-                ai >= len(self._audio_samples.samples) or
-                self._is_video_sample(vi, ai)
+                ai >= len(self._audio_samples.samples) or self._is_video_sample(vi, ai)
             ):
                 video_offsets.append(offset)
                 vi += 1
@@ -948,8 +957,9 @@ def build_fmp4_init_segment(
 
     # Video trak (with empty stbl)
     video_duration = int(duration_ms * video_timescale / 1000.0) if duration_ms > 0 else 0
-    video_tkhd = build_tkhd(1, int(duration_ms) if duration_ms > 0 else 0,
-                             width=video_track.pixel_width, height=video_track.pixel_height)
+    video_tkhd = build_tkhd(
+        1, int(duration_ms) if duration_ms > 0 else 0, width=video_track.pixel_width, height=video_track.pixel_height
+    )
     video_stsd = build_stsd_video(video_track)
     video_stbl = _build_empty_stbl(video_stsd)
     video_minf = build_minf(is_audio=False, stbl=video_stbl)
@@ -971,20 +981,32 @@ def build_fmp4_init_segment(
     # all sample flag decisions to per-fragment tfhd.default_sample_flags
     # and trun.first_sample_flags.  This avoids global defaults that could
     # confuse strict browser parsers.
-    trex_video = build_full_box(b"trex", 0, 0, struct.pack(">IIIII",
-        1,  # track_ID
-        1,  # default_sample_description_index
-        0,  # default_sample_duration
-        0,  # default_sample_size
-        0x00000000,  # default_sample_flags (deferred to tfhd per fragment)
-    ))
-    trex_audio = build_full_box(b"trex", 0, 0, struct.pack(">IIIII",
-        2,  # track_ID
-        1,  # default_sample_description_index
-        0,  # default_sample_duration
-        0,  # default_sample_size
-        0x00000000,  # default_sample_flags (deferred to tfhd per fragment)
-    ))
+    trex_video = build_full_box(
+        b"trex",
+        0,
+        0,
+        struct.pack(
+            ">IIIII",
+            1,  # track_ID
+            1,  # default_sample_description_index
+            0,  # default_sample_duration
+            0,  # default_sample_size
+            0x00000000,  # default_sample_flags (deferred to tfhd per fragment)
+        ),
+    )
+    trex_audio = build_full_box(
+        b"trex",
+        0,
+        0,
+        struct.pack(
+            ">IIIII",
+            2,  # track_ID
+            1,  # default_sample_description_index
+            0,  # default_sample_duration
+            0,  # default_sample_size
+            0x00000000,  # default_sample_flags (deferred to tfhd per fragment)
+        ),
+    )
     mvex = build_box(b"mvex", trex_video + trex_audio)
 
     # Assemble moov
@@ -1004,6 +1026,7 @@ def _build_fmp4_ftyp() -> bytes:
 @dataclass
 class FragmentSample:
     """A single sample to be written into an fMP4 fragment."""
+
     data: bytes
     duration: int  # In track timescale
     is_sync: bool = False
@@ -1105,7 +1128,6 @@ def build_fmp4_fragment(
     # Patch data_offset in trun: offset from moof start to mdat payload start
     # mdat header is 8 bytes, so data_offset = moof_size + 8
     data_offset = len(moof) + 8  # 8 = mdat box header
-    moof_bytes = bytearray(moof)
 
     # Find the trun data_offset position within the moof
     # trun is inside traf, which is inside moof.
@@ -1132,7 +1154,6 @@ def build_fmp4_fragment(
     mdat = build_box(b"mdat", mdat_payload)
 
     return bytes(moof_fixed) + mdat
-
 
 
 class FMP4StreamMuxer:
@@ -1234,7 +1255,10 @@ class FMP4StreamMuxer:
         self._audio_specific_config = asc
 
     def add_video_sample(
-        self, data: bytes, duration_ticks: int, is_keyframe: bool,
+        self,
+        data: bytes,
+        duration_ticks: int,
+        is_keyframe: bool,
         pts_ticks: int | None = None,
     ) -> None:
         """
@@ -1255,17 +1279,25 @@ class FMP4StreamMuxer:
             dts = self._video_decode_time + self._fragment_video_duration
             cts_offset = pts_ticks - dts
 
-        self._video_samples.append(FragmentSample(
-            data=data, duration=duration_ticks, is_sync=is_keyframe,
-            composition_offset=cts_offset,
-        ))
+        self._video_samples.append(
+            FragmentSample(
+                data=data,
+                duration=duration_ticks,
+                is_sync=is_keyframe,
+                composition_offset=cts_offset,
+            )
+        )
         self._fragment_video_duration += duration_ticks
 
     def add_audio_sample(self, data: bytes, duration_ticks: int) -> None:
         """Add an audio sample to the current fragment."""
-        self._audio_samples.append(FragmentSample(
-            data=data, duration=duration_ticks, is_sync=True,
-        ))
+        self._audio_samples.append(
+            FragmentSample(
+                data=data,
+                duration=duration_ticks,
+                is_sync=True,
+            )
+        )
 
     def should_flush(self) -> bool:
         """Check if the current fragment has enough data to emit."""
@@ -1297,8 +1329,7 @@ class FMP4StreamMuxer:
 
         # When flushing at a keyframe, the last sample (the new keyframe)
         # belongs to the NEXT fragment. Split there.
-        if (not force and len(self._video_samples) > 1
-                and self._video_samples[-1].is_sync):
+        if not force and len(self._video_samples) > 1 and self._video_samples[-1].is_sync:
             video_to_emit = self._video_samples[:-1]
             video_remaining = [self._video_samples[-1]]
         else:

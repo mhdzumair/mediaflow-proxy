@@ -495,10 +495,15 @@ async def transcode_hls_playlist(
     base_params = _build_hls_query_params(request, destination)
 
     init_url = f"/proxy/transcode/init.mp4?{base_params}"
-    segment_url_template = f"/proxy/transcode/segment.m4s?{base_params}&seg={{seg}}&start_ms={{start_ms}}&end_ms={{end_ms}}"
+    segment_url_template = (
+        f"/proxy/transcode/segment.m4s?{base_params}&seg={{seg}}&start_ms={{start_ms}}&end_ms={{end_ms}}"
+    )
 
     return await handle_transcode_hls_playlist(
-        request, source, init_url=init_url, segment_url_template=segment_url_template,
+        request,
+        source,
+        init_url=init_url,
+        segment_url_template=segment_url_template,
     )
 
 
@@ -554,7 +559,9 @@ async def transcode_hls_segment(
     source = HTTPMediaSource(url=destination, headers=dict(proxy_headers.request))
     await source.resolve_file_size()
 
-    return await handle_transcode_hls_segment(request, source, start_time_ms=start_ms, end_time_ms=end_ms, segment_number=seg)
+    return await handle_transcode_hls_segment(
+        request, source, start_time_ms=start_ms, end_time_ms=end_ms, segment_number=seg
+    )
 
 
 def _build_hls_query_params(request: Request, destination: str) -> str:
@@ -591,7 +598,9 @@ async def proxy_stream_endpoint(
         "If not specified, auto-detects based on destination URL hostname. "
         "Set to 'none' to explicitly disable rate limiting.",
     ),
-    transcode: bool = Query(False, description="Transcode to browser-compatible fMP4 (re-encode video/audio as needed)"),
+    transcode: bool = Query(
+        False, description="Transcode to browser-compatible fMP4 (re-encode video/audio as needed)"
+    ),
     start: float | None = Query(None, description="Seek start time in seconds (used with transcode=true)"),
 ):
     """

@@ -145,12 +145,18 @@ class TelegramMediaSource:
         effective_limit = limit or self._file_size
         if self._use_single_client:
             async for chunk in telegram_manager.stream_media_single(
-                self._ref, offset=offset, limit=effective_limit, file_size=self._file_size,
+                self._ref,
+                offset=offset,
+                limit=effective_limit,
+                file_size=self._file_size,
             ):
                 yield chunk
         else:
             async for chunk in telegram_manager.stream_media(
-                self._ref, offset=offset, limit=effective_limit, file_size=self._file_size,
+                self._ref,
+                offset=offset,
+                limit=effective_limit,
+                file_size=self._file_size,
             ):
                 yield chunk
 
@@ -183,7 +189,10 @@ class HTTPMediaSource:
 
         async with create_aiohttp_session(self._url, headers=self._headers) as (session, proxy_url):
             async with session.head(
-                self._url, headers=self._headers, proxy=proxy_url, allow_redirects=True,
+                self._url,
+                headers=self._headers,
+                proxy=proxy_url,
+                allow_redirects=True,
             ) as resp:
                 cl = resp.headers.get("content-length")
                 if cl:
@@ -215,7 +224,10 @@ class HTTPMediaSource:
 
         async with create_aiohttp_session(self._url, headers=headers) as (session, proxy_url):
             async with session.get(
-                self._url, headers=headers, proxy=proxy_url, allow_redirects=True,
+                self._url,
+                headers=headers,
+                proxy=proxy_url,
+                allow_redirects=True,
             ) as resp:
                 resp.raise_for_status()
                 async for chunk in resp.content.iter_any():

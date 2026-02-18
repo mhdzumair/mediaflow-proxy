@@ -210,8 +210,11 @@ async def telegram_stream(
         # Handle transcode mode: stream as fMP4 with transcoded audio
         if transcode:
             return await _handle_transcode(
-                request, ref, actual_file_size,
-                start_time=start, file_name=media_filename or "",
+                request,
+                ref,
+                actual_file_size,
+                start_time=start,
+                file_name=media_filename or "",
             )
 
         # Parse range header
@@ -397,12 +400,14 @@ async def _resolve_telegram_source(
     """
     if not settings.enable_telegram:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=503, detail="Telegram proxy support is disabled")
 
     telegram_url = d or url
 
     if not telegram_url and not file_id and not (chat_id and message_id):
         from fastapi import HTTPException
+
         raise HTTPException(
             status_code=400,
             detail="Provide either 'd' (t.me URL), 'chat_id' + 'message_id', or 'file_id' + 'file_size'",
@@ -419,6 +424,7 @@ async def _resolve_telegram_source(
     else:
         if not file_size:
             from fastapi import HTTPException
+
             raise HTTPException(
                 status_code=400,
                 detail="file_size is required when using file_id",
@@ -430,7 +436,9 @@ async def _resolve_telegram_source(
     media_filename = filename or media_info.file_name
 
     return TelegramMediaSource(
-        ref, actual_file_size, file_name=media_filename or "",
+        ref,
+        actual_file_size,
+        file_name=media_filename or "",
         use_single_client=use_single_client,
     )
 
@@ -449,7 +457,13 @@ async def telegram_transcode_hls_playlist(
 ):
     """Generate an HLS VOD M3U8 playlist for a Telegram media file."""
     source = await _resolve_telegram_source(
-        d, url, chat_id, message_id, file_id, file_size, filename,
+        d,
+        url,
+        chat_id,
+        message_id,
+        file_id,
+        file_size,
+        filename,
         use_single_client=True,
     )
 
@@ -457,10 +471,15 @@ async def telegram_transcode_hls_playlist(
     # that init/segment requests skip the Telegram API call for get_message.
     base_params = _build_telegram_hls_resolved_params(request, source)
     init_url = f"/proxy/telegram/transcode/init.mp4?{base_params}"
-    segment_url_template = f"/proxy/telegram/transcode/segment.m4s?{base_params}&seg={{seg}}&start_ms={{start_ms}}&end_ms={{end_ms}}"
+    segment_url_template = (
+        f"/proxy/telegram/transcode/segment.m4s?{base_params}&seg={{seg}}&start_ms={{start_ms}}&end_ms={{end_ms}}"
+    )
 
     return await handle_transcode_hls_playlist(
-        request, source, init_url=init_url, segment_url_template=segment_url_template,
+        request,
+        source,
+        init_url=init_url,
+        segment_url_template=segment_url_template,
     )
 
 
@@ -478,7 +497,13 @@ async def telegram_transcode_hls_init(
 ):
     """Serve the fMP4 init segment for a Telegram media file."""
     source = await _resolve_telegram_source(
-        d, url, chat_id, message_id, file_id, file_size, filename,
+        d,
+        url,
+        chat_id,
+        message_id,
+        file_id,
+        file_size,
+        filename,
         use_single_client=True,
     )
     return await handle_transcode_hls_init(request, source)
@@ -500,15 +525,24 @@ async def telegram_transcode_hls_segment(
 ):
     """Serve a single HLS fMP4 media segment for a Telegram media file."""
     source = await _resolve_telegram_source(
-        d, url, chat_id, message_id, file_id, file_size, filename,
+        d,
+        url,
+        chat_id,
+        message_id,
+        file_id,
+        file_size,
+        filename,
         use_single_client=True,
     )
-    return await handle_transcode_hls_segment(request, source, start_time_ms=start_ms, end_time_ms=end_ms, segment_number=seg)
+    return await handle_transcode_hls_segment(
+        request, source, start_time_ms=start_ms, end_time_ms=end_ms, segment_number=seg
+    )
 
 
 def _build_telegram_hls_params(request: Request) -> str:
     """Build query string for Telegram HLS sub-requests, preserving all input params."""
     from urllib.parse import quote
+
     params = []
     original = request.query_params
     # Copy all original params except segment-specific ones (added per-segment)

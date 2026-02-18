@@ -74,14 +74,20 @@ def _detect_hw_capability() -> HWCapability:
 
     # Collect available encoders/decoders for logging
     hw_encoders = [
-        "h264_nvenc", "hevc_nvenc",
-        "h264_videotoolbox", "hevc_videotoolbox",
-        "h264_vaapi", "hevc_vaapi",
-        "h264_qsv", "hevc_qsv",
+        "h264_nvenc",
+        "hevc_nvenc",
+        "h264_videotoolbox",
+        "hevc_videotoolbox",
+        "h264_vaapi",
+        "hevc_vaapi",
+        "h264_qsv",
+        "hevc_qsv",
     ]
     hw_decoders = [
-        "h264_cuvid", "hevc_cuvid",
-        "h264_qsv", "hevc_qsv",
+        "h264_cuvid",
+        "hevc_cuvid",
+        "h264_qsv",
+        "hevc_qsv",
     ]
 
     cap.available_encoders = [c for c in hw_encoders if _probe_codec(c, "w")]
@@ -170,11 +176,7 @@ class VideoTranscoder:
         force_software: bool = False,
     ) -> None:
         hw = get_hw_capability()
-        use_gpu = (
-            settings.transcode_prefer_gpu
-            and hw.accel_type != HWAccelType.NONE
-            and not force_software
-        )
+        use_gpu = settings.transcode_prefer_gpu and hw.accel_type != HWAccelType.NONE and not force_software
 
         # --- Decoder ---
         hw_decoder = None
@@ -211,7 +213,7 @@ class VideoTranscoder:
             opts["profile"] = "high"
         elif "nvenc" in encoder_name:
             opts["preset"] = "p4"  # NVENC preset (p1=fastest .. p7=slowest)
-            opts["tune"] = "ll"   # Low latency
+            opts["tune"] = "ll"  # Low latency
             opts["rc"] = "vbr"
         elif "videotoolbox" in encoder_name:
             opts["realtime"] = "1"
@@ -241,8 +243,12 @@ class VideoTranscoder:
 
         logger.info(
             "[video_transcoder] Initialized: %s -> %s (%s), %dx%d @%.1ffps %dk",
-            input_codec_name, encoder_name, hw.accel_type.value,
-            width, height, fps,
+            input_codec_name,
+            encoder_name,
+            hw.accel_type.value,
+            width,
+            height,
+            fps,
             self._encoder.bit_rate // 1000 if self._encoder.bit_rate else 0,
         )
 
@@ -281,12 +287,14 @@ class VideoTranscoder:
         try:
             for packet in self._encoder.encode(frame):
                 self._frames_encoded += 1
-                output.append((
-                    bytes(packet),
-                    packet.is_keyframe,
-                    int(packet.pts) if packet.pts is not None else 0,
-                    int(packet.dts) if packet.dts is not None else 0,
-                ))
+                output.append(
+                    (
+                        bytes(packet),
+                        packet.is_keyframe,
+                        int(packet.pts) if packet.pts is not None else 0,
+                        int(packet.dts) if packet.dts is not None else 0,
+                    )
+                )
         except av.error.InvalidDataError as e:
             logger.debug("[video_transcoder] Encode error: %s", e)
 
@@ -327,12 +335,14 @@ class VideoTranscoder:
                         frame = frame.reformat(format=self._encoder.pix_fmt)
                     for packet in self._encoder.encode(frame):
                         self._frames_encoded += 1
-                        output.append((
-                            bytes(packet),
-                            packet.is_keyframe,
-                            int(packet.pts) if packet.pts is not None else 0,
-                            int(packet.dts) if packet.dts is not None else 0,
-                        ))
+                        output.append(
+                            (
+                                bytes(packet),
+                                packet.is_keyframe,
+                                int(packet.pts) if packet.pts is not None else 0,
+                                int(packet.dts) if packet.dts is not None else 0,
+                            )
+                        )
             except Exception as e:
                 logger.debug("[video_transcoder] Decoder flush error: %s", e)
         else:
@@ -342,18 +352,22 @@ class VideoTranscoder:
         try:
             for packet in self._encoder.encode(None):
                 self._frames_encoded += 1
-                output.append((
-                    bytes(packet),
-                    packet.is_keyframe,
-                    int(packet.pts) if packet.pts is not None else 0,
-                    int(packet.dts) if packet.dts is not None else 0,
-                ))
+                output.append(
+                    (
+                        bytes(packet),
+                        packet.is_keyframe,
+                        int(packet.pts) if packet.pts is not None else 0,
+                        int(packet.dts) if packet.dts is not None else 0,
+                    )
+                )
         except Exception as e:
             logger.debug("[video_transcoder] Encoder flush error: %s", e)
 
         logger.info(
             "[video_transcoder] Flushed: %d decoded, %d encoded total (decoder_used=%s)",
-            self._frames_decoded, self._frames_encoded, self._decoder_used,
+            self._frames_decoded,
+            self._frames_encoded,
+            self._decoder_used,
         )
         return output
 

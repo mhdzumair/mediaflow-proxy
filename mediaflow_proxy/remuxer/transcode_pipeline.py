@@ -55,6 +55,7 @@ logger = logging.getLogger(__name__)
 # Video timescale (90kHz is standard for MPEG transport)
 _VIDEO_TIMESCALE = 90000
 
+
 def derive_mp4_cache_key(
     chat_id: str | int | None,
     message_id: int | None,
@@ -118,7 +119,9 @@ async def stream_transcode_fmp4(
         logger.info(
             "[pipeline] MKV header: duration=%.1fs, video=%s %dx%d, audio=%s %dHz %dch",
             header.duration_ms / 1000.0,
-            video_track.codec_id, video_track.pixel_width, video_track.pixel_height,
+            video_track.codec_id,
+            video_track.pixel_width,
+            video_track.pixel_height,
             audio_track.codec_id if audio_track else "none",
             int(audio_track.sample_rate) if audio_track else 0,
             audio_track.channels if audio_track else 0,
@@ -141,9 +144,7 @@ async def stream_transcode_fmp4(
                 logger.warning("[pipeline] No FFmpeg codec for %s, skipping audio", audio_track.codec_id)
                 audio_track = None
 
-        audio_timescale = 48000 if transcoder else (
-            int(audio_track.effective_sample_rate) if audio_track else 48000
-        )
+        audio_timescale = 48000 if transcoder else (int(audio_track.effective_sample_rate) if audio_track else 48000)
 
         # Phase 3: Build init segment with placeholder AAC config
         # We'll use a default AAC config (48kHz stereo LC) initially.
@@ -201,7 +202,9 @@ async def stream_transcode_fmp4(
                     continue
 
                 muxer.add_video_sample(
-                    sample_data, duration_ticks, frame.is_keyframe,
+                    sample_data,
+                    duration_ticks,
+                    frame.is_keyframe,
                     pts_ticks=pts_ticks,
                 )
                 last_video_ts_ms = frame.timestamp_ms
@@ -236,7 +239,8 @@ async def stream_transcode_fmp4(
             if max_duration_ms is not None and emitted_duration_ms >= max_duration_ms:
                 logger.debug(
                     "[pipeline] Duration limit reached (%.0fms >= %.0fms), stopping",
-                    emitted_duration_ms, max_duration_ms,
+                    emitted_duration_ms,
+                    max_duration_ms,
                 )
                 break
 
@@ -277,12 +281,18 @@ async def stream_transcode_fmp4(
     if cancelled:
         logger.info(
             "[pipeline] Cancelled after %d video, %d audio frames, %d fragments, %d bytes out",
-            video_frame_count, audio_frame_count, fragment_count, bytes_out,
+            video_frame_count,
+            audio_frame_count,
+            fragment_count,
+            bytes_out,
         )
     else:
         logger.info(
             "[pipeline] Complete: %d video, %d audio frames, %d fragments, %d bytes out",
-            video_frame_count, audio_frame_count, fragment_count, bytes_out,
+            video_frame_count,
+            audio_frame_count,
+            fragment_count,
+            bytes_out,
         )
 
 
@@ -347,7 +357,9 @@ async def stream_segment_fmp4(
             "[seg_fmp4] Segment %.1f-%.1fs: video=%s %dx%d, audio=%s %dHz %dch",
             start_decode_time_ms / 1000.0,
             (start_decode_time_ms + (max_duration_ms or 0)) / 1000.0,
-            video_track.codec_id, video_track.pixel_width, video_track.pixel_height,
+            video_track.codec_id,
+            video_track.pixel_width,
+            video_track.pixel_height,
             audio_track.codec_id if audio_track else "none",
             int(audio_track.sample_rate) if audio_track else 0,
             audio_track.channels if audio_track else 0,
@@ -370,9 +382,7 @@ async def stream_segment_fmp4(
                 logger.warning("[seg_fmp4] No FFmpeg codec for %s, skipping audio", audio_track.codec_id)
                 audio_track = None
 
-        audio_timescale = 48000 if transcoder else (
-            int(audio_track.effective_sample_rate) if audio_track else 48000
-        )
+        audio_timescale = 48000 if transcoder else (int(audio_track.effective_sample_rate) if audio_track else 48000)
         aac_frame_size = transcoder.frame_size if transcoder else 1024
         audio_sr = 48000 if transcoder else (int(audio_track.sample_rate) if audio_track else 48000)
 
@@ -422,9 +432,12 @@ async def stream_segment_fmp4(
                 _max_audio_frames = None
 
             logger.info(
-                "[seg_fmp4] Frame limits: video=%s @%.1ffps, audio=%s (frame_size=%d, sr=%d), "
-                "window=%.3f-%.3fs",
-                _max_video_frames, fps, _max_audio_frames, aac_frame_size, audio_sr,
+                "[seg_fmp4] Frame limits: video=%s @%.1ffps, audio=%s (frame_size=%d, sr=%d), window=%.3f-%.3fs",
+                _max_video_frames,
+                fps,
+                _max_audio_frames,
+                aac_frame_size,
+                audio_sr,
                 start_decode_time_ms / 1000.0,
                 segment_end_ms / 1000.0 if segment_end_ms is not None else -1.0,
             )
@@ -496,7 +509,9 @@ async def stream_segment_fmp4(
                 pts_ticks = int(frame.timestamp_ms * _VIDEO_TIMESCALE / 1000.0)
 
                 muxer.add_video_sample(
-                    sample_data, duration_ticks, frame.is_keyframe,
+                    sample_data,
+                    duration_ticks,
+                    frame.is_keyframe,
                     pts_ticks=pts_ticks,
                 )
                 last_video_ts_ms = frame.timestamp_ms
@@ -579,12 +594,18 @@ async def stream_segment_fmp4(
     if cancelled:
         logger.info(
             "[seg_fmp4] Cancelled: %d video, %d audio frames, %d fragments, %d bytes",
-            video_frame_count, audio_frame_count, fragment_count, bytes_out,
+            video_frame_count,
+            audio_frame_count,
+            fragment_count,
+            bytes_out,
         )
     else:
         logger.info(
             "[seg_fmp4] Complete: %d video, %d audio frames, %d fragments, %d bytes",
-            video_frame_count, audio_frame_count, fragment_count, bytes_out,
+            video_frame_count,
+            audio_frame_count,
+            fragment_count,
+            bytes_out,
         )
 
 
@@ -615,7 +636,7 @@ def _has_valid_video_nal(data: bytes) -> bool:
     pos = 0
     size = len(data)
     while pos + 4 < size:
-        nal_len = int.from_bytes(data[pos:pos + 4], "big")
+        nal_len = int.from_bytes(data[pos : pos + 4], "big")
         if nal_len <= 0 or nal_len > size - pos - 4:
             break
         nal_byte = data[pos + 4]
@@ -786,7 +807,9 @@ async def stream_transcode_universal(
             )
         if aus:
             audio_mkv_codec = _PYAV_TO_MKV_AUDIO.get(aus.codec_name, aus.codec_name)
-            do_audio_transcode = pyav_audio_needs_transcode(aus.codec_name) or pyav_audio_needs_transcode(audio_mkv_codec)
+            do_audio_transcode = pyav_audio_needs_transcode(aus.codec_name) or pyav_audio_needs_transcode(
+                audio_mkv_codec
+            )
 
         # Tell the demux thread whether to decode video/audio in-thread.
         # This must be called before consuming packets via iter_packets().
@@ -795,8 +818,10 @@ async def stream_transcode_universal(
 
         logger.info(
             "[universal] Streams: video=%s (reencode=%s), audio=%s (transcode=%s)",
-            vs.codec_name if vs else "none", do_video_transcode,
-            aus.codec_name if aus else "none", do_audio_transcode,
+            vs.codec_name if vs else "none",
+            do_video_transcode,
+            aus.codec_name if aus else "none",
+            do_audio_transcode,
         )
 
         # Phase 3: Set up transcoders
@@ -830,7 +855,9 @@ async def stream_transcode_universal(
 
             logger.info(
                 "[universal] Audio transcoding: %s %dHz %dch -> aac 48000Hz 2ch @192k",
-                aus.codec_name, aus.sample_rate or 0, aus.channels or 0,
+                aus.codec_name,
+                aus.sample_rate or 0,
+                aus.channels or 0,
             )
 
         # Phase 4: Build init segment
@@ -915,9 +942,9 @@ async def stream_transcode_universal(
         # Phase 5: Process packets
         # For video passthrough: skip until first keyframe and rebase DTS/PTS
         # so fMP4 timestamps start from 0 (live TS streams have huge absolute values).
-        _video_dts_base: float | None = None   # first video DTS in seconds
-        _got_keyframe = do_video_transcode      # transcoded output always starts with keyframe
-        _emitted_video_duration_ms = 0.0        # accumulated video duration for monitoring
+        _video_dts_base: float | None = None  # first video DTS in seconds
+        _got_keyframe = do_video_transcode  # transcoded output always starts with keyframe
+        _emitted_video_duration_ms = 0.0  # accumulated video duration for monitoring
 
         # Offset (video timescale ticks) that maps rebased-to-0 encoder PTS
         # onto the absolute timeline expected by the muxer.  When producing
@@ -1035,7 +1062,11 @@ async def stream_transcode_universal(
                     if not sample_data:
                         return None, None
 
-                    dur_ticks = max(1, int(packet.duration_seconds * _VIDEO_TIMESCALE)) if packet.duration > 0 else max(1, int(_VIDEO_TIMESCALE / (vs.fps or 24.0)))
+                    dur_ticks = (
+                        max(1, int(packet.duration_seconds * _VIDEO_TIMESCALE))
+                        if packet.duration > 0
+                        else max(1, int(_VIDEO_TIMESCALE / (vs.fps or 24.0)))
+                    )
 
                     # Always pass PTS for CTS computation so B-frames
                     # are properly reordered by the player.
@@ -1101,15 +1132,12 @@ async def stream_transcode_universal(
             # to avoid draining the entire byte range.
             if _max_video_frames is not None:
                 video_done = video_frame_count >= _max_video_frames
-                audio_done = (
-                    _max_audio_frames is None
-                    or audio_frame_count >= _max_audio_frames
-                )
+                audio_done = _max_audio_frames is None or audio_frame_count >= _max_audio_frames
                 if video_done and audio_done:
                     logger.debug(
-                        "[universal] Segment frame limits reached: "
-                        "video=%d/%d, audio=%d/%s, emitted=%.0fms",
-                        video_frame_count, _max_video_frames,
+                        "[universal] Segment frame limits reached: video=%d/%d, audio=%d/%s, emitted=%.0fms",
+                        video_frame_count,
+                        _max_video_frames,
                         audio_frame_count,
                         _max_audio_frames if _max_audio_frames is not None else "unlimited",
                         _emitted_video_duration_ms,
@@ -1219,11 +1247,16 @@ async def stream_transcode_universal(
     if cancelled:
         logger.info(
             "[universal] Cancelled after %d video, %d audio frames, %d fragments, %d bytes out",
-            video_frame_count, audio_frame_count, fragment_count, bytes_out,
+            video_frame_count,
+            audio_frame_count,
+            fragment_count,
+            bytes_out,
         )
     else:
         logger.info(
             "[universal] Complete: %d video, %d audio frames, %d fragments, %d bytes out",
-            video_frame_count, audio_frame_count, fragment_count, bytes_out,
+            video_frame_count,
+            audio_frame_count,
+            fragment_count,
+            bytes_out,
         )
-

@@ -128,24 +128,28 @@ async def _set_cached_cue_index(cache_key: str, index: MKVCueIndex) -> None:
     if r is None:
         return
     redis_key = f"{_CUE_INDEX_CACHE_PREFIX}{cache_key}"
-    data = json.dumps({
-        "duration_ms": index.duration_ms,
-        "timestamp_scale": index.timestamp_scale,
-        "cue_points": index.cue_points,
-        "segment_data_offset": index.segment_data_offset,
-        "first_cluster_offset": index.first_cluster_offset,
-        "seek_header_b64": base64.b64encode(index.seek_header).decode() if index.seek_header else "",
-        "audio_codec_id": index.audio_codec_id,
-        "audio_bitrate": index.audio_bitrate,
-        "audio_channels": index.audio_channels,
-        "audio_sample_rate": index.audio_sample_rate,
-        "video_codec_id": index.video_codec_id,
-        "video_codec_private_b64": base64.b64encode(index.video_codec_private).decode() if index.video_codec_private else "",
-        "video_width": index.video_width,
-        "video_height": index.video_height,
-        "video_fps": index.video_fps,
-        "video_default_duration_ns": index.video_default_duration_ns,
-    })
+    data = json.dumps(
+        {
+            "duration_ms": index.duration_ms,
+            "timestamp_scale": index.timestamp_scale,
+            "cue_points": index.cue_points,
+            "segment_data_offset": index.segment_data_offset,
+            "first_cluster_offset": index.first_cluster_offset,
+            "seek_header_b64": base64.b64encode(index.seek_header).decode() if index.seek_header else "",
+            "audio_codec_id": index.audio_codec_id,
+            "audio_bitrate": index.audio_bitrate,
+            "audio_channels": index.audio_channels,
+            "audio_sample_rate": index.audio_sample_rate,
+            "video_codec_id": index.video_codec_id,
+            "video_codec_private_b64": base64.b64encode(index.video_codec_private).decode()
+            if index.video_codec_private
+            else "",
+            "video_width": index.video_width,
+            "video_height": index.video_height,
+            "video_fps": index.video_fps,
+            "video_default_duration_ns": index.video_default_duration_ns,
+        }
+    )
     await r.set(redis_key, data, ex=_CUE_INDEX_CACHE_TTL)
     logger.debug("[container_probe] Cached cue index: %s", cache_key)
 
@@ -216,7 +220,8 @@ async def probe_mkv_cues(
 
         logger.info(
             "[container_probe] SeekHead: Cues at offset %d (absolute %d), Info at %s",
-            cues_relative_offset, cues_absolute_offset,
+            cues_relative_offset,
+            cues_absolute_offset,
             seek_positions.get(INFO, "not found"),
         )
 
@@ -316,18 +321,20 @@ async def _set_cached_mp4_index(cache_key: str, index: MP4Index) -> None:
     if r is None:
         return
     redis_key = f"{_MP4_INDEX_CACHE_PREFIX}{cache_key}"
-    data = json.dumps({
-        "duration_ms": index.duration_ms,
-        "timescale": index.timescale,
-        "cue_points": index.cue_points,
-        "moov_offset": index.moov_offset,
-        "moov_size": index.moov_size,
-        "ftyp_data_b64": base64.b64encode(index.ftyp_data).decode() if index.ftyp_data else "",
-        "mdat_offset": index.mdat_offset,
-        "mdat_size": index.mdat_size,
-        "video_codec": index.video_codec,
-        "audio_codec": index.audio_codec,
-    })
+    data = json.dumps(
+        {
+            "duration_ms": index.duration_ms,
+            "timescale": index.timescale,
+            "cue_points": index.cue_points,
+            "moov_offset": index.moov_offset,
+            "moov_size": index.moov_size,
+            "ftyp_data_b64": base64.b64encode(index.ftyp_data).decode() if index.ftyp_data else "",
+            "mdat_offset": index.mdat_offset,
+            "mdat_size": index.mdat_size,
+            "video_codec": index.video_codec,
+            "audio_codec": index.audio_codec,
+        }
+    )
     await r.set(redis_key, data, ex=_MP4_INDEX_CACHE_TTL)
     logger.debug("[container_probe] Cached MP4 index: %s", cache_key)
 
@@ -404,9 +411,7 @@ async def probe_mp4_moov(
             # Re-fetch moov_data (not cached due to size) and rewrite offsets
             if cached.moov_size > 0 and cached.moov_size <= _MAX_MOOV_SIZE:
                 moov_data = b""
-                async for chunk in source.stream(
-                    offset=cached.moov_offset, limit=cached.moov_size
-                ):
+                async for chunk in source.stream(offset=cached.moov_offset, limit=cached.moov_size):
                     moov_data += chunk
                 if cached.mdat_offset >= 0:
                     new_mdat_start = len(cached.ftyp_data) + cached.moov_size
@@ -482,7 +487,10 @@ async def probe_mp4_moov(
 
         logger.info(
             "[container_probe] MP4 atoms: moov at %d (%d bytes), mdat at %d (%d bytes)",
-            moov_offset, moov_size, mdat_offset, mdat_size,
+            moov_offset,
+            moov_size,
+            mdat_offset,
+            mdat_size,
         )
 
         # Step 5: Fetch full moov atom
@@ -497,7 +505,8 @@ async def probe_mp4_moov(
         if len(moov_data) < moov_size:
             logger.warning(
                 "[container_probe] Incomplete moov: got %d of %d bytes",
-                len(moov_data), moov_size,
+                len(moov_data),
+                moov_size,
             )
             return None
 
@@ -507,9 +516,7 @@ async def probe_mp4_moov(
         hdr_size = 16 if raw_size == 1 else 8
         moov_body = moov_data[hdr_size:]
 
-        cue_points, duration_ms, timescale, video_codec, audio_codec = (
-            build_cue_points_from_moov(moov_body)
-        )
+        cue_points, duration_ms, timescale, video_codec, audio_codec = build_cue_points_from_moov(moov_body)
 
         # If mdat wasn't found via header scan, it's likely right after ftyp
         # or right after moov. Common layouts:
@@ -574,7 +581,10 @@ async def probe_mp4_moov(
 
         logger.info(
             "[container_probe] MP4 index: duration=%.1fs, %d cue points, video=%s, audio=%s",
-            duration_ms / 1000.0, len(cue_points), video_codec, audio_codec,
+            duration_ms / 1000.0,
+            len(cue_points),
+            video_codec,
+            audio_codec,
         )
 
         if cache_key:

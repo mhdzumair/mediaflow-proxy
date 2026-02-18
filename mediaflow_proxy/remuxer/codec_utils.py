@@ -13,74 +13,110 @@ logger = logging.getLogger(__name__)
 # ────────────────────────────────────────────────────────────────────
 # Browser-compatible codecs (work natively in HTML5 <video>)
 # ────────────────────────────────────────────────────────────────────
-BROWSER_VIDEO_CODECS = frozenset({
-    "V_MPEG4/ISO/AVC",   # H.264/AVC -- universal
-    "h264", "avc1",       # FFmpeg/PyAV names
-})
+BROWSER_VIDEO_CODECS = frozenset(
+    {
+        "V_MPEG4/ISO/AVC",  # H.264/AVC -- universal
+        "h264",
+        "avc1",  # FFmpeg/PyAV names
+    }
+)
 
-BROWSER_AUDIO_CODECS = frozenset({
-    "A_AAC",              # AAC-LC -- universal
-    "A_AAC/MPEG2/LC",
-    "A_AAC/MPEG4/LC",
-    "aac",                # FFmpeg/PyAV name
-    "mp3",                # MP3 -- universal
-    "A_MPEG/L3",
-})
+BROWSER_AUDIO_CODECS = frozenset(
+    {
+        "A_AAC",  # AAC-LC -- universal
+        "A_AAC/MPEG2/LC",
+        "A_AAC/MPEG4/LC",
+        "aac",  # FFmpeg/PyAV name
+        "mp3",  # MP3 -- universal
+        "A_MPEG/L3",
+    }
+)
 
 # ────────────────────────────────────────────────────────────────────
 # Video codecs that need re-encoding to H.264
 # ────────────────────────────────────────────────────────────────────
-VIDEO_NEEDS_REENCODE = frozenset({
-    "V_MPEGH/ISO/HEVC",   # H.265/HEVC (Chrome/Firefox don't support)
-    "V_MPEG2",             # MPEG-2 (DVD-era)
-    "V_MPEG4/ISO/SP",      # MPEG-4 Part 2 Simple Profile
-    "V_MPEG4/ISO/ASP",     # MPEG-4 Part 2 Advanced Simple (DivX/Xvid)
-    "V_MPEG4/ISO/AP",      # MPEG-4 Part 2 Advanced Profile
-    "V_MPEG4/MS/V3",       # MS MPEG-4 v3 (WMV)
-    "V_MS/VFW/FOURCC",     # Generic VFW (VC-1, etc.)
-    "V_REAL/RV10",
-    "V_REAL/RV20",
-    "V_REAL/RV30",
-    "V_REAL/RV40",
-    "V_THEORA",
-    "V_VP8",
-    "V_VP9",               # VP9 in MKV (needs WebM container for browser)
-    "V_AV1",               # AV1 (partial support, safer to reencode)
-    # PyAV / FFmpeg codec names
-    "hevc", "h265",
-    "mpeg2video",
-    "mpeg4",
-    "vc1",
-    "vp8", "vp9",
-    "av1",
-    "theora",
-    "wmv3",
-    "rv30", "rv40",
-})
+VIDEO_NEEDS_REENCODE = frozenset(
+    {
+        "V_MPEGH/ISO/HEVC",  # H.265/HEVC (Chrome/Firefox don't support)
+        "V_MPEG2",  # MPEG-2 (DVD-era)
+        "V_MPEG4/ISO/SP",  # MPEG-4 Part 2 Simple Profile
+        "V_MPEG4/ISO/ASP",  # MPEG-4 Part 2 Advanced Simple (DivX/Xvid)
+        "V_MPEG4/ISO/AP",  # MPEG-4 Part 2 Advanced Profile
+        "V_MPEG4/MS/V3",  # MS MPEG-4 v3 (WMV)
+        "V_MS/VFW/FOURCC",  # Generic VFW (VC-1, etc.)
+        "V_REAL/RV10",
+        "V_REAL/RV20",
+        "V_REAL/RV30",
+        "V_REAL/RV40",
+        "V_THEORA",
+        "V_VP8",
+        "V_VP9",  # VP9 in MKV (needs WebM container for browser)
+        "V_AV1",  # AV1 (partial support, safer to reencode)
+        # PyAV / FFmpeg codec names
+        "hevc",
+        "h265",
+        "mpeg2video",
+        "mpeg4",
+        "vc1",
+        "vp8",
+        "vp9",
+        "av1",
+        "theora",
+        "wmv3",
+        "rv30",
+        "rv40",
+    }
+)
 
 # ────────────────────────────────────────────────────────────────────
 # Audio codecs that need transcoding to AAC
 # (superset of the list in audio_transcoder.py, uses both MKV and
 # PyAV codec names for universal lookup)
 # ────────────────────────────────────────────────────────────────────
-AUDIO_NEEDS_TRANSCODE = frozenset({
-    # MKV CodecIDs
-    "A_EAC3", "A_AC3",
-    "A_DTS", "A_DTS/EXPRESS", "A_DTS/LOSSLESS",
-    "A_OPUS", "A_VORBIS", "A_FLAC",
-    "A_TRUEHD", "A_MLP",
-    "A_PCM/INT/LIT", "A_PCM/INT/BIG", "A_PCM/FLOAT/IEEE",
-    "A_REAL/28_8", "A_REAL/COOK", "A_REAL/SIPR", "A_REAL/ATRC",
-    "A_MS/ACM",  # Generic Windows audio
-    "A_MP3", "A_MPEG/L3",
-    # PyAV / FFmpeg names
-    "eac3", "ac3",
-    "dts", "dca", "truehd", "mlp",
-    "opus", "vorbis", "flac",
-    "pcm_s16le", "pcm_s24le", "pcm_f32le",
-    "wmav2", "wmavoice", "wmapro",
-    "cook", "sipr", "atrac3",
-})
+AUDIO_NEEDS_TRANSCODE = frozenset(
+    {
+        # MKV CodecIDs
+        "A_EAC3",
+        "A_AC3",
+        "A_DTS",
+        "A_DTS/EXPRESS",
+        "A_DTS/LOSSLESS",
+        "A_OPUS",
+        "A_VORBIS",
+        "A_FLAC",
+        "A_TRUEHD",
+        "A_MLP",
+        "A_PCM/INT/LIT",
+        "A_PCM/INT/BIG",
+        "A_PCM/FLOAT/IEEE",
+        "A_REAL/28_8",
+        "A_REAL/COOK",
+        "A_REAL/SIPR",
+        "A_REAL/ATRC",
+        "A_MS/ACM",  # Generic Windows audio
+        "A_MP3",
+        "A_MPEG/L3",
+        # PyAV / FFmpeg names
+        "eac3",
+        "ac3",
+        "dts",
+        "dca",
+        "truehd",
+        "mlp",
+        "opus",
+        "vorbis",
+        "flac",
+        "pcm_s16le",
+        "pcm_s24le",
+        "pcm_f32le",
+        "wmav2",
+        "wmavoice",
+        "wmapro",
+        "cook",
+        "sipr",
+        "atrac3",
+    }
+)
 
 # Map PyAV codec names to MKV CodecIDs (for the MKV fast-path)
 _PYAV_TO_MKV_VIDEO = {
@@ -262,7 +298,7 @@ def _fix_avcc_high_profile(avcc: bytes) -> bytes:
     for _ in range(num_sps):
         if off + 2 > len(avcc):
             return avcc
-        sps_len = struct.unpack(">H", avcc[off:off + 2])[0]
+        sps_len = struct.unpack(">H", avcc[off : off + 2])[0]
         off += 2 + sps_len
 
     if off >= len(avcc):
@@ -272,7 +308,7 @@ def _fix_avcc_high_profile(avcc: bytes) -> bytes:
     for _ in range(num_pps):
         if off + 2 > len(avcc):
             return avcc
-        pps_len = struct.unpack(">H", avcc[off:off + 2])[0]
+        pps_len = struct.unpack(">H", avcc[off : off + 2])[0]
         off += 2 + pps_len
 
     # If there are already bytes after the PPS section, extensions exist
@@ -339,18 +375,18 @@ def ensure_avcc_extradata(extradata: bytes) -> bytes:
 
     # Build avcC box content
     avcc = bytearray()
-    avcc.append(1)                    # configurationVersion
-    avcc.append(sps[1])               # AVCProfileIndication
-    avcc.append(sps[2])               # profile_compatibility
-    avcc.append(sps[3])               # AVCLevelIndication
-    avcc.append(0xFF)                 # 6 bits reserved (0x3F) + lengthSizeMinusOne=3 -> 4-byte NAL lengths
+    avcc.append(1)  # configurationVersion
+    avcc.append(sps[1])  # AVCProfileIndication
+    avcc.append(sps[2])  # profile_compatibility
+    avcc.append(sps[3])  # AVCLevelIndication
+    avcc.append(0xFF)  # 6 bits reserved (0x3F) + lengthSizeMinusOne=3 -> 4-byte NAL lengths
     avcc.append(0xE0 | len(sps_list))  # 3 bits reserved (0x07) + numOfSPS
 
     for s in sps_list:
         avcc.extend(struct.pack(">H", len(s)))
         avcc.extend(s)
 
-    avcc.append(len(pps_list))        # numOfPPS
+    avcc.append(len(pps_list))  # numOfPPS
     for p in pps_list:
         avcc.extend(struct.pack(">H", len(p)))
         avcc.extend(p)
@@ -403,18 +439,18 @@ def extract_sps_pps_from_annexb(data: bytes) -> bytes:
 
     # Build avcC box content
     avcc = bytearray()
-    avcc.append(1)                    # configurationVersion
-    avcc.append(sps[1])               # AVCProfileIndication
-    avcc.append(sps[2])               # profile_compatibility
-    avcc.append(sps[3])               # AVCLevelIndication
-    avcc.append(0xFF)                 # 6 bits reserved + lengthSizeMinusOne=3
+    avcc.append(1)  # configurationVersion
+    avcc.append(sps[1])  # AVCProfileIndication
+    avcc.append(sps[2])  # profile_compatibility
+    avcc.append(sps[3])  # AVCLevelIndication
+    avcc.append(0xFF)  # 6 bits reserved + lengthSizeMinusOne=3
     avcc.append(0xE0 | len(sps_list))  # 3 bits reserved + numOfSPS
 
     for s in sps_list:
         avcc.extend(struct.pack(">H", len(s)))
         avcc.extend(s)
 
-    avcc.append(len(pps_list))        # numOfPPS
+    avcc.append(len(pps_list))  # numOfPPS
     for p in pps_list:
         avcc.extend(struct.pack(">H", len(p)))
         avcc.extend(p)

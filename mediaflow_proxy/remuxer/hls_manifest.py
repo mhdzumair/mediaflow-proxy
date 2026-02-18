@@ -17,8 +17,7 @@ import math
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from mediaflow_proxy.remuxer.ebml_parser import MKVCueIndex
-    from mediaflow_proxy.remuxer.mp4_parser import MP4Index
+    pass
 
 
 def merge_cue_points(
@@ -130,12 +129,19 @@ def generate_vod_playlist(
 
     for seg_num, (start_ms, end_ms, dur_s) in enumerate(segments):
         lines.append(f"#EXTINF:{dur_s:.3f},")
-        url = segment_url_template.replace(
-            "{seg}", str(seg_num),
-        ).replace(
-            "{start_ms}", str(int(start_ms)),
-        ).replace(
-            "{end_ms}", str(int(end_ms)),
+        url = (
+            segment_url_template.replace(
+                "{seg}",
+                str(seg_num),
+            )
+            .replace(
+                "{start_ms}",
+                str(int(start_ms)),
+            )
+            .replace(
+                "{end_ms}",
+                str(int(end_ms)),
+            )
         )
         lines.append(url)
 

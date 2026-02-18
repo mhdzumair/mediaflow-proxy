@@ -56,6 +56,7 @@ async def _handle_xtream_transcode(request, upstream_url: str, proxy_headers, st
 async def _handle_xtream_hls_playlist(request, upstream_url: str, proxy_headers):
     """Generate HLS VOD playlist for an Xtream stream."""
     from urllib.parse import quote
+
     source = HTTPMediaSource(url=upstream_url, headers=dict(proxy_headers.request))
     await source.resolve_file_size()
 
@@ -67,10 +68,15 @@ async def _handle_xtream_hls_playlist(request, upstream_url: str, proxy_headers)
         base_params += f"&api_password={quote(original['api_password'], safe='')}"
 
     init_url = f"/proxy/transcode/init.mp4?{base_params}"
-    segment_url_template = f"/proxy/transcode/segment.m4s?{base_params}&seg={{seg}}&start_ms={{start_ms}}&end_ms={{end_ms}}"
+    segment_url_template = (
+        f"/proxy/transcode/segment.m4s?{base_params}&seg={{seg}}&start_ms={{start_ms}}&end_ms={{end_ms}}"
+    )
 
     return await handle_transcode_hls_playlist(
-        request, source, init_url=init_url, segment_url_template=segment_url_template,
+        request,
+        source,
+        init_url=init_url,
+        segment_url_template=segment_url_template,
     )
 
 
@@ -82,13 +88,19 @@ async def _handle_xtream_hls_init(request, upstream_url: str, proxy_headers):
 
 
 async def _handle_xtream_hls_segment(
-    request, upstream_url: str, proxy_headers,
-    start_ms: float, end_ms: float, seg: int | None = None,
+    request,
+    upstream_url: str,
+    proxy_headers,
+    start_ms: float,
+    end_ms: float,
+    seg: int | None = None,
 ):
     """Serve a single HLS fMP4 segment for an Xtream stream."""
     source = HTTPMediaSource(url=upstream_url, headers=dict(proxy_headers.request))
     await source.resolve_file_size()
-    return await handle_transcode_hls_segment(request, source, start_time_ms=start_ms, end_time_ms=end_ms, segment_number=seg)
+    return await handle_transcode_hls_segment(
+        request, source, start_time_ms=start_ms, end_time_ms=end_ms, segment_number=seg
+    )
 
 
 def decode_upstream_url(upstream_encoded: str) -> str:

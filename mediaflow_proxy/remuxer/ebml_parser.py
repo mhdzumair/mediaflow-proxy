@@ -80,11 +80,24 @@ CUE_TRACK = 0xF7
 CUE_CLUSTER_POSITION = 0xF1
 
 # Container elements (have children, not raw data)
-_CONTAINER_IDS = frozenset({
-    EBML_HEADER, SEGMENT, SEEK_HEAD, SEEK, INFO, TRACKS, TRACK_ENTRY,
-    VIDEO, AUDIO, CLUSTER, BLOCK_GROUP,
-    CUES, CUE_POINT, CUE_TRACK_POSITIONS,
-})
+_CONTAINER_IDS = frozenset(
+    {
+        EBML_HEADER,
+        SEGMENT,
+        SEEK_HEAD,
+        SEEK,
+        INFO,
+        TRACKS,
+        TRACK_ENTRY,
+        VIDEO,
+        AUDIO,
+        CLUSTER,
+        BLOCK_GROUP,
+        CUES,
+        CUE_POINT,
+        CUE_TRACK_POSITIONS,
+    }
+)
 
 # Unknown/indeterminate size sentinel
 UNKNOWN_SIZE = -1
@@ -583,8 +596,25 @@ def parse_ac3_bitrate(frame_data: bytes) -> int | None:
 
     # AC3 bitrate table (kbps) indexed by frmsizecod // 2
     _AC3_BITRATES_KBPS = [
-        32, 40, 48, 56, 64, 80, 96, 112, 128, 160,
-        192, 224, 256, 320, 384, 448, 512, 576, 640,
+        32,
+        40,
+        48,
+        56,
+        64,
+        80,
+        96,
+        112,
+        128,
+        160,
+        192,
+        224,
+        256,
+        320,
+        384,
+        448,
+        512,
+        576,
+        640,
     ]
     idx = frmsizecod >> 1
     if fscod > 2 or idx >= len(_AC3_BITRATES_KBPS):
@@ -632,9 +662,7 @@ def _extract_first_audio_frame(
                 bg_end = data_off + size
                 for child_eid, child_off, child_size, _ in iter_elements(header_data, data_off, bg_end):
                     if child_eid == BLOCK:
-                        for track_num, _, _, frame_list in extract_block_frames(
-                            header_data, child_off, child_size
-                        ):
+                        for track_num, _, _, frame_list in extract_block_frames(header_data, child_off, child_size):
                             if track_num == audio_track_number and frame_list:
                                 return frame_list[0]
     except (ValueError, IndexError):
@@ -703,7 +731,9 @@ def build_cue_index(
             segment_data_offset=segment_data_offset,
         )
     cues_size, cues_children_start = read_element_size(cues_data, cues_id_end)
-    cues_children_end = min(cues_children_start + cues_size, len(cues_data)) if cues_size != UNKNOWN_SIZE else len(cues_data)
+    cues_children_end = (
+        min(cues_children_start + cues_size, len(cues_data)) if cues_size != UNKNOWN_SIZE else len(cues_data)
+    )
 
     for cp_eid, cp_off, cp_size, _ in iter_elements(cues_data, cues_children_start, cues_children_end):
         if cp_eid != CUE_POINT:
@@ -770,7 +800,9 @@ def build_cue_index(
     # Try to determine audio bitrate from the first audio frame in the Cluster
     if audio_track and first_cluster_offset > 0:
         frame_data = _extract_first_audio_frame(
-            header_data, first_cluster_offset, audio_track.track_number,
+            header_data,
+            first_cluster_offset,
+            audio_track.track_number,
         )
         if frame_data:
             if audio_codec_id == CODEC_ID_EAC3:
@@ -781,8 +813,10 @@ def build_cue_index(
         if audio_bitrate > 0:
             logger.info(
                 "[ebml] Detected audio: %s %d kbps %dch %.0fHz",
-                audio_codec_id, audio_bitrate // 1000,
-                audio_channels, audio_sample_rate,
+                audio_codec_id,
+                audio_bitrate // 1000,
+                audio_channels,
+                audio_sample_rate,
             )
 
     index = MKVCueIndex(
@@ -807,9 +841,13 @@ def build_cue_index(
     logger.info(
         "[ebml] Built cue index: duration=%.1fs, %d cue points, segment_offset=%d, "
         "first_cluster=%d, seek_header=%d bytes, audio=%s @%dkbps",
-        duration_ms / 1000, len(cue_points), segment_data_offset,
-        first_cluster_offset, len(seek_header),
-        audio_codec_id or "none", audio_bitrate // 1000 if audio_bitrate else 0,
+        duration_ms / 1000,
+        len(cue_points),
+        segment_data_offset,
+        first_cluster_offset,
+        len(seek_header),
+        audio_codec_id or "none",
+        audio_bitrate // 1000 if audio_bitrate else 0,
     )
     return index
 
@@ -885,7 +923,7 @@ class MKVFrame:
 
 def read_string(data: bytes, pos: int, length: int) -> str:
     """Read a UTF-8 string of N bytes, stripping null terminators."""
-    raw = data[pos: pos + length]
+    raw = data[pos : pos + length]
     return raw.rstrip(b"\x00").decode("utf-8", errors="replace")
 
 
@@ -920,7 +958,7 @@ def parse_tracks(data: bytes, start: int, end: int) -> list[MKVTrack]:
             elif child_eid == CODEC_ID:
                 track.codec_id = read_string(data, child_off, child_size)
             elif child_eid == CODEC_PRIVATE:
-                track.codec_private = bytes(data[child_off: child_off + child_size])
+                track.codec_private = bytes(data[child_off : child_off + child_size])
             elif child_eid == DEFAULT_DURATION:
                 track.default_duration_ns = read_uint(data, child_off, child_size)
             elif child_eid == CODEC_DELAY:
@@ -1036,7 +1074,7 @@ def extract_block_frames(data: bytes, pos: int, block_size: int) -> list[tuple[i
         frame_size = remaining // num_frames
         frames = []
         for _ in range(num_frames):
-            frames.append(bytes(data[lace_pos:lace_pos + frame_size]))
+            frames.append(bytes(data[lace_pos : lace_pos + frame_size]))
             lace_pos += frame_size
         return [(track_number, rel_timecode, flags, frames)]
 
@@ -1058,7 +1096,7 @@ def extract_block_frames(data: bytes, pos: int, block_size: int) -> list[tuple[i
         frames = []
         frame_data_start = lace_pos
         for sz in frame_sizes:
-            frames.append(bytes(data[frame_data_start:frame_data_start + sz]))
+            frames.append(bytes(data[frame_data_start : frame_data_start + sz]))
             frame_data_start += sz
         frames.append(bytes(data[frame_data_start:block_end]))
         return [(track_number, rel_timecode, flags, frames)]
@@ -1092,7 +1130,7 @@ def extract_block_frames(data: bytes, pos: int, block_size: int) -> list[tuple[i
         frames = []
         frame_data_start = lace_pos
         for sz in frame_sizes:
-            frames.append(bytes(data[frame_data_start:frame_data_start + sz]))
+            frames.append(bytes(data[frame_data_start : frame_data_start + sz]))
             frame_data_start += sz
         frames.append(bytes(data[frame_data_start:block_end]))
         return [(track_number, rel_timecode, flags, frames)]
@@ -1131,16 +1169,17 @@ def parse_cluster_frames(
                 is_kf = bool(flags & 0x80)
                 abs_ts_ms = (cluster_timecode + rel_tc) * scale_ms
                 for frame_data in frame_list:
-                    frames.append(MKVFrame(
-                        track_number=track_num,
-                        timestamp_ms=abs_ts_ms,
-                        is_keyframe=is_kf,
-                        data=frame_data,
-                    ))
+                    frames.append(
+                        MKVFrame(
+                            track_number=track_num,
+                            timestamp_ms=abs_ts_ms,
+                            is_keyframe=is_kf,
+                            data=frame_data,
+                        )
+                    )
 
         elif eid == BLOCK_GROUP:
-            _parse_block_group(data, data_off, data_off + size,
-                               cluster_timecode, scale_ms, frames)
+            _parse_block_group(data, data_off, data_off + size, cluster_timecode, scale_ms, frames)
 
     cluster_ts_ms = cluster_timecode * scale_ms
     return cluster_ts_ms, frames
@@ -1178,10 +1217,12 @@ def _parse_block_group(
         abs_ts_ms = (cluster_timecode + rel_tc) * scale_ms
         dur_ms = duration_ticks * scale_ms if duration_ticks > 0 else 0.0
         for frame_data in frame_list:
-            frames.append(MKVFrame(
-                track_number=track_num,
-                timestamp_ms=abs_ts_ms,
-                is_keyframe=False,
-                data=frame_data,
-                duration_ms=dur_ms,
-            ))
+            frames.append(
+                MKVFrame(
+                    track_number=track_num,
+                    timestamp_ms=abs_ts_ms,
+                    is_keyframe=False,
+                    data=frame_data,
+                    duration_ms=dur_ms,
+                )
+            )

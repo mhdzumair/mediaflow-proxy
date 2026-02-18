@@ -289,7 +289,8 @@ class PyAVDemuxer:
                 self._read_fd = None  # ownership transferred
 
                 self._container = av.open(
-                    read_file, mode="r",
+                    read_file,
+                    mode="r",
                     options={
                         # Tolerate mid-stream joins / broken data in live TS
                         "err_detect": "ignore_err",
@@ -308,13 +309,9 @@ class PyAVDemuxer:
                 # Select streams to demux
                 streams_to_demux = []
                 if self._video_stream is not None:
-                    streams_to_demux.append(
-                        self._container.streams[self._video_stream.index]
-                    )
+                    streams_to_demux.append(self._container.streams[self._video_stream.index])
                 if self._audio_stream is not None:
-                    streams_to_demux.append(
-                        self._container.streams[self._audio_stream.index]
-                    )
+                    streams_to_demux.append(self._container.streams[self._audio_stream.index])
 
                 # Wait for the caller to decide on video/audio decoding
                 # (if not already decided at construction time).
@@ -325,12 +322,10 @@ class PyAVDemuxer:
 
                 # Cache stream objects and time_base for the hot loop
                 video_stream_obj = (
-                    self._container.streams[self._video_stream.index]
-                    if self._video_stream is not None else None
+                    self._container.streams[self._video_stream.index] if self._video_stream is not None else None
                 )
                 audio_stream_obj = (
-                    self._container.streams[self._audio_stream.index]
-                    if self._audio_stream is not None else None
+                    self._container.streams[self._audio_stream.index] if self._audio_stream is not None else None
                 )
 
                 video_tb_num = video_stream_obj.time_base.numerator if video_stream_obj else 1
@@ -357,18 +352,20 @@ class PyAVDemuxer:
                         except Exception:
                             frames = []
                         for frame in frames:
-                            pq.put(DemuxedPacket(
-                                stream_index=packet.stream_index,
-                                codec_type="video",
-                                data=b"",
-                                pts=int(frame.pts) if frame.pts is not None else 0,
-                                dts=int(frame.pts) if frame.pts is not None else 0,
-                                duration=int(packet.duration) if packet.duration is not None else 0,
-                                is_keyframe=frame.key_frame,
-                                time_base_num=video_tb_num,
-                                time_base_den=video_tb_den,
-                                decoded_frame=frame,
-                            ))
+                            pq.put(
+                                DemuxedPacket(
+                                    stream_index=packet.stream_index,
+                                    codec_type="video",
+                                    data=b"",
+                                    pts=int(frame.pts) if frame.pts is not None else 0,
+                                    dts=int(frame.pts) if frame.pts is not None else 0,
+                                    duration=int(packet.duration) if packet.duration is not None else 0,
+                                    is_keyframe=frame.key_frame,
+                                    time_base_num=video_tb_num,
+                                    time_base_den=video_tb_den,
+                                    decoded_frame=frame,
+                                )
+                            )
                             pkt_count += 1
 
                     # Optionally decode audio packets in-thread
@@ -378,52 +375,58 @@ class PyAVDemuxer:
                         except Exception:
                             frames = []
                         for frame in frames:
-                            pq.put(DemuxedPacket(
-                                stream_index=packet.stream_index,
-                                codec_type="audio",
-                                data=b"",
-                                pts=int(frame.pts) if frame.pts is not None else 0,
-                                dts=int(frame.pts) if frame.pts is not None else 0,
-                                duration=int(packet.duration) if packet.duration is not None else 0,
-                                is_keyframe=False,
-                                time_base_num=audio_tb_num,
-                                time_base_den=audio_tb_den,
-                                decoded_frame=frame,
-                            ))
+                            pq.put(
+                                DemuxedPacket(
+                                    stream_index=packet.stream_index,
+                                    codec_type="audio",
+                                    data=b"",
+                                    pts=int(frame.pts) if frame.pts is not None else 0,
+                                    dts=int(frame.pts) if frame.pts is not None else 0,
+                                    duration=int(packet.duration) if packet.duration is not None else 0,
+                                    is_keyframe=False,
+                                    time_base_num=audio_tb_num,
+                                    time_base_den=audio_tb_den,
+                                    decoded_frame=frame,
+                                )
+                            )
                             pkt_count += 1
 
                     else:
                         tb_num = video_tb_num if is_video else audio_tb_num
                         tb_den = video_tb_den if is_video else audio_tb_den
-                        pq.put(DemuxedPacket(
-                            stream_index=packet.stream_index,
-                            codec_type=stream.type,
-                            data=bytes(packet),
-                            pts=int(packet.pts) if packet.pts is not None else 0,
-                            dts=int(packet.dts) if packet.dts is not None else 0,
-                            duration=int(packet.duration) if packet.duration is not None else 0,
-                            is_keyframe=packet.is_keyframe,
-                            time_base_num=tb_num,
-                            time_base_den=tb_den,
-                        ))
+                        pq.put(
+                            DemuxedPacket(
+                                stream_index=packet.stream_index,
+                                codec_type=stream.type,
+                                data=bytes(packet),
+                                pts=int(packet.pts) if packet.pts is not None else 0,
+                                dts=int(packet.dts) if packet.dts is not None else 0,
+                                duration=int(packet.duration) if packet.duration is not None else 0,
+                                is_keyframe=packet.is_keyframe,
+                                time_base_num=tb_num,
+                                time_base_den=tb_den,
+                            )
+                        )
                         pkt_count += 1
 
                 # Flush the video decoder if we were decoding
                 if decode_video and video_stream_obj is not None:
                     try:
                         for frame in video_stream_obj.codec_context.decode(None):
-                            pq.put(DemuxedPacket(
-                                stream_index=video_stream_obj.index,
-                                codec_type="video",
-                                data=b"",
-                                pts=int(frame.pts) if frame.pts is not None else 0,
-                                dts=int(frame.pts) if frame.pts is not None else 0,
-                                duration=0,
-                                is_keyframe=frame.key_frame,
-                                time_base_num=video_tb_num,
-                                time_base_den=video_tb_den,
-                                decoded_frame=frame,
-                            ))
+                            pq.put(
+                                DemuxedPacket(
+                                    stream_index=video_stream_obj.index,
+                                    codec_type="video",
+                                    data=b"",
+                                    pts=int(frame.pts) if frame.pts is not None else 0,
+                                    dts=int(frame.pts) if frame.pts is not None else 0,
+                                    duration=0,
+                                    is_keyframe=frame.key_frame,
+                                    time_base_num=video_tb_num,
+                                    time_base_den=video_tb_den,
+                                    decoded_frame=frame,
+                                )
+                            )
                             pkt_count += 1
                     except Exception:
                         pass
@@ -432,18 +435,20 @@ class PyAVDemuxer:
                 if decode_audio and audio_stream_obj is not None:
                     try:
                         for frame in audio_stream_obj.codec_context.decode(None):
-                            pq.put(DemuxedPacket(
-                                stream_index=audio_stream_obj.index,
-                                codec_type="audio",
-                                data=b"",
-                                pts=int(frame.pts) if frame.pts is not None else 0,
-                                dts=int(frame.pts) if frame.pts is not None else 0,
-                                duration=0,
-                                is_keyframe=False,
-                                time_base_num=audio_tb_num,
-                                time_base_den=audio_tb_den,
-                                decoded_frame=frame,
-                            ))
+                            pq.put(
+                                DemuxedPacket(
+                                    stream_index=audio_stream_obj.index,
+                                    codec_type="audio",
+                                    data=b"",
+                                    pts=int(frame.pts) if frame.pts is not None else 0,
+                                    dts=int(frame.pts) if frame.pts is not None else 0,
+                                    duration=0,
+                                    is_keyframe=False,
+                                    time_base_num=audio_tb_num,
+                                    time_base_den=audio_tb_den,
+                                    decoded_frame=frame,
+                                )
+                            )
                             pkt_count += 1
                     except Exception:
                         pass
@@ -458,9 +463,7 @@ class PyAVDemuxer:
             finally:
                 pq.put(_SENTINEL)
 
-        self._demux_thread = threading.Thread(
-            target=_open_and_demux, daemon=True, name="pyav-demux"
-        )
+        self._demux_thread = threading.Thread(target=_open_and_demux, daemon=True, name="pyav-demux")
         self._demux_thread.start()
 
         # Wait for stream discovery before returning.

@@ -419,7 +419,9 @@ async def acestream_ts_stream(
                 try:
                     async with create_aiohttp_session(ts_url) as (session, proxy_url):
                         async with session.get(
-                            ts_url, proxy=proxy_url, allow_redirects=True,
+                            ts_url,
+                            proxy=proxy_url,
+                            allow_redirects=True,
                         ) as resp:
                             resp.raise_for_status()
                             async for chunk in resp.content.iter_any():

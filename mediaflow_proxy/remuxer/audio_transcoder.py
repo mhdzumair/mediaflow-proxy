@@ -91,10 +91,18 @@ _MKV_TO_FFMPEG_CODEC = {
 }
 
 # Codecs that need transcoding to AAC for browser playback
-NEEDS_TRANSCODE = frozenset({
-    CODEC_ID_EAC3, CODEC_ID_AC3, CODEC_ID_OPUS, CODEC_ID_VORBIS,
-    CODEC_ID_FLAC, "A_DTS", "A_MP3", "A_MPEG/L3",
-})
+NEEDS_TRANSCODE = frozenset(
+    {
+        CODEC_ID_EAC3,
+        CODEC_ID_AC3,
+        CODEC_ID_OPUS,
+        CODEC_ID_VORBIS,
+        CODEC_ID_FLAC,
+        "A_DTS",
+        "A_MP3",
+        "A_MPEG/L3",
+    }
+)
 
 # Output AAC settings
 _OUTPUT_CODEC = "aac"
@@ -183,8 +191,12 @@ class AudioTranscoder:
 
         logger.info(
             "[audio_transcoder] Initialized: %s %dHz %dch -> aac %dHz %dch @%dk",
-            input_codec, input_sample_rate, input_channels,
-            output_sample_rate, output_channels, output_bitrate // 1000,
+            input_codec,
+            input_sample_rate,
+            input_channels,
+            output_sample_rate,
+            output_channels,
+            output_bitrate // 1000,
         )
 
     @property
@@ -317,7 +329,8 @@ class AudioTranscoder:
 
         logger.info(
             "[audio_transcoder] Flushed: %d decoded, %d encoded total",
-            self._frames_decoded, self._frames_encoded,
+            self._frames_decoded,
+            self._frames_encoded,
         )
         return output
 

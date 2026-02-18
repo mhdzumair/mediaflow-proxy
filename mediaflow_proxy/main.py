@@ -40,9 +40,8 @@ _default_unraisable_hook = sys.unraisablehook
 
 
 def _filtered_unraisable_hook(unraisable):
-    if (
-        isinstance(unraisable.exc_value, RuntimeError)
-        and "coroutine ignored GeneratorExit" in str(unraisable.exc_value)
+    if isinstance(unraisable.exc_value, RuntimeError) and "coroutine ignored GeneratorExit" in str(
+        unraisable.exc_value
     ):
         return  # Suppress Telethon GC noise
     _default_unraisable_hook(unraisable)
@@ -67,7 +66,8 @@ async def lifespan(app: FastAPI):
     if hw.accel_type != HWAccelType.NONE and settings.transcode_prefer_gpu:
         logger.info(
             "Transcode ready: GPU %s (encoder=%s) | PyAV pipeline",
-            hw.accel_type.value, hw.h264_encoder,
+            hw.accel_type.value,
+            hw.h264_encoder,
         )
     else:
         logger.info(
