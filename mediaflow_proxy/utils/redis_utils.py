@@ -160,6 +160,35 @@ async def close_redis():
 
 
 # =============================================================================
+# Instance Namespace Helper
+# =============================================================================
+# Some cached data is bound to the outgoing IP of the pod that produced it
+# (e.g. extractor results resolved via the pod's egress IP). Sharing these
+# entries across pods in a multi-instance deployment causes other pods to serve
+# stale/wrong URLs.
+#
+# Set CACHE_NAMESPACE (env: CACHE_NAMESPACE) to a unique value per pod (e.g.
+# pod name, hostname, or any discriminator). Instance-scoped keys are then
+# stored under  "<namespace>:<original_key>", while fully-shared keys (MPD,
+# init segments, media segments, locks, stream gates) remain unchanged.
+
+
+def make_instance_key(key: str) -> str:
+    """Prefix *key* with the configured instance namespace.
+
+    Use this for cache/coordination keys that must NOT be shared across pods
+    because the underlying data is specific to a pod's outgoing IP (e.g.
+    extractor results).  Common content (MPD, init/media segments) should
+    never be namespaced.
+
+    If ``settings.cache_namespace`` is not set the key is returned unchanged,
+    so single-instance deployments are unaffected.
+    """
+    ns = settings.cache_namespace
+    return f"{ns}:{key}" if ns else key
+
+
+# =============================================================================
 # Stream Gate (Distributed Lock)
 # =============================================================================
 # Serializes upstream connection handshakes per-URL across all workers.
