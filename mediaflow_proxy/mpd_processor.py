@@ -16,7 +16,7 @@ from mediaflow_proxy.utils.http_utils import (
 from mediaflow_proxy.utils.dash_prebuffer import dash_prebuffer
 from mediaflow_proxy.utils.cache_utils import get_cached_processed_init, set_cached_processed_init
 from mediaflow_proxy.utils.m3u8_processor import SkipSegmentFilter
-from mediaflow_proxy.utils.ts_muxer import remux_fmp4_to_ts
+from mediaflow_proxy.remuxer.ts_muxer import remux_fmp4_to_ts
 from mediaflow_proxy.configs import settings
 
 logger = logging.getLogger(__name__)

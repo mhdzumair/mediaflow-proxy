@@ -2,7 +2,7 @@
 Telegram MTProto proxy routes.
 
 Provides endpoints for streaming Telegram media:
-- /proxy/telegram/stream - Stream media from t.me links or file_id
+- /proxy/telegram/stream - Stream media from t.me links or file_id (&transcode=true for fMP4 audio transcode)
 - /proxy/telegram/info - Get media metadata
 - /proxy/telegram/status - Check session status
 - /proxy/telegram/session/* - Session string generation
@@ -16,10 +16,18 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
+
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 from mediaflow_proxy.configs import settings
+from mediaflow_proxy.remuxer.media_source import TelegramMediaSource
+from mediaflow_proxy.remuxer.transcode_handler import (
+    handle_transcode,
+    handle_transcode_hls_init,
+    handle_transcode_hls_playlist,
+    handle_transcode_hls_segment,
+)
 from mediaflow_proxy.utils.http_utils import (
     EnhancedStreamingResponse,
     ProxyRequestHeaders,
@@ -120,6 +128,8 @@ async def telegram_stream(
     message_id: Optional[int] = Query(None, description="Message ID (use with chat_id)"),
     file_id: Optional[str] = Query(None, description="Bot API file_id (requires file_size parameter)"),
     file_size: Optional[int] = Query(None, description="File size in bytes (required for file_id streaming)"),
+    transcode: bool = Query(False, description="Transcode to browser-compatible fMP4 (EAC3/AC3->AAC)"),
+    start: Optional[float] = Query(None, description="Seek start time in seconds (used with transcode=true)"),
     filename: Optional[str] = None,
 ):
     """
@@ -130,6 +140,12 @@ async def telegram_stream(
     - chat_id + message_id: Direct reference by IDs (e.g., chat_id=-100123456&message_id=789)
     - file_id + file_size: Direct streaming by Bot API file_id (requires file_size)
 
+    When transcode=true, the media is remuxed from MKV to standard MP4 with
+    browser-compatible audio (AAC). Video is copied without re-encoding.
+    Seeking is supported via standard HTTP Range requests (byte offsets are
+    converted to time positions using an estimated fMP4 size). The 'start'
+    query parameter can also be used for explicit time-based seeking.
+
     Args:
         request: The incoming HTTP request
         proxy_headers: Headers for proxy requests
@@ -139,10 +155,11 @@ async def telegram_stream(
         message_id: Message ID within the chat
         file_id: Bot API file_id (requires file_size parameter)
         file_size: File size in bytes (required for file_id streaming)
+        transcode: Transcode to browser-compatible format (EAC3/AC3->AAC)
         filename: Optional filename for Content-Disposition
 
     Returns:
-        Streaming response with media content
+        Streaming response with media content, or redirect to HLS manifest when transcoding
     """
     if not settings.enable_telegram:
         raise HTTPException(status_code=503, detail="Telegram proxy support is disabled")
@@ -189,6 +206,13 @@ async def telegram_stream(
         # This catches FileReferenceExpiredError early, before headers are sent
         if ref.file_id and not ref.message_id:
             await telegram_manager.validate_file_access(ref, file_size=file_size)
+
+        # Handle transcode mode: stream as fMP4 with transcoded audio
+        if transcode:
+            return await _handle_transcode(
+                request, ref, actual_file_size,
+                start_time=start, file_name=media_filename or "",
+            )
 
         # Parse range header
         range_header = request.headers.get("range")
@@ -324,6 +348,215 @@ async def telegram_stream(
 
         logger.exception(f"[telegram_stream] Unexpected error: {e}")
         raise HTTPException(status_code=500, detail=f"Internal error: {error_name}")
+
+
+async def _handle_transcode(
+    request: Request,
+    ref: TelegramMediaRef,
+    file_size: int,
+    start_time: float | None = None,
+    file_name: str = "",
+) -> Response:
+    """
+    Handle transcode mode: delegate to the shared transcode handler.
+
+    Wraps the Telegram media reference in a TelegramMediaSource and
+    passes it to the source-agnostic transcode handler which handles
+    cue probing, seeking, and pipeline selection.
+    """
+    source = TelegramMediaSource(ref, file_size, file_name=file_name)
+    return await handle_transcode(request, source, start_time=start_time)
+
+
+# ---------------------------------------------------------------------------
+# HLS transcode endpoints for Telegram sources
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_telegram_source(
+    d: str | None = None,
+    url: str | None = None,
+    chat_id: str | None = None,
+    message_id: int | None = None,
+    file_id: str | None = None,
+    file_size: int | None = None,
+    filename: str | None = None,
+    *,
+    use_single_client: bool = False,
+) -> TelegramMediaSource:
+    """
+    Resolve input parameters to a ``TelegramMediaSource``.
+
+    Args:
+        use_single_client: When ``True``, the returned source will use
+            Telethon's built-in single-connection downloader instead of
+            the parallel ``ParallelTransferrer``.  Should be ``True``
+            for HLS requests (playlist, init, segments) where each
+            request fetches a small byte range and spinning up multiple
+            DC connections per request is wasteful.
+    """
+    if not settings.enable_telegram:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="Telegram proxy support is disabled")
+
+    telegram_url = d or url
+
+    if not telegram_url and not file_id and not (chat_id and message_id):
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either 'd' (t.me URL), 'chat_id' + 'message_id', or 'file_id' + 'file_size'",
+        )
+
+    if telegram_url:
+        ref = parse_telegram_url(telegram_url)
+    elif chat_id and message_id:
+        try:
+            parsed_chat_id: int | str = int(chat_id)
+        except ValueError:
+            parsed_chat_id = chat_id
+        ref = TelegramMediaRef(chat_id=parsed_chat_id, message_id=message_id)
+    else:
+        if not file_size:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail="file_size is required when using file_id",
+            )
+        ref = TelegramMediaRef(file_id=file_id)
+
+    media_info = await telegram_manager.get_media_info(ref, file_size=file_size)
+    actual_file_size = media_info.file_size
+    media_filename = filename or media_info.file_name
+
+    return TelegramMediaSource(
+        ref, actual_file_size, file_name=media_filename or "",
+        use_single_client=use_single_client,
+    )
+
+
+@telegram_router.head("/telegram/transcode/playlist.m3u8")
+@telegram_router.get("/telegram/transcode/playlist.m3u8")
+async def telegram_transcode_hls_playlist(
+    request: Request,
+    d: Optional[str] = Query(None, description="t.me link or Telegram URL"),
+    url: Optional[str] = Query(None, description="Alias for 'd'"),
+    chat_id: Optional[str] = Query(None, description="Chat/Channel ID"),
+    message_id: Optional[int] = Query(None, description="Message ID"),
+    file_id: Optional[str] = Query(None, description="Bot API file_id"),
+    file_size: Optional[int] = Query(None, description="File size in bytes"),
+    filename: Optional[str] = Query(None, description="Optional filename"),
+):
+    """Generate an HLS VOD M3U8 playlist for a Telegram media file."""
+    source = await _resolve_telegram_source(
+        d, url, chat_id, message_id, file_id, file_size, filename,
+        use_single_client=True,
+    )
+
+    # Build sub-request params using the *resolved* file_id + file_size so
+    # that init/segment requests skip the Telegram API call for get_message.
+    base_params = _build_telegram_hls_resolved_params(request, source)
+    init_url = f"/proxy/telegram/transcode/init.mp4?{base_params}"
+    segment_url_template = f"/proxy/telegram/transcode/segment.m4s?{base_params}&seg={{seg}}&start_ms={{start_ms}}&end_ms={{end_ms}}"
+
+    return await handle_transcode_hls_playlist(
+        request, source, init_url=init_url, segment_url_template=segment_url_template,
+    )
+
+
+@telegram_router.head("/telegram/transcode/init.mp4")
+@telegram_router.get("/telegram/transcode/init.mp4")
+async def telegram_transcode_hls_init(
+    request: Request,
+    d: Optional[str] = Query(None, description="t.me link or Telegram URL"),
+    url: Optional[str] = Query(None, description="Alias for 'd'"),
+    chat_id: Optional[str] = Query(None, description="Chat/Channel ID"),
+    message_id: Optional[int] = Query(None, description="Message ID"),
+    file_id: Optional[str] = Query(None, description="Bot API file_id"),
+    file_size: Optional[int] = Query(None, description="File size in bytes"),
+    filename: Optional[str] = Query(None, description="Optional filename"),
+):
+    """Serve the fMP4 init segment for a Telegram media file."""
+    source = await _resolve_telegram_source(
+        d, url, chat_id, message_id, file_id, file_size, filename,
+        use_single_client=True,
+    )
+    return await handle_transcode_hls_init(request, source)
+
+
+@telegram_router.get("/telegram/transcode/segment.m4s")
+async def telegram_transcode_hls_segment(
+    request: Request,
+    start_ms: float = Query(..., description="Segment start time in milliseconds"),
+    end_ms: float = Query(..., description="Segment end time in milliseconds"),
+    seg: int | None = Query(None, description="Segment number (informational, for logging)"),
+    d: Optional[str] = Query(None, description="t.me link or Telegram URL"),
+    url: Optional[str] = Query(None, description="Alias for 'd'"),
+    chat_id: Optional[str] = Query(None, description="Chat/Channel ID"),
+    message_id: Optional[int] = Query(None, description="Message ID"),
+    file_id: Optional[str] = Query(None, description="Bot API file_id"),
+    file_size: Optional[int] = Query(None, description="File size in bytes"),
+    filename: Optional[str] = Query(None, description="Optional filename"),
+):
+    """Serve a single HLS fMP4 media segment for a Telegram media file."""
+    source = await _resolve_telegram_source(
+        d, url, chat_id, message_id, file_id, file_size, filename,
+        use_single_client=True,
+    )
+    return await handle_transcode_hls_segment(request, source, start_time_ms=start_ms, end_time_ms=end_ms, segment_number=seg)
+
+
+def _build_telegram_hls_params(request: Request) -> str:
+    """Build query string for Telegram HLS sub-requests, preserving all input params."""
+    from urllib.parse import quote
+    params = []
+    original = request.query_params
+    # Copy all original params except segment-specific ones (added per-segment)
+    _seg_keys = {"seg", "start_ms", "end_ms"}
+    for key in original:
+        if key not in _seg_keys:
+            params.append(f"{key}={quote(original[key], safe='')}")
+    return "&".join(params)
+
+
+def _build_telegram_hls_resolved_params(
+    request: Request,
+    source: "TelegramMediaSource",
+) -> str:
+    """
+    Build query string for HLS sub-request URLs using the *resolved* source.
+
+    Unlike ``_build_telegram_hls_params`` which blindly copies the original
+    query params, this version replaces chat_id/message_id/d/url with the
+    resolved file reference so that init and segment requests can skip the
+    expensive ``get_message()`` Telegram API call.
+
+    The original query params are used as a fallback for any extra parameters
+    (api_password, filename, etc.).
+    """
+    from urllib.parse import quote
+
+    ref = source._ref
+    params: dict[str, str] = {}
+
+    # Carry over non-identifying params from the original request
+    # (api_password, filename, etc.)
+    _skip_keys = {"d", "url", "chat_id", "message_id", "file_id", "file_size", "seg", "start_ms", "end_ms"}
+    for key in request.query_params:
+        if key not in _skip_keys:
+            params[key] = request.query_params[key]
+
+    # Use the resolved reference -- prefer chat_id + message_id (most reliable
+    # for streaming), but also include file_size from the resolved source.
+    if ref.chat_id is not None and ref.message_id is not None:
+        params["chat_id"] = str(ref.chat_id)
+        params["message_id"] = str(ref.message_id)
+    elif ref.file_id:
+        params["file_id"] = ref.file_id
+    # Always include file_size -- it prevents unnecessary lookups
+    params["file_size"] = str(source.file_size)
+
+    return "&".join(f"{k}={quote(v, safe='')}" for k, v in params.items())
 
 
 @telegram_router.get("/telegram/info")
