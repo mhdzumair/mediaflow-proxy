@@ -2353,7 +2353,13 @@
                             hls.destroy();
                             delete _hlsInstances[prefix];
                             if (playerDiv) {
-                                playerDiv.innerHTML = '<p class="text-red-400 p-4 text-sm">Playback failed — server may be unreachable. Close and try again later.</p>';
+                                const video = playerDiv.querySelector('video');
+                                if (video) {
+                                    video.replaceWith(Object.assign(document.createElement('p'), {
+                                        className: 'text-red-400 p-4 text-sm',
+                                        textContent: 'Playback failed \u2014 server may be unreachable. Close and try again later.',
+                                    }));
+                                }
                             }
                             return;
                         }

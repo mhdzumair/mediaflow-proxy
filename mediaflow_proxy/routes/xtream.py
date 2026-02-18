@@ -779,6 +779,8 @@ async def movie_stream(
         return await _handle_xtream_hls_playlist(request, upstream_url, proxy_headers)
     if hls_init:
         return await _handle_xtream_hls_init(request, upstream_url, proxy_headers)
+    if (start_ms is None) != (end_ms is None):
+        raise HTTPException(status_code=400, detail="Both start_ms and end_ms are required for segment requests")
     if start_ms is not None and end_ms is not None:
         return await _handle_xtream_hls_segment(request, upstream_url, proxy_headers, start_ms, end_ms, seg)
     if transcode:
@@ -819,6 +821,8 @@ async def series_stream(
         return await _handle_xtream_hls_playlist(request, upstream_url, proxy_headers)
     if hls_init:
         return await _handle_xtream_hls_init(request, upstream_url, proxy_headers)
+    if (start_ms is None) != (end_ms is None):
+        raise HTTPException(status_code=400, detail="Both start_ms and end_ms are required for segment requests")
     if start_ms is not None and end_ms is not None:
         return await _handle_xtream_hls_segment(request, upstream_url, proxy_headers, start_ms, end_ms, seg)
     if transcode:
@@ -1059,6 +1063,8 @@ async def movie_stream_no_ext(
         return await _handle_xtream_hls_playlist(request, upstream_url, proxy_headers)
     if hls_init:
         return await _handle_xtream_hls_init(request, upstream_url, proxy_headers)
+    if (start_ms is None) != (end_ms is None):
+        raise HTTPException(status_code=400, detail="Both start_ms and end_ms are required for segment requests")
     if start_ms is not None and end_ms is not None:
         return await _handle_xtream_hls_segment(request, upstream_url, proxy_headers, start_ms, end_ms, seg)
     if transcode:
@@ -1098,6 +1104,8 @@ async def series_stream_no_ext(
         return await _handle_xtream_hls_playlist(request, upstream_url, proxy_headers)
     if hls_init:
         return await _handle_xtream_hls_init(request, upstream_url, proxy_headers)
+    if (start_ms is None) != (end_ms is None):
+        raise HTTPException(status_code=400, detail="Both start_ms and end_ms are required for segment requests")
     if start_ms is not None and end_ms is not None:
         return await _handle_xtream_hls_segment(request, upstream_url, proxy_headers, start_ms, end_ms, seg)
     if transcode:

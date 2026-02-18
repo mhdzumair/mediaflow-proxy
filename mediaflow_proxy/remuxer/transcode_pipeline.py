@@ -198,7 +198,7 @@ async def stream_transcode_fmp4(
 
                 # Ensure AVCC format and skip non-VCL NAL-only samples
                 sample_data = annexb_to_avcc(frame.data, filter_ps=False)
-                if not sample_data or not _has_valid_video_nal(sample_data):
+                if not sample_data or not _has_valid_video_nal(sample_data, video_track.codec_id):
                     continue
 
                 muxer.add_video_sample(
@@ -479,7 +479,7 @@ async def stream_segment_fmp4(
                     continue
 
                 # Skip non-VCL samples (SEI-only, filler, padding).
-                if not _has_valid_video_nal(sample_data):
+                if not _has_valid_video_nal(sample_data, video_track.codec_id):
                     continue
 
                 # Gate on first keyframe: fMP4 segments must start with a sync sample.
@@ -616,23 +616,25 @@ async def stream_segment_fmp4(
 
 # H.264 VCL NAL unit types (actual video slices)
 _H264_VCL_TYPES = frozenset({1, 2, 3, 4, 5})  # Non-IDR, Part A/B/C, IDR
+# HEVC VCL NAL unit types (BLA through CRA, 0-21)
+_HEVC_VCL_TYPES = frozenset(range(0, 22))
 
 
-def _has_valid_video_nal(data: bytes) -> bool:
+def _has_valid_video_nal(data: bytes, codec_id: str = CODEC_ID_H264) -> bool:
     """
-    Check if AVCC-formatted sample data contains at least one valid H.264
-    VCL (video coding layer) NAL unit.
+    Check if AVCC/HVCC-formatted sample data contains at least one VCL NAL.
 
-    Some MKV files contain SimpleBlocks on the video track that hold
-    non-video data (SEI-only, filler, or corrupt padding). Emitting these
-    as separate fMP4 samples causes "missing picture in access unit"
-    errors because the player expects every sample to decode a picture.
+    For H.264: VCL types 1-5 (Non-IDR through IDR slice).
+    For HEVC: VCL types 0-21 (BLA_W_LP through CRA_NUT).
 
-    Returns True if the sample has at least one NAL with type 1-5
-    (Non-IDR or IDR slice) and forbidden_zero_bit == 0.
+    Returns True if at least one qualifying NAL is present.
     """
     if len(data) < 5:
         return False
+
+    is_hevc = codec_id == CODEC_ID_H265
+    vcl_types = _HEVC_VCL_TYPES if is_hevc else _H264_VCL_TYPES
+
     pos = 0
     size = len(data)
     while pos + 4 < size:
@@ -640,9 +642,13 @@ def _has_valid_video_nal(data: bytes) -> bool:
         if nal_len <= 0 or nal_len > size - pos - 4:
             break
         nal_byte = data[pos + 4]
-        forbidden = (nal_byte >> 7) & 1
-        nal_type = nal_byte & 0x1F
-        if forbidden == 0 and nal_type in _H264_VCL_TYPES:
+        if is_hevc:
+            forbidden = (nal_byte >> 7) & 1
+            nal_type = (nal_byte >> 1) & 0x3F
+        else:
+            forbidden = (nal_byte >> 7) & 1
+            nal_type = nal_byte & 0x1F
+        if forbidden == 0 and nal_type in vcl_types:
             return True
         pos += 4 + nal_len
     return False

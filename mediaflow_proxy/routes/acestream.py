@@ -404,6 +404,7 @@ async def acestream_ts_stream(
             # crashes from the Python server process.
 
             if request.method == "HEAD":
+                await acestream_manager.release_session(infohash)
                 return Response(
                     status_code=200,
                     headers={

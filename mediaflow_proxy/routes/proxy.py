@@ -650,9 +650,12 @@ async def proxy_stream_endpoint(
         destination = dlhd_result["destination_url"]
         proxy_headers.request.update(dlhd_result.get("request_headers", {}))
 
-    # Handle transcode mode
+    # Handle transcode mode — transcode uses time-based seeking, not byte ranges
     if transcode:
-        source = HTTPMediaSource(url=destination, headers=dict(proxy_headers.request))
+        transcode_headers = dict(proxy_headers.request)
+        transcode_headers.pop("range", None)
+        transcode_headers.pop("if-range", None)
+        source = HTTPMediaSource(url=destination, headers=transcode_headers)
         await source.resolve_file_size()
         return await handle_transcode(request, source, start_time=start)
 

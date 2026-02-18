@@ -477,6 +477,23 @@ async def probe_mp4_moov(
                         mdat_offset = abs_offset
                         mdat_size = atom_size
 
+                # If the initial scan yielded no moov (tail_start may land
+                # inside a large mdat payload producing garbage atom headers),
+                # resync by scanning 8-byte aligned windows for b"moov".
+                if moov_offset < 0:
+                    needle = b"moov"
+                    search_pos = 0
+                    while search_pos + 8 <= len(tail_data):
+                        idx = tail_data.find(needle, search_pos)
+                        if idx < 0 or idx < 4:
+                            break
+                        candidate_size = struct.unpack_from(">I", tail_data, idx - 4)[0]
+                        if 8 < candidate_size <= _MAX_MOOV_SIZE:
+                            moov_offset = tail_start + idx - 4
+                            moov_size = candidate_size
+                            break
+                        search_pos = idx + 4
+
         if moov_offset < 0:
             logger.info("[container_probe] No moov atom found in MP4")
             return None

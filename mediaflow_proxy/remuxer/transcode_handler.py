@@ -80,6 +80,7 @@ _HEADER_PROBE_SIZE = 64 * 1024  # 64 KB
 # is populated.  Keyed by cache_key.
 _probe_locks: dict[str, asyncio.Lock] = {}
 _probe_locks_lock = asyncio.Lock()  # protects the dict itself
+_MAX_PROBE_LOCKS = 256
 
 
 async def _get_probe_lock(cache_key: str) -> asyncio.Lock:
@@ -87,6 +88,11 @@ async def _get_probe_lock(cache_key: str) -> asyncio.Lock:
     async with _probe_locks_lock:
         lock = _probe_locks.get(cache_key)
         if lock is None:
+            # Evict idle locks when the dict grows too large.
+            if len(_probe_locks) >= _MAX_PROBE_LOCKS:
+                to_remove = [k for k, v in _probe_locks.items() if not v.locked()]
+                for k in to_remove[: len(to_remove) // 2 or 1]:
+                    del _probe_locks[k]
             lock = asyncio.Lock()
             _probe_locks[cache_key] = lock
         return lock
@@ -286,7 +292,6 @@ async def handle_transcode(
     probe = await _probe_source(source)
     cue_index = probe.cue_index
     mp4_index = probe.mp4_index
-    needs_video_transcode = probe.needs_video_transcode
 
     # ── Phase 2: Determine pipeline parameters ───────────────────────
 
@@ -372,7 +377,7 @@ async def handle_transcode(
     else:
         logger.info("[transcode_handler] No MKV Cues or MP4 moov, streaming from beginning")
 
-    stream_limit = file_size - stream_offset if file_size > 0 else None
+    stream_limit = max(0, file_size - stream_offset) if file_size > 0 else None
 
     # ── Phase 3: HEAD request ─────────────────────────────────────────
 
@@ -588,10 +593,9 @@ def _find_segment(
     segments: list[HLSSegmentInfo],
     start_time_ms: float,
 ) -> HLSSegmentInfo | None:
-    """Find the segment whose start_ms matches *start_time_ms*."""
-    target = int(start_time_ms)
+    """Find the segment whose start_ms matches *start_time_ms* (within 1ms tolerance)."""
     for seg in segments:
-        if int(seg.start_ms) == target:
+        if abs(seg.start_ms - start_time_ms) < 1.0:
             return seg
     return None
 
@@ -627,8 +631,14 @@ async def _build_segment_source(
         yield mp4.moov_data
         async for chunk in source.stream(offset=seg.byte_offset, limit=byte_length):
             yield chunk
-    elif probe.cue_index and probe.cue_index.seek_header:
-        # ---- MKV: prepend synthetic seek header ----
+    elif probe.cue_index:
+        if not probe.cue_index.seek_header:
+            logger.error(
+                "[build_segment_source] MKV cue_index present but seek_header is empty; "
+                "cannot build a valid segment source for offset %d",
+                seg.byte_offset,
+            )
+            return
         yield probe.cue_index.seek_header
         async for chunk in source.stream(offset=seg.byte_offset, limit=byte_length):
             yield chunk

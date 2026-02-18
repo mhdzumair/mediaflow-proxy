@@ -27,8 +27,6 @@ BROWSER_AUDIO_CODECS = frozenset(
         "A_AAC/MPEG2/LC",
         "A_AAC/MPEG4/LC",
         "aac",  # FFmpeg/PyAV name
-        "mp3",  # MP3 -- universal
-        "A_MPEG/L3",
     }
 )
 
@@ -103,6 +101,7 @@ AUDIO_NEEDS_TRANSCODE = frozenset(
         "dca",
         "truehd",
         "mlp",
+        "mp3",
         "opus",
         "vorbis",
         "flac",

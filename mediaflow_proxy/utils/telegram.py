@@ -1182,6 +1182,9 @@ class TelegramSessionManager:
         client = await self.get_client()
         file_location, dc_id, actual_file_size = await self._resolve_file_location(ref, file_size)
 
+        if offset >= actual_file_size:
+            return
+
         if limit is None:
             limit = actual_file_size - offset
 

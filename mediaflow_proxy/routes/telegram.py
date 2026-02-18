@@ -140,11 +140,13 @@ async def telegram_stream(
     - chat_id + message_id: Direct reference by IDs (e.g., chat_id=-100123456&message_id=789)
     - file_id + file_size: Direct streaming by Bot API file_id (requires file_size)
 
-    When transcode=true, the media is remuxed from MKV to standard MP4 with
-    browser-compatible audio (AAC). Video is copied without re-encoding.
-    Seeking is supported via standard HTTP Range requests (byte offsets are
-    converted to time positions using an estimated fMP4 size). The 'start'
-    query parameter can also be used for explicit time-based seeking.
+    When transcode=true, the media is remuxed to fragmented MP4 with
+    browser-compatible codecs. Audio is transcoded to AAC. Video is passed
+    through when the source codec is already browser-compatible (H.264);
+    otherwise it is re-encoded to H.264.  Seeking is supported via standard
+    HTTP Range requests (byte offsets are converted to time positions using
+    an estimated fMP4 size). The 'start' query parameter can also be used
+    for explicit time-based seeking.
 
     Args:
         request: The incoming HTTP request
