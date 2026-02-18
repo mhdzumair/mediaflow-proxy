@@ -160,6 +160,35 @@ async def close_redis():
 
 
 # =============================================================================
+# Instance Namespace Helper
+# =============================================================================
+# Some cached data is bound to the outgoing IP of the pod that produced it
+# (e.g. extractor results resolved via the pod's egress IP). Sharing these
+# entries across pods in a multi-instance deployment causes other pods to serve
+# stale/wrong URLs.
+#
+# Set CACHE_NAMESPACE (env: CACHE_NAMESPACE) to a unique value per pod (e.g.
+# pod name, hostname, or any discriminator). Instance-scoped keys are then
+# stored under  "<namespace>:<original_key>", while fully-shared keys (MPD,
+# init segments, media segments, locks, stream gates) remain unchanged.
+
+
+def make_instance_key(key: str) -> str:
+    """Prefix *key* with the configured instance namespace.
+
+    Use this for cache/coordination keys that must NOT be shared across pods
+    because the underlying data is specific to a pod's outgoing IP (e.g.
+    extractor results).  Common content (MPD, init/media segments) should
+    never be namespaced.
+
+    If ``settings.cache_namespace`` is not set the key is returned unchanged,
+    so single-instance deployments are unaffected.
+    """
+    ns = settings.cache_namespace
+    return f"{ns}:{key}" if ns else key
+
+
+# =============================================================================
 # Stream Gate (Distributed Lock)
 # =============================================================================
 # Serializes upstream connection handshakes per-URL across all workers.
@@ -718,3 +747,115 @@ async def is_in_cooldown(key: str) -> bool:
 
     cooldown_key = _cooldown_key(key)
     return await r.exists(cooldown_key) > 0
+
+
+# =============================================================================
+# HLS Transcode Session (Cross-Worker)
+# =============================================================================
+# Per-segment HLS transcode caching.
+# Each segment is independently transcoded and cached. Segment output metadata
+# (video/audio DTS, sequence number) is stored so consecutive segments can
+# maintain timeline continuity without a persistent pipeline.
+
+HLS_SEG_PREFIX = b"mfp:hls_seg:"
+HLS_INIT_PREFIX = b"mfp:hls_init:"
+HLS_SEG_META_PREFIX = "mfp:hls_smeta:"
+
+HLS_SEG_TTL = 60  # 60 s -- short-lived; only for immediate retry/re-request
+HLS_INIT_TTL = 3600  # 1 hour -- stable for the viewing session
+HLS_SEG_META_TTL = 3600  # 1 hour -- needed for next-segment continuity
+
+
+def _hls_seg_key(cache_key: str, seg_index: int) -> bytes:
+    return HLS_SEG_PREFIX + f"{cache_key}:{seg_index}".encode()
+
+
+def _hls_init_key(cache_key: str) -> bytes:
+    return HLS_INIT_PREFIX + cache_key.encode()
+
+
+def _hls_seg_meta_key(cache_key: str, seg_index: int) -> str:
+    return f"{HLS_SEG_META_PREFIX}{cache_key}:{seg_index}"
+
+
+async def hls_get_segment(cache_key: str, seg_index: int) -> Optional[bytes]:
+    """Get a cached HLS segment from Redis. Returns None if unavailable."""
+    r = await get_redis_binary()
+    if r is None:
+        return None
+    try:
+        return await r.get(_hls_seg_key(cache_key, seg_index))
+    except Exception:
+        return None
+
+
+async def hls_set_segment(cache_key: str, seg_index: int, data: bytes) -> None:
+    """Store an HLS segment in Redis with short TTL. No-op if Redis unavailable."""
+    r = await get_redis_binary()
+    if r is None:
+        return
+    try:
+        await r.set(_hls_seg_key(cache_key, seg_index), data, ex=HLS_SEG_TTL)
+    except Exception:
+        logger.debug("[Redis] Failed to cache HLS segment %d", seg_index)
+
+
+async def hls_get_init(cache_key: str) -> Optional[bytes]:
+    """Get the cached HLS init segment from Redis."""
+    r = await get_redis_binary()
+    if r is None:
+        return None
+    try:
+        return await r.get(_hls_init_key(cache_key))
+    except Exception:
+        return None
+
+
+async def hls_set_init(cache_key: str, data: bytes) -> None:
+    """Store the HLS init segment in Redis."""
+    r = await get_redis_binary()
+    if r is None:
+        return
+    try:
+        await r.set(_hls_init_key(cache_key), data, ex=HLS_INIT_TTL)
+    except Exception:
+        logger.debug("[Redis] Failed to cache HLS init segment")
+
+
+async def hls_get_segment_meta(cache_key: str, seg_index: int) -> Optional[dict]:
+    """
+    Get per-segment output metadata from Redis.
+
+    Returns a dict with keys like ``video_dts_ms``, ``audio_dts_ms``,
+    ``sequence_number``, or None if unavailable.
+    """
+    r = await get_redis()
+    if r is None:
+        return None
+    try:
+        raw = await r.get(_hls_seg_meta_key(cache_key, seg_index))
+        if raw:
+            return json.loads(raw)
+    except Exception:
+        pass
+    return None
+
+
+async def hls_set_segment_meta(cache_key: str, seg_index: int, meta: dict) -> None:
+    """
+    Store per-segment output metadata in Redis.
+
+    ``meta`` should contain keys like ``video_dts_ms``, ``audio_dts_ms``,
+    ``sequence_number`` so the next segment can continue the timeline.
+    """
+    r = await get_redis()
+    if r is None:
+        return
+    try:
+        await r.set(
+            _hls_seg_meta_key(cache_key, seg_index),
+            json.dumps(meta),
+            ex=HLS_SEG_META_TTL,
+        )
+    except Exception:
+        logger.debug("[Redis] Failed to set HLS segment meta %d", seg_index)

@@ -487,6 +487,150 @@ class ParallelTransferrer:
             await self._cleanup()
 
 
+class _SingleSenderPool:
+    """
+    Pool of persistent ``MTProtoSender`` connections per DC.
+
+    Instead of creating a new connection for every HLS segment request
+    (which involves handshake + auth export overhead), this pool maintains
+    a queue of idle senders per DC. When a caller needs a sender, it
+    borrows one from the pool (or creates a new one if the pool is empty).
+    After use, the sender is returned to the pool for reuse.
+
+    Senders that have been idle longer than ``_MAX_IDLE_SECONDS`` are
+    discarded on checkout.
+    """
+
+    _MAX_IDLE_SECONDS = 120.0  # discard senders idle longer than this
+
+    def __init__(self) -> None:
+        # dc_id -> list of (sender, auth_key, last_used_monotonic)
+        self._pool: dict[int, list[tuple[MTProtoSender, AuthKey, float]]] = {}
+        self._lock = asyncio.Lock()
+        # Cached auth keys per DC -- shared across all senders.
+        self._auth_keys: dict[int, AuthKey] = {}
+
+    async def acquire(
+        self,
+        client: TelegramClient,
+        dc_id: int,
+    ) -> tuple[MTProtoSender, AuthKey]:
+        """
+        Borrow a connected ``MTProtoSender`` for *dc_id*.
+
+        Returns an existing idle sender if one is available, otherwise
+        creates a new one (handling auth export if needed).
+        """
+        import time as _time
+
+        async with self._lock:
+            bucket = self._pool.get(dc_id, [])
+            now = _time.monotonic()
+            # Try to find a live sender
+            while bucket:
+                sender, auth_key, last_used = bucket.pop()
+                idle = now - last_used
+                if idle > self._MAX_IDLE_SECONDS:
+                    # Stale -- disconnect quietly
+                    logger.debug("[sender_pool] Discarding stale sender for DC %d (idle %.0fs)", dc_id, idle)
+                    try:
+                        await sender.disconnect()
+                    except Exception:
+                        pass
+                    continue
+                # Check if still connected
+                if sender.is_connected():
+                    logger.debug("[sender_pool] Reusing sender for DC %d (idle %.1fs)", dc_id, idle)
+                    return sender, auth_key
+                else:
+                    logger.debug("[sender_pool] Sender for DC %d disconnected, discarding", dc_id)
+                    try:
+                        await sender.disconnect()
+                    except Exception:
+                        pass
+
+        # No reusable sender -- create a new one
+        logger.debug("[sender_pool] Creating new sender for DC %d", dc_id)
+        return await self._create_sender(client, dc_id)
+
+    async def _create_sender(
+        self,
+        client: TelegramClient,
+        dc_id: int,
+    ) -> tuple[MTProtoSender, AuthKey]:
+        """Create a new ``MTProtoSender`` with auth export if needed."""
+        auth_key = self._auth_keys.get(dc_id)
+        if auth_key is None and dc_id == client.session.dc_id:
+            auth_key = client.session.auth_key
+
+        dc = await client._get_dc(dc_id)
+        sender = MTProtoSender(auth_key, loggers=client._log)
+        await sender.connect(
+            client._connection(
+                dc.ip_address,
+                dc.port,
+                dc.id,
+                loggers=client._log,
+                proxy=client._proxy,
+            )
+        )
+        if not auth_key:
+            logger.debug("[sender_pool] Exporting auth to DC %d", dc_id)
+            auth = await client(ExportAuthorizationRequest(dc_id))
+            client._init_request.query = ImportAuthorizationRequest(id=auth.id, bytes=auth.bytes)
+            req = InvokeWithLayerRequest(LAYER, client._init_request)
+            await sender.send(req)
+            auth_key = sender.auth_key
+            self._auth_keys[dc_id] = auth_key
+        return sender, auth_key
+
+    async def release(
+        self,
+        dc_id: int,
+        sender: MTProtoSender,
+        auth_key: AuthKey,
+    ) -> None:
+        """Return a sender to the pool for reuse."""
+        import time as _time
+
+        # Cache auth key
+        if auth_key is not None:
+            self._auth_keys[dc_id] = auth_key
+
+        if not sender.is_connected():
+            logger.debug("[sender_pool] Sender for DC %d disconnected, not returning to pool", dc_id)
+            try:
+                await sender.disconnect()
+            except Exception:
+                pass
+            return
+
+        async with self._lock:
+            bucket = self._pool.setdefault(dc_id, [])
+            bucket.append((sender, auth_key, _time.monotonic()))
+            logger.debug("[sender_pool] Returned sender to pool for DC %d (pool size=%d)", dc_id, len(bucket))
+
+    async def discard(self, sender: MTProtoSender) -> None:
+        """Disconnect and discard a sender without returning it to the pool."""
+        try:
+            await sender.disconnect()
+        except Exception:
+            pass
+
+    async def close_all(self) -> None:
+        """Disconnect all pooled senders."""
+        async with self._lock:
+            for dc_id, bucket in self._pool.items():
+                for sender, _, _ in bucket:
+                    try:
+                        await sender.disconnect()
+                    except Exception:
+                        pass
+                bucket.clear()
+            self._pool.clear()
+            self._auth_keys.clear()
+
+
 class TelegramSessionManager:
     """
     Manages the Telethon client session.
@@ -496,12 +640,20 @@ class TelegramSessionManager:
     - Session persistence via StringSession
     - Automatic reconnection on disconnect
     - Thread-safe with asyncio lock
+    - Persistent sender pool for HLS segment downloads
     """
+
+    # Cache TTL for get_media_info results (seconds)
+    _MEDIA_INFO_CACHE_TTL = 3600  # 1 hour
 
     def __init__(self):
         self._client: Optional[TelegramClient] = None
         self._lock = asyncio.Lock()
         self._initialized = False
+        # In-memory cache: key → (MediaInfo, expiry_timestamp)
+        self._media_info_cache: dict[str, tuple["MediaInfo", float]] = {}
+        # Persistent sender pool for single-connection downloads (HLS).
+        self._sender_pool = _SingleSenderPool()
 
     async def get_client(self) -> TelegramClient:
         """
@@ -629,9 +781,21 @@ class TelegramSessionManager:
                 attributes=[],
             ), decoded.dc_id
 
+    def _media_info_cache_key(self, ref: TelegramMediaRef) -> str:
+        """Derive an in-memory cache key for a TelegramMediaRef."""
+        if ref.file_id and not ref.message_id:
+            return f"fid:{ref.file_id}"
+        if ref.chat_id is not None and ref.message_id is not None:
+            return f"chat:{ref.chat_id}:msg:{ref.message_id}"
+        return ""
+
     async def get_media_info(self, ref: TelegramMediaRef, file_size: Optional[int] = None) -> MediaInfo:
         """
         Get information about a media file.
+
+        Results are cached in-memory (with TTL) to avoid repeated Telegram API
+        calls for the same media -- especially important for HLS, where each
+        sub-request (playlist, init, segments) resolves the same source.
 
         Args:
             ref: TelegramMediaRef pointing to the media
@@ -640,6 +804,33 @@ class TelegramSessionManager:
         Returns:
             MediaInfo with file details
         """
+        # Check in-memory cache first
+        import time
+
+        ck = self._media_info_cache_key(ref)
+        if ck:
+            cached = self._media_info_cache.get(ck)
+            if cached is not None:
+                info, expiry = cached
+                if time.monotonic() < expiry:
+                    return info
+                else:
+                    del self._media_info_cache[ck]
+
+        info = await self._get_media_info_uncached(ref, file_size)
+
+        # Store in cache
+        if ck:
+            self._media_info_cache[ck] = (info, time.monotonic() + self._MEDIA_INFO_CACHE_TTL)
+
+        return info
+
+    async def _get_media_info_uncached(
+        self,
+        ref: TelegramMediaRef,
+        file_size: Optional[int] = None,
+    ) -> MediaInfo:
+        """Uncached implementation of get_media_info."""
         # Handle file_id reference
         if ref.file_id and not ref.message_id:
             media, dc_id = self.resolve_file_id(ref.file_id)
@@ -835,6 +1026,91 @@ class TelegramSessionManager:
                 # Clean up transferrer connections
                 await transferrer._cleanup()
 
+    async def _resolve_file_location(
+        self,
+        ref: TelegramMediaRef,
+        file_size: Optional[int] = None,
+    ) -> tuple["TypeLocation", int, int]:
+        """
+        Resolve a ``TelegramMediaRef`` into a Telegram file location.
+
+        Returns:
+            ``(file_location, dc_id, actual_file_size)``
+        """
+        # Handle file_id reference (no message needed, fast local parse)
+        if ref.file_id and not ref.message_id:
+            media, dc_id = self.resolve_file_id(ref.file_id)
+
+            if isinstance(media, Document):
+                actual_file_size = file_size or media.size
+                if actual_file_size == 0:
+                    raise ValueError(
+                        "file_size parameter is required when streaming by file_id. "
+                        "The file_id doesn't contain size information."
+                    )
+                file_location = InputDocumentFileLocation(
+                    id=media.id,
+                    access_hash=media.access_hash,
+                    file_reference=media.file_reference,
+                    thumb_size="",
+                )
+                return file_location, dc_id, actual_file_size
+
+            elif isinstance(media, Photo):
+                largest = max(media.sizes, key=lambda s: getattr(s, "size", 0) if hasattr(s, "size") else 0)
+                actual_file_size = file_size or getattr(largest, "size", 0)
+                if actual_file_size == 0:
+                    raise ValueError(
+                        "file_size parameter is required when streaming by file_id. "
+                        "The file_id doesn't contain size information."
+                    )
+                file_location = InputPhotoFileLocation(
+                    id=media.id,
+                    access_hash=media.access_hash,
+                    file_reference=media.file_reference,
+                    thumb_size=getattr(largest, "type", "x"),
+                )
+                return file_location, dc_id, actual_file_size
+
+            else:
+                raise ValueError(f"Unsupported media type from file_id: {type(media)}")
+
+        # Handle message-based reference (requires Telegram API call)
+        message = await self.get_message(ref)
+
+        if not message.media:
+            raise ValueError(f"Message {ref.message_id} does not contain media")
+
+        if isinstance(message.media, MessageMediaDocument):
+            doc = message.media.document
+            if not isinstance(doc, Document):
+                raise ValueError("Invalid document")
+
+            file_location = InputDocumentFileLocation(
+                id=doc.id,
+                access_hash=doc.access_hash,
+                file_reference=doc.file_reference,
+                thumb_size="",
+            )
+            return file_location, doc.dc_id, doc.size
+
+        elif isinstance(message.media, MessageMediaPhoto):
+            photo = message.media.photo
+            if not photo:
+                raise ValueError("Invalid photo")
+
+            largest = max(photo.sizes, key=lambda s: getattr(s, "size", 0) if hasattr(s, "size") else 0)
+            file_location = InputPhotoFileLocation(
+                id=photo.id,
+                access_hash=photo.access_hash,
+                file_reference=photo.file_reference,
+                thumb_size=getattr(largest, "type", ""),
+            )
+            return file_location, photo.dc_id, getattr(largest, "size", 0)
+
+        else:
+            raise ValueError(f"Unsupported media type: {type(message.media)}")
+
     async def stream_media(
         self,
         ref: TelegramMediaRef,
@@ -843,7 +1119,14 @@ class TelegramSessionManager:
         file_size: Optional[int] = None,
     ) -> AsyncGenerator[bytes, None]:
         """
-        Stream media content with parallel downloads.
+        Stream media content with **parallel** downloads (fast Telethon).
+
+        Creates multiple MTProtoSender connections to the file's DC for
+        maximum throughput.  Best suited for large/full-file downloads
+        (e.g. the non-transcode ``/proxy/telegram/stream`` endpoint).
+
+        For small byte-range fetches (HLS segments) use
+        ``stream_media_single`` instead.
 
         Args:
             ref: TelegramMediaRef pointing to the media
@@ -855,102 +1138,114 @@ class TelegramSessionManager:
             Chunks of media data
         """
         client = await self.get_client()
+        file_location, dc_id, actual_file_size = await self._resolve_file_location(ref, file_size)
 
-        # Handle file_id reference (no message needed)
-        if ref.file_id and not ref.message_id:
-            media, dc_id = self.resolve_file_id(ref.file_id)
-
-            if isinstance(media, Document):
-                actual_file_size = file_size or media.size
-                if actual_file_size == 0:
-                    raise ValueError(
-                        "file_size parameter is required when streaming by file_id. "
-                        "The file_id doesn't contain size information."
-                    )
-
-                file_location = InputDocumentFileLocation(
-                    id=media.id,
-                    access_hash=media.access_hash,
-                    file_reference=media.file_reference,  # Empty, but may still work
-                    thumb_size="",
-                )
-
-            elif isinstance(media, Photo):
-                largest = max(media.sizes, key=lambda s: getattr(s, "size", 0) if hasattr(s, "size") else 0)
-                actual_file_size = file_size or getattr(largest, "size", 0)
-                if actual_file_size == 0:
-                    raise ValueError(
-                        "file_size parameter is required when streaming by file_id. "
-                        "The file_id doesn't contain size information."
-                    )
-
-                file_location = InputPhotoFileLocation(
-                    id=media.id,
-                    access_hash=media.access_hash,
-                    file_reference=media.file_reference,  # Empty, but may still work
-                    thumb_size=getattr(largest, "type", "x"),
-                )
-            else:
-                raise ValueError(f"Unsupported media type from file_id: {type(media)}")
-
-            # Use parallel transferrer for download with guaranteed cleanup
-            transferrer = ParallelTransferrer(client, dc_id)
-            try:
-                async for chunk in transferrer.download(file_location, actual_file_size, offset=offset, limit=limit):
-                    yield chunk
-            finally:
-                await transferrer._cleanup()
-            return
-
-        # Handle message-based reference
-        message = await self.get_message(ref)
-
-        if not message.media:
-            raise ValueError(f"Message {ref.message_id} does not contain media")
-
-        # Get document/photo and create file location
-        if isinstance(message.media, MessageMediaDocument):
-            doc = message.media.document
-            if not isinstance(doc, Document):
-                raise ValueError("Invalid document")
-
-            actual_file_size = doc.size
-            dc_id = doc.dc_id
-            file_location = InputDocumentFileLocation(
-                id=doc.id,
-                access_hash=doc.access_hash,
-                file_reference=doc.file_reference,
-                thumb_size="",
-            )
-
-        elif isinstance(message.media, MessageMediaPhoto):
-            photo = message.media.photo
-            if not photo:
-                raise ValueError("Invalid photo")
-
-            # Get largest size
-            largest = max(photo.sizes, key=lambda s: getattr(s, "size", 0) if hasattr(s, "size") else 0)
-            actual_file_size = getattr(largest, "size", 0)
-            dc_id = photo.dc_id
-            file_location = InputPhotoFileLocation(
-                id=photo.id,
-                access_hash=photo.access_hash,
-                file_reference=photo.file_reference,
-                thumb_size=getattr(largest, "type", ""),
-            )
-        else:
-            raise ValueError(f"Unsupported media type: {type(message.media)}")
-
-        # Use parallel transferrer for download with guaranteed cleanup
         transferrer = ParallelTransferrer(client, dc_id)
         try:
-            async for chunk in transferrer.download(file_location, actual_file_size, offset=offset, limit=limit):
+            async for chunk in transferrer.download(
+                file_location,
+                actual_file_size,
+                offset=offset,
+                limit=limit,
+            ):
                 yield chunk
         finally:
             await transferrer._cleanup()
 
+    async def stream_media_single(
+        self,
+        ref: TelegramMediaRef,
+        offset: int = 0,
+        limit: Optional[int] = None,
+        file_size: Optional[int] = None,
+    ) -> AsyncGenerator[bytes, None]:
+        """
+        Stream media content over a **pooled** single MTProto connection.
+
+        Borrows a persistent ``MTProtoSender`` from ``_SingleSenderPool``
+        for the target DC.  The sender is returned to the pool after the
+        download completes so the next request reuses the same TCP
+        connection (no handshake, no ``ExportAuthorizationRequest``).
+
+        This is ideal for small byte-range fetches (HLS segments, probe
+        headers) where spinning up connections per request is wasteful.
+
+        Args:
+            ref: TelegramMediaRef pointing to the media
+            offset: Byte offset to start from
+            limit: Number of bytes to download (None for entire file)
+            file_size: Optional file size (required for file_id streaming)
+
+        Yields:
+            Chunks of media data
+        """
+        client = await self.get_client()
+        file_location, dc_id, actual_file_size = await self._resolve_file_location(ref, file_size)
+
+        if offset >= actual_file_size:
+            return
+
+        if limit is None:
+            limit = actual_file_size - offset
+
+        part_size = int(utils.get_appropriated_part_size(actual_file_size) * 1024)
+        aligned_offset = (offset // part_size) * part_size
+        skip_bytes = offset - aligned_offset
+        part_count = math.ceil((limit + skip_bytes) / part_size)
+
+        logger.debug(
+            "[single] DC %d: offset=%d, limit=%d, parts=%d, part_size=%d",
+            dc_id,
+            offset,
+            limit,
+            part_count,
+            part_size,
+        )
+
+        sender, auth_key = await self._sender_pool.acquire(client, dc_id)
+        sender_ok = True  # track whether to return to pool or discard
+
+        try:
+            request = GetFileRequest(file_location, offset=aligned_offset, limit=part_size)
+            bytes_yielded = 0
+
+            for _ in range(part_count):
+                if bytes_yielded >= limit:
+                    break
+                try:
+                    result = await client._call(sender, request)
+                except Exception:
+                    sender_ok = False
+                    raise
+                data = result.bytes
+                if not data:
+                    break
+                request.offset += part_size
+
+                # Handle offset alignment
+                if skip_bytes > 0:
+                    if len(data) <= skip_bytes:
+                        skip_bytes -= len(data)
+                        continue
+                    data = data[skip_bytes:]
+                    skip_bytes = 0
+
+                # Trim to limit
+                remaining = limit - bytes_yielded
+                if len(data) > remaining:
+                    data = data[:remaining]
+
+                bytes_yielded += len(data)
+                yield data
+        finally:
+            if sender_ok:
+                await self._sender_pool.release(dc_id, sender, auth_key)
+            else:
+                await self._sender_pool.discard(sender)
+
     async def close(self) -> None:
-        """Close the Telegram client connection."""
+        """Close the Telegram client connection and pooled senders."""
+        await self._sender_pool.close_all()
         async with self._lock:
             if self._client is not None:
                 await self._client.disconnect()

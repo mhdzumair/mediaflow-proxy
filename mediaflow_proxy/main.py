@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sys
 from contextlib import asynccontextmanager
 from importlib import resources
 
@@ -26,10 +27,27 @@ from mediaflow_proxy.utils import redis_utils
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
 from mediaflow_proxy.utils.base64_utils import encode_url_to_base64, decode_base64_url, is_base64_url
 from mediaflow_proxy.utils.acestream import acestream_manager
+from mediaflow_proxy.remuxer.video_transcoder import get_hw_capability, HWAccelType
 from mediaflow_proxy.utils.telegram import telegram_manager
 
 logging.basicConfig(level=settings.log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+# Suppress Telethon's "RuntimeError: coroutine ignored GeneratorExit" warnings.
+# These are harmless GC noise from Telethon's internal _recv_loop coroutines
+# when parallel download connections are cleaned up after client disconnect.
+_default_unraisable_hook = sys.unraisablehook
+
+
+def _filtered_unraisable_hook(unraisable):
+    if isinstance(unraisable.exc_value, RuntimeError) and "coroutine ignored GeneratorExit" in str(
+        unraisable.exc_value
+    ):
+        return  # Suppress Telethon GC noise
+    _default_unraisable_hook(unraisable)
+
+
+sys.unraisablehook = _filtered_unraisable_hook
 
 
 @asynccontextmanager
@@ -42,6 +60,20 @@ async def lifespan(app: FastAPI):
         # Individual cache entries will expire via TTL. If full clear is needed,
         # use redis-cli KEYS "mfp:*" | xargs redis-cli DEL
         logger.info("Cache clearing note: Redis entries will expire via TTL")
+
+    # Log transcoding capability
+    hw = get_hw_capability()
+    if hw.accel_type != HWAccelType.NONE and settings.transcode_prefer_gpu:
+        logger.info(
+            "Transcode ready: GPU %s (encoder=%s) | PyAV pipeline",
+            hw.accel_type.value,
+            hw.h264_encoder,
+        )
+    else:
+        logger.info(
+            "Transcode ready: CPU (%s) | PyAV pipeline",
+            hw.h264_encoder,
+        )
 
     yield
 

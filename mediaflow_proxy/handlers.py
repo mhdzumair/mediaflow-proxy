@@ -97,6 +97,13 @@ def handle_exceptions(exception: Exception, context: str = "") -> Response:
         # Client errors are often network issues - warning level
         logger.warning(f"Client error{ctx}: {exception}")
         return Response(status_code=502, content=f"Upstream connection error: {exception}")
+    elif isinstance(exception, HTTPException):
+        # HTTPException is intentionally raised (e.g. segment unavailable) - not unexpected
+        if exception.status_code >= 500:
+            logger.warning(f"HTTP exception{ctx}: {exception.status_code}: {exception.detail}")
+        else:
+            logger.debug(f"HTTP exception{ctx}: {exception.status_code}: {exception.detail}")
+        return Response(status_code=exception.status_code, content=exception.detail)
     elif isinstance(exception, ValueError) and "HTML instead of m3u8" in str(exception):
         # Expected error when upstream returns error page instead of playlist
         logger.warning(f"Upstream returned HTML{ctx}: stream may be offline or unavailable")

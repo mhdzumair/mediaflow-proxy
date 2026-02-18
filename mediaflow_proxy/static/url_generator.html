@@ -6,6 +6,7 @@
     <title>MediaFlow URL Generator</title>
     <link rel="icon" href="/logo.png" type="image/x-icon">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -124,7 +125,7 @@
         </a>
     </div>
 
-    <main class="container mx-auto px-4 py-12 max-w-5xl">
+    <main class="container mx-auto px-4 py-12 max-w-6xl">
         <!-- Header -->
         <div class="text-center mb-10 animate-fade-in">
             <div class="flex items-center justify-center gap-3 mb-3">
@@ -433,6 +434,31 @@
                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Filename for Content-Disposition header (useful for media players like Infuse)</p>
                     </div>
                     
+                    <!-- Transcode Section -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Transcode <span class="text-gray-400 font-normal">(optional)</span></h4>
+                        <div class="space-y-4">
+                            <div class="flex items-center gap-3">
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="stream-transcode" class="sr-only peer">
+                                    <div class="w-11 h-6 bg-gray-300 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
+                                </label>
+                                <span class="text-sm text-gray-700 dark:text-gray-300">Enable Transcoding</span>
+                            </div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                Transcode to browser-compatible fMP4 (H.264 + AAC). Without Start Time, generates
+                                <code>/proxy/transcode/playlist.m3u8</code> (HLS). With Start Time, generates
+                                <code>/proxy/stream?...&transcode=true&start=...</code>.
+                            </p>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Start Time (seconds) <span class="text-gray-400 font-normal">(optional)</span></label>
+                                <input type="number" id="stream-start-time" placeholder="0" min="0" step="1"
+                                    class="input-field w-full sm:w-48 px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Seek to this position before starting transcoded playback (e.g., 300 for 5 minutes)</p>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Response Headers Section -->
                     <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
                         <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Response Headers</h4>
@@ -493,8 +519,23 @@
                     <div class="url-output rounded-xl p-4 text-green-400 text-sm break-all overflow-x-auto">
                         <code id="proxy-generated-url"></code>
                     </div>
-                    <button onclick="copyUrl('proxy-generated-url', event)" class="copy-btn mt-3 px-6 py-2.5 rounded-xl text-white font-semibold text-sm">
-                        📋 Copy to Clipboard
+                    <div class="flex flex-wrap gap-2 mt-3">
+                        <button onclick="copyUrl('proxy-generated-url', event)" class="copy-btn px-6 py-2.5 rounded-xl text-white font-semibold text-sm">
+                            📋 Copy to Clipboard
+                        </button>
+                        <button id="proxy-hls-preview-btn" onclick="openHlsPreview('proxy')" class="hidden px-6 py-2.5 rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold text-sm hover:from-green-600 hover:to-emerald-700 transition-all">
+                            ▶ Preview (HLS)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- HLS Preview Player -->
+                <div id="proxy-hls-player" class="mt-4 hidden">
+                    <div class="bg-black rounded-xl overflow-hidden shadow-xl">
+                        <video id="proxy-video" controls class="w-full max-h-[80vh] object-contain bg-black"></video>
+                    </div>
+                    <button onclick="closeHlsPreview('proxy')" class="mt-2 px-4 py-2 rounded-lg bg-gray-600 text-white text-sm hover:bg-gray-700 transition-all">
+                        Close Preview
                     </button>
                 </div>
             </div>
@@ -1060,6 +1101,30 @@
                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">40-character hex string from magnet links (e.g., b04372b9543d763bd2dbd2a1842d9723fd080076)</p>
                     </div>
 
+                    <!-- Transcode Section -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Transcode <span class="text-gray-400 font-normal">(optional)</span></h4>
+                        <div class="space-y-4">
+                            <div class="flex items-center gap-3">
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="acestream-transcode" class="sr-only peer">
+                                    <div class="w-11 h-6 bg-gray-300 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-500"></div>
+                                </label>
+                                <span class="text-sm text-gray-700 dark:text-gray-300">Enable Transcoding</span>
+                            </div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                Transcode to browser-compatible fMP4 (H.264 + AAC) using direct stream mode
+                                (<code>transcode=true</code>). Uses GPU acceleration when available.
+                            </p>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Start Time (seconds) <span class="text-gray-400 font-normal">(optional)</span></label>
+                                <input type="number" id="acestream-start-time" placeholder="0" min="0" step="1"
+                                    class="input-field w-full sm:w-48 px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-teal-500 text-sm">
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Seek to this position before starting transcoded playback (e.g., 300 for 5 minutes)</p>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Start Offset Section (Live Streams) -->
                     <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
                         <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Start Offset <span class="text-gray-400 font-normal">(Live Stream Prebuffer)</span></h4>
@@ -1203,6 +1268,31 @@
                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Override the filename for media players that use filename for metadata</p>
                     </div>
 
+                    <!-- Transcode Section -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Transcode <span class="text-gray-400 font-normal">(optional)</span></h4>
+                        <div class="space-y-4">
+                            <div class="flex items-center gap-3">
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="telegram-transcode" class="sr-only peer">
+                                    <div class="w-11 h-6 bg-gray-300 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-500"></div>
+                                </label>
+                                <span class="text-sm text-gray-700 dark:text-gray-300">Enable Transcoding</span>
+                            </div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                Transcode to browser-compatible fMP4 (H.264 + AAC). Without Start Time, generates
+                                <code>/proxy/telegram/transcode/playlist.m3u8</code> (HLS). With Start Time, generates
+                                <code>/proxy/telegram/stream?...&transcode=true&start=...</code>.
+                            </p>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Start Time (seconds) <span class="text-gray-400 font-normal">(optional)</span></label>
+                                <input type="number" id="telegram-start-time" placeholder="0" min="0" step="1"
+                                    class="input-field w-full sm:w-48 px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-sky-500 text-sm">
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Seek to this position before starting transcoded playback (e.g., 300 for 5 minutes)</p>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- URL Format Examples -->
                     <div class="bg-sky-50 dark:bg-sky-900/20 rounded-xl p-4 border border-sky-200 dark:border-sky-800">
                         <h4 class="text-sm font-semibold text-sky-800 dark:text-sky-200 mb-2">📋 Input Format Examples</h4>
@@ -1239,9 +1329,24 @@
                     <div class="url-output rounded-xl p-4 text-green-400 text-sm break-all overflow-x-auto">
                         <code id="telegram-generated-url"></code>
                     </div>
-                    <button onclick="copyUrl('telegram-generated-url', event)" class="copy-btn mt-3 px-6 py-2.5 rounded-xl text-white font-semibold text-sm">
-                        📋 Copy to Clipboard
-                    </button>
+                    <div class="flex flex-wrap gap-2 mt-3">
+                        <button onclick="copyUrl('telegram-generated-url', event)" class="copy-btn px-6 py-2.5 rounded-xl text-white font-semibold text-sm">
+                            📋 Copy to Clipboard
+                        </button>
+                        <button id="telegram-hls-preview-btn" onclick="openHlsPreview('telegram')" class="hidden px-6 py-2.5 rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold text-sm hover:from-green-600 hover:to-emerald-700 transition-all">
+                            ▶ Preview (HLS)
+                        </button>
+                    </div>
+
+                    <!-- HLS Preview Player -->
+                    <div id="telegram-hls-player" class="mt-4 hidden">
+                        <div class="bg-black rounded-xl overflow-hidden shadow-xl">
+                            <video id="telegram-video" controls class="w-full max-h-[80vh] object-contain bg-black"></video>
+                        </div>
+                        <button onclick="closeHlsPreview('telegram')" class="mt-2 px-4 py-2 rounded-lg bg-gray-600 text-white text-sm hover:bg-gray-700 transition-all">
+                            Close Preview
+                        </button>
+                    </div>
 
                     <!-- Usage Examples -->
                     <div class="mt-4 bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
@@ -1891,13 +1996,34 @@
                     return;
                 }
                 
-                const filename = document.getElementById('stream-filename').value.trim();
-                if (filename) {
-                    url = `${baseUrl}/proxy/stream/${encodeURIComponent(filename)}`;
+                const isTranscode = document.getElementById('stream-transcode').checked;
+                const streamStartTime = document.getElementById('stream-start-time').value.trim();
+                const hasStreamStart = streamStartTime !== '' && parseFloat(streamStartTime) > 0;
+                
+                if (isTranscode && !hasStreamStart) {
+                    // Preferred transcode mode: HLS playlist URL for smooth playback/seeking.
+                    url = `${baseUrl}/proxy/transcode/playlist.m3u8`;
+                    params.append('d', destination);
+                } else if (isTranscode) {
+                    // Legacy/direct transcode mode for explicit start offset support.
+                    const filename = document.getElementById('stream-filename').value.trim();
+                    if (filename) {
+                        url = `${baseUrl}/proxy/stream/${encodeURIComponent(filename)}`;
+                    } else {
+                        url = `${baseUrl}/proxy/stream`;
+                    }
+                    params.append('d', destination);
+                    params.append('transcode', 'true');
+                    params.append('start', streamStartTime);
                 } else {
-                    url = `${baseUrl}/proxy/stream`;
+                    const filename = document.getElementById('stream-filename').value.trim();
+                    if (filename) {
+                        url = `${baseUrl}/proxy/stream/${encodeURIComponent(filename)}`;
+                    } else {
+                        url = `${baseUrl}/proxy/stream`;
+                    }
+                    params.append('d', destination);
                 }
-                params.append('d', destination);
                 
                 // Add stream response headers (r_ prefix)
                 const responseHeaders = getStreamResponseHeaders();
@@ -1927,6 +2053,20 @@
             
             document.getElementById('proxy-generated-url').textContent = finalUrl;
             document.getElementById('proxy-output').classList.remove('hidden');
+
+            // Show/hide HLS preview button based on whether the URL is an HLS playlist
+            const previewBtn = document.getElementById('proxy-hls-preview-btn');
+            if (previewBtn) {
+                const generatedPath = new URL(finalUrl).pathname;
+                const isHlsPlaylist = generatedPath === '/proxy/transcode/playlist.m3u8';
+                if (isHlsPlaylist) {
+                    previewBtn.classList.remove('hidden');
+                    previewBtn.dataset.hlsUrl = finalUrl;
+                } else {
+                    previewBtn.classList.add('hidden');
+                    closeHlsPreview('proxy');
+                }
+            }
         }
 
         // Hosts that return HLS streams (auto-suggest .m3u8 extension)
@@ -2160,6 +2300,109 @@
             });
         }
 
+        // =================================================================
+        // HLS.js Preview Player
+        // =================================================================
+
+        // Track active HLS instances for cleanup
+        const _hlsInstances = {};
+
+        function openHlsPreview(prefix) {
+            const btn = document.getElementById(`${prefix}-hls-preview-btn`);
+            const playerDiv = document.getElementById(`${prefix}-hls-player`);
+            const video = document.getElementById(`${prefix}-video`);
+            if (!btn || !playerDiv || !video) return;
+
+            const hlsUrl = btn.dataset.hlsUrl;
+            if (!hlsUrl) return;
+
+            // Clean up previous instance
+            closeHlsPreview(prefix);
+
+            playerDiv.classList.remove('hidden');
+
+            if (Hls.isSupported()) {
+                const hls = new Hls({
+                    maxBufferLength: 30,
+                    maxMaxBufferLength: 60,
+                    manifestLoadingMaxRetry: 2,
+                    manifestLoadingRetryDelay: 2000,
+                    levelLoadingMaxRetry: 2,
+                    levelLoadingRetryDelay: 2000,
+                    fragLoadingMaxRetry: 3,
+                    fragLoadingRetryDelay: 2000,
+                });
+                let fatalRetries = 0;
+                const MAX_FATAL_RETRIES = 2;
+
+                hls.loadSource(hlsUrl);
+                hls.attachMedia(video);
+                hls.on(Hls.Events.MANIFEST_PARSED, function () {
+                    fatalRetries = 0;
+                    video.play().catch(() => {});
+                });
+                hls.on(Hls.Events.FRAG_LOADED, function () {
+                    fatalRetries = 0;  // reset on any successful load
+                });
+                hls.on(Hls.Events.ERROR, function (event, data) {
+                    if (data.fatal) {
+                        console.error('[HLS Preview] Fatal error:', data.type, data.details);
+                        fatalRetries++;
+                        if (fatalRetries > MAX_FATAL_RETRIES) {
+                            console.warn('[HLS Preview] Max retries reached, stopping.');
+                            hls.destroy();
+                            delete _hlsInstances[prefix];
+                            if (playerDiv) {
+                                const video = playerDiv.querySelector('video');
+                                if (video) {
+                                    video.replaceWith(Object.assign(document.createElement('p'), {
+                                        className: 'text-red-400 p-4 text-sm',
+                                        textContent: 'Playback failed \u2014 server may be unreachable. Close and try again later.',
+                                    }));
+                                }
+                            }
+                            return;
+                        }
+                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                            setTimeout(() => hls.startLoad(), 3000);
+                        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                            hls.recoverMediaError();
+                        } else {
+                            hls.destroy();
+                            delete _hlsInstances[prefix];
+                        }
+                    }
+                });
+                _hlsInstances[prefix] = hls;
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Native HLS support (Safari)
+                video.src = hlsUrl;
+                video.addEventListener('loadedmetadata', function () {
+                    video.play().catch(() => {});
+                }, { once: true });
+            } else {
+                playerDiv.innerHTML = '<p class="text-red-400 p-4 text-sm">HLS playback is not supported in this browser.</p>';
+            }
+        }
+
+        function closeHlsPreview(prefix) {
+            const playerDiv = document.getElementById(`${prefix}-hls-player`);
+            const video = document.getElementById(`${prefix}-video`);
+
+            if (_hlsInstances[prefix]) {
+                _hlsInstances[prefix].destroy();
+                delete _hlsInstances[prefix];
+            }
+            if (video) {
+                video.pause();
+                video.removeAttribute('src');
+                video.load();
+            }
+            if (playerDiv) {
+                playerDiv.classList.add('hidden');
+            }
+        }
+
         // XC Proxy functions
         function base64UrlEncode(str) {
             // Convert string to base64 and make it URL-safe
@@ -2304,6 +2547,15 @@
             // Build URL
             const params = new URLSearchParams();
             params.append(idParam, idValue);
+            
+            // Transcode parameters
+            if (document.getElementById('acestream-transcode').checked) {
+                params.append('transcode', 'true');
+                const startTime = document.getElementById('acestream-start-time').value.trim();
+                if (startTime && parseFloat(startTime) > 0) {
+                    params.append('start', startTime);
+                }
+            }
             
             if (apiPassword) {
                 params.append('api_password', apiPassword);
@@ -2693,14 +2945,40 @@ TELEGRAM_SESSION_STRING=${sessionString}`;
                 params.append('filename', filename);
             }
             
+            const isTranscode = document.getElementById('telegram-transcode').checked;
+            const telegramStartTime = document.getElementById('telegram-start-time').value.trim();
+            const hasTelegramStart = telegramStartTime !== '' && parseFloat(telegramStartTime) > 0;
+            
             if (apiPassword) {
                 params.append('api_password', apiPassword);
             }
             
-            const finalUrl = `${baseUrl}/proxy/telegram/stream?${params.toString()}`;
+            let finalUrl;
+            if (isTranscode && !hasTelegramStart) {
+                // Preferred transcode mode: HLS playlist URL for smooth playback/seeking.
+                finalUrl = `${baseUrl}/proxy/telegram/transcode/playlist.m3u8?${params.toString()}`;
+            } else {
+                if (isTranscode) {
+                    params.append('transcode', 'true');
+                    params.append('start', telegramStartTime);
+                }
+                finalUrl = `${baseUrl}/proxy/telegram/stream?${params.toString()}`;
+            }
             
             document.getElementById('telegram-generated-url').textContent = finalUrl;
             document.getElementById('telegram-output').classList.remove('hidden');
+
+            // Show/hide HLS preview button
+            const tgPreviewBtn = document.getElementById('telegram-hls-preview-btn');
+            if (tgPreviewBtn) {
+                if (isTranscode && !hasTelegramStart) {
+                    tgPreviewBtn.classList.remove('hidden');
+                    tgPreviewBtn.dataset.hlsUrl = finalUrl;
+                } else {
+                    tgPreviewBtn.classList.add('hidden');
+                    closeHlsPreview('telegram');
+                }
+            }
         }
 
         // Check Telegram Status

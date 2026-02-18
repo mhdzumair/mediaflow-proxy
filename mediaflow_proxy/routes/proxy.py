@@ -16,6 +16,7 @@ from mediaflow_proxy.handlers import (
     get_manifest,
     get_playlist,
     get_segment,
+    get_init_segment,
     get_public_ip,
 )
 from mediaflow_proxy.schemas import (
@@ -40,6 +41,13 @@ from mediaflow_proxy.utils.http_utils import (
 from mediaflow_proxy.utils.http_client import create_aiohttp_session
 from mediaflow_proxy.utils.m3u8_processor import M3U8Processor
 from mediaflow_proxy.utils.stream_transformers import apply_transformer_to_bytes
+from mediaflow_proxy.remuxer.media_source import HTTPMediaSource
+from mediaflow_proxy.remuxer.transcode_handler import (
+    handle_transcode,
+    handle_transcode_hls_init,
+    handle_transcode_hls_playlist,
+    handle_transcode_hls_segment,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -462,6 +470,129 @@ async def hls_segment_proxy(
     return await handle_stream_request("GET", segment_url, proxy_headers, transformer)
 
 
+# =============================================================================
+# HLS Transcode endpoints (VOD playlist + init segment + media segments)
+# =============================================================================
+
+
+@proxy_router.head("/transcode/playlist.m3u8")
+@proxy_router.get("/transcode/playlist.m3u8")
+async def transcode_hls_playlist(
+    request: Request,
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+    destination: str = Query(..., description="The URL of the source media.", alias="d"),
+):
+    """
+    Generate an HLS VOD M3U8 playlist for on-the-fly transcoded content.
+
+    Probes the source file's keyframe index and generates a playlist where
+    each segment corresponds to one or more keyframe intervals. The playlist
+    references the init segment and media segment endpoints below.
+
+    The generated playlist uses ``#EXT-X-VERSION:7`` with fMP4 (CMAF)
+    segments for universal browser and player compatibility.
+
+    Args:
+        request: The incoming HTTP request.
+        proxy_headers: Headers to forward to the source.
+        destination: URL of the source media file.
+    """
+    destination = sanitize_url(destination)
+    source = HTTPMediaSource(url=destination, headers=dict(proxy_headers.request))
+    await source.resolve_file_size()
+
+    # Build URLs for init and segment endpoints that preserve query params
+    # (api_password, headers, etc.) from the current request.
+    base_params = _build_hls_query_params(request, destination)
+
+    init_url = f"/proxy/transcode/init.mp4?{base_params}"
+    segment_url_template = (
+        f"/proxy/transcode/segment.m4s?{base_params}&seg={{seg}}&start_ms={{start_ms}}&end_ms={{end_ms}}"
+    )
+
+    return await handle_transcode_hls_playlist(
+        request,
+        source,
+        init_url=init_url,
+        segment_url_template=segment_url_template,
+    )
+
+
+@proxy_router.head("/transcode/init.mp4")
+@proxy_router.get("/transcode/init.mp4")
+async def transcode_hls_init(
+    request: Request,
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+    destination: str = Query(..., description="The URL of the source media.", alias="d"),
+):
+    """
+    Serve the fMP4 init segment (ftyp + moov) for HLS transcode playback.
+
+    The init segment is built from probed track metadata without running
+    the full transcode pipeline.
+
+    Args:
+        request: The incoming HTTP request.
+        proxy_headers: Headers to forward to the source.
+        destination: URL of the source media file.
+    """
+    destination = sanitize_url(destination)
+    source = HTTPMediaSource(url=destination, headers=dict(proxy_headers.request))
+    await source.resolve_file_size()
+
+    return await handle_transcode_hls_init(request, source)
+
+
+@proxy_router.get("/transcode/segment.m4s")
+async def transcode_hls_segment(
+    request: Request,
+    proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+    destination: str = Query(..., description="The URL of the source media.", alias="d"),
+    start_ms: float = Query(..., description="Segment start time in milliseconds."),
+    end_ms: float = Query(..., description="Segment end time in milliseconds."),
+    seg: int | None = Query(None, description="Segment number (informational, for logging)."),
+):
+    """
+    Serve a single HLS fMP4 media segment (moof + mdat).
+
+    Each segment corresponds to a merged keyframe interval in the source
+    file.  The time range is self-describing (from the playlist URL) so
+    no cue-point re-derivation is needed.
+
+    Args:
+        request: The incoming HTTP request.
+        proxy_headers: Headers to forward to the source.
+        destination: URL of the source media file.
+        start_ms: Segment start time in milliseconds.
+        end_ms: Segment end time in milliseconds.
+    """
+    destination = sanitize_url(destination)
+    source = HTTPMediaSource(url=destination, headers=dict(proxy_headers.request))
+    await source.resolve_file_size()
+
+    return await handle_transcode_hls_segment(
+        request, source, start_time_ms=start_ms, end_time_ms=end_ms, segment_number=seg
+    )
+
+
+def _build_hls_query_params(request: Request, destination: str) -> str:
+    """
+    Build query string for HLS sub-requests, preserving auth and header params.
+
+    Copies ``api_password``, header manipulation params (``h_*``), and the
+    destination URL from the original request.
+    """
+    params = [f"d={quote(destination, safe='')}"]
+    original = request.query_params
+    if "api_password" in original:
+        params.append(f"api_password={quote(original['api_password'], safe='')}")
+    # Preserve header overrides (h_referer, h_origin, etc.)
+    for key in original:
+        if key.startswith("h_"):
+            params.append(f"{key}={quote(original[key], safe='')}")
+    return "&".join(params)
+
+
 @proxy_router.head("/stream")
 @proxy_router.get("/stream")
 @proxy_router.head("/stream/{filename:path}")
@@ -478,12 +609,21 @@ async def proxy_stream_endpoint(
         "If not specified, auto-detects based on destination URL hostname. "
         "Set to 'none' to explicitly disable rate limiting.",
     ),
+    transcode: bool = Query(
+        False, description="Transcode to browser-compatible fMP4 (re-encode video/audio as needed)"
+    ),
+    start: float | None = Query(None, description="Seek start time in seconds (used with transcode=true)"),
 ):
     """
     Proxify stream requests to the given video URL.
 
     This is a general-purpose stream proxy endpoint. For HLS segments with prebuffer
     support, use the dedicated /hls/segment.ts endpoint instead.
+
+    When transcode=true, the media is transcoded on-the-fly to browser-compatible
+    fMP4 (H.264 video + AAC audio). Video is re-encoded only if the source codec
+    is not browser-compatible (e.g. H.265, MPEG-2). Audio is transcoded to AAC
+    when needed (e.g. EAC3, AC3, DTS). GPU acceleration is used when available.
 
     Rate limiting can be controlled via the `ratelimit` parameter:
     - Not specified: Auto-detects based on destination URL (e.g., Vidoza is auto-detected)
@@ -498,6 +638,8 @@ async def proxy_stream_endpoint(
         filename (str | None): The filename to be used in the response headers.
         transformer (str, optional): Stream transformer ID for content manipulation.
         ratelimit (str, optional): Rate limit handler ID for host-specific rate limiting.
+        transcode (bool): Transcode to browser-compatible format.
+        start (float, optional): Seek start time in seconds (transcode mode only).
 
     Returns:
         Response: The HTTP response with the streamed content.
@@ -505,7 +647,8 @@ async def proxy_stream_endpoint(
     # Log incoming request details for debugging seek issues
     range_header = proxy_headers.request.get("range", "not set")
     logger.info(
-        f"[proxy_stream] Request received - filename: {filename}, range: {range_header}, method: {request.method}"
+        f"[proxy_stream] Request received - filename: {filename}, range: {range_header}, "
+        f"method: {request.method}, transcode: {transcode}"
     )
 
     # Sanitize destination URL to fix common encoding issues
@@ -539,6 +682,15 @@ async def proxy_stream_endpoint(
         # Update destination and headers with extracted stream data
         destination = dlhd_result["destination_url"]
         proxy_headers.request.update(dlhd_result.get("request_headers", {}))
+
+    # Handle transcode mode — transcode uses time-based seeking, not byte ranges
+    if transcode:
+        transcode_headers = dict(proxy_headers.request)
+        transcode_headers.pop("range", None)
+        transcode_headers.pop("if-range", None)
+        source = HTTPMediaSource(url=destination, headers=transcode_headers)
+        await source.resolve_file_size()
+        return await handle_transcode(request, source, start_time=start)
 
     if proxy_headers.request.get("range", "").strip() == "":
         proxy_headers.request.pop("range", None)
@@ -698,8 +850,6 @@ async def init_endpoint(
     Returns:
         Response: The HTTP response with the processed init segment.
     """
-    from mediaflow_proxy.handlers import get_init_segment
-
     return await get_init_segment(init_params, proxy_headers)
 
 

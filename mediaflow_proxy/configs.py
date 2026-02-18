@@ -90,6 +90,12 @@ class Settings(BaseSettings):
     telegram_max_connections: int = 8  # Max parallel DC connections for downloads (max 20, careful of floods).
     telegram_request_timeout: int = 30  # Request timeout in seconds.
 
+    # Transcode settings
+    transcode_prefer_gpu: bool = True  # Prefer GPU acceleration (NVENC/VideoToolbox/VAAPI) when available.
+    transcode_video_bitrate: str = "4M"  # Target video bitrate for re-encoding (e.g. "4M", "2000k").
+    transcode_audio_bitrate: int = 192000  # AAC audio bitrate in bits/s for the Python transcode pipeline.
+    transcode_video_preset: str = "medium"  # Encoding speed/quality tradeoff (libx264: ultrafast..veryslow).
+
     user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"  # The user agent to use for HTTP requests.
 
     # Upstream error resilience settings
@@ -100,6 +106,9 @@ class Settings(BaseSettings):
 
     # Redis settings
     redis_url: str | None = None  # Redis URL for distributed locking and caching. None = disabled.
+    cache_namespace: str | None = (
+        None  # Optional namespace for instance-specific caches (e.g. pod name or hostname). When set, extractor results and other IP-bound data are stored under this namespace so multiple pods sharing one Redis don't serve each other's IP-specific URLs.
+    )
 
     class Config:
         env_file = ".env"

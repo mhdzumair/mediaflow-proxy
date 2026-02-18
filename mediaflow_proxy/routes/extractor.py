@@ -89,10 +89,18 @@ async def _extract_url_impl(
         extractor_params.destination = processed_destination
 
         cache_key = f"{extractor_params.host}_{extractor_params.model_dump_json()}"
-        response = await get_cached_extractor_result(cache_key)
+
+        # Extractor results are resolved via the pod's outgoing IP and may not
+        # be valid when served from a different pod.  Namespace the cache and
+        # all associated coordination keys so each pod operates on its own
+        # partition of the shared Redis.  On single-instance deployments (no
+        # CACHE_NAMESPACE env var) make_instance_key() is a no-op.
+        instance_cache_key = redis_utils.make_instance_key(cache_key)
+
+        response = await get_cached_extractor_result(instance_cache_key)
 
         if response:
-            logger.info(f"Serving from cache for key: {cache_key}")
+            logger.info(f"Serving from cache for key: {instance_cache_key}")
             # Schedule a background refresh, but only if:
             # 1. The host is NOT in the no-refresh list (hosts with unique per-extraction URLs)
             # 2. The cooldown has elapsed (prevents flooding upstream)
@@ -101,50 +109,52 @@ async def _extract_url_impl(
             # Each extraction generates a unique CDN URL. Refreshing invalidates the
             # old URL, causing 509 errors for clients still using it.
             if extractor_params.host not in _NO_BACKGROUND_REFRESH_HOSTS:
-                cooldown_key = f"extractor_refresh:{cache_key}"
+                cooldown_key = f"extractor_refresh:{instance_cache_key}"
                 if await redis_utils.check_and_set_cooldown(cooldown_key, _REFRESH_COOLDOWN):
-                    background_tasks.add_task(refresh_extractor_cache, cache_key, extractor_params, proxy_headers)
+                    background_tasks.add_task(
+                        refresh_extractor_cache, instance_cache_key, extractor_params, proxy_headers
+                    )
             else:
                 logger.debug(f"Skipping background refresh for {extractor_params.host} (unique CDN URLs)")
         else:
             # Use Redis-based in-flight tracking for cross-worker deduplication.
             # If another worker is already extracting, wait for them to finish.
-            inflight_key = f"extractor:{cache_key}"
+            inflight_key = f"extractor:{instance_cache_key}"
 
             if not await redis_utils.mark_inflight(inflight_key, ttl=60):
                 # Another worker is extracting - wait for them to finish and check cache
-                logger.info(f"Waiting for in-flight extraction (cross-worker) for key: {cache_key}")
+                logger.info(f"Waiting for in-flight extraction (cross-worker) for key: {instance_cache_key}")
                 if await redis_utils.wait_for_completion(inflight_key, timeout=30.0):
                     # Extraction completed, check cache
-                    response = await get_cached_extractor_result(cache_key)
+                    response = await get_cached_extractor_result(instance_cache_key)
                     if response:
-                        logger.info(f"Serving from cache (after wait) for key: {cache_key}")
+                        logger.info(f"Serving from cache (after wait) for key: {instance_cache_key}")
 
             if response is None:
                 # We either marked it as in-flight (first) or waited and still no cache hit.
                 # Use Redis lock to ensure only one worker extracts at a time.
-                if await redis_utils.acquire_lock(f"extractor_lock:{cache_key}", ttl=30, timeout=30.0):
+                if await redis_utils.acquire_lock(f"extractor_lock:{instance_cache_key}", ttl=30, timeout=30.0):
                     try:
                         # Re-check cache after acquiring lock - another worker may have populated it
-                        response = await get_cached_extractor_result(cache_key)
+                        response = await get_cached_extractor_result(instance_cache_key)
                         if response:
-                            logger.info(f"Serving from cache (after lock) for key: {cache_key}")
+                            logger.info(f"Serving from cache (after lock) for key: {instance_cache_key}")
                         else:
-                            logger.info(f"Cache miss for key: {cache_key}. Fetching fresh data.")
+                            logger.info(f"Cache miss for key: {instance_cache_key}. Fetching fresh data.")
                             try:
                                 extractor = ExtractorFactory.get_extractor(extractor_params.host, proxy_headers.request)
                                 response = await extractor.extract(
                                     extractor_params.destination, **extractor_params.extra_params
                                 )
-                                await set_cache_extractor_result(cache_key, response)
+                                await set_cache_extractor_result(instance_cache_key, response)
                             except Exception:
                                 raise
                     finally:
-                        await redis_utils.release_lock(f"extractor_lock:{cache_key}")
+                        await redis_utils.release_lock(f"extractor_lock:{instance_cache_key}")
                         await redis_utils.clear_inflight(inflight_key)
                 else:
                     # Lock timeout - try to serve from cache anyway
-                    response = await get_cached_extractor_result(cache_key)
+                    response = await get_cached_extractor_result(instance_cache_key)
                     if not response:
                         raise HTTPException(status_code=503, detail="Extraction in progress, please retry")
 
