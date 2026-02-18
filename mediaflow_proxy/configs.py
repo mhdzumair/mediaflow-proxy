@@ -106,7 +106,9 @@ class Settings(BaseSettings):
 
     # Redis settings
     redis_url: str | None = None  # Redis URL for distributed locking and caching. None = disabled.
-    cache_namespace: str | None = None  # Optional namespace for instance-specific caches (e.g. pod name or hostname). When set, extractor results and other IP-bound data are stored under this namespace so multiple pods sharing one Redis don't serve each other's IP-specific URLs.
+    cache_namespace: str | None = (
+        None  # Optional namespace for instance-specific caches (e.g. pod name or hostname). When set, extractor results and other IP-bound data are stored under this namespace so multiple pods sharing one Redis don't serve each other's IP-specific URLs.
+    )
 
     class Config:
         env_file = ".env"

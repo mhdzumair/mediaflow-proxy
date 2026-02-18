@@ -111,7 +111,9 @@ async def _extract_url_impl(
             if extractor_params.host not in _NO_BACKGROUND_REFRESH_HOSTS:
                 cooldown_key = f"extractor_refresh:{instance_cache_key}"
                 if await redis_utils.check_and_set_cooldown(cooldown_key, _REFRESH_COOLDOWN):
-                    background_tasks.add_task(refresh_extractor_cache, instance_cache_key, extractor_params, proxy_headers)
+                    background_tasks.add_task(
+                        refresh_extractor_cache, instance_cache_key, extractor_params, proxy_headers
+                    )
             else:
                 logger.debug(f"Skipping background refresh for {extractor_params.host} (unique CDN URLs)")
         else:
