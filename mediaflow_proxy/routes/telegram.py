@@ -211,6 +211,8 @@ async def telegram_stream(
 
         # Handle transcode mode: stream as fMP4 with transcoded audio
         if transcode:
+            if not settings.enable_transcode:
+                raise HTTPException(status_code=503, detail="Transcoding support is disabled")
             return await _handle_transcode(
                 request,
                 ref,
@@ -458,6 +460,8 @@ async def telegram_transcode_hls_playlist(
     filename: Optional[str] = Query(None, description="Optional filename"),
 ):
     """Generate an HLS VOD M3U8 playlist for a Telegram media file."""
+    if not settings.enable_transcode:
+        raise HTTPException(status_code=503, detail="Transcoding support is disabled")
     source = await _resolve_telegram_source(
         d,
         url,
@@ -498,6 +502,8 @@ async def telegram_transcode_hls_init(
     filename: Optional[str] = Query(None, description="Optional filename"),
 ):
     """Serve the fMP4 init segment for a Telegram media file."""
+    if not settings.enable_transcode:
+        raise HTTPException(status_code=503, detail="Transcoding support is disabled")
     source = await _resolve_telegram_source(
         d,
         url,
@@ -526,6 +532,8 @@ async def telegram_transcode_hls_segment(
     filename: Optional[str] = Query(None, description="Optional filename"),
 ):
     """Serve a single HLS fMP4 media segment for a Telegram media file."""
+    if not settings.enable_transcode:
+        raise HTTPException(status_code=503, detail="Transcoding support is disabled")
     source = await _resolve_telegram_source(
         d,
         url,

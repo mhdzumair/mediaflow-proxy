@@ -48,6 +48,8 @@ xtream_root_router = APIRouter()
 
 async def _handle_xtream_transcode(request, upstream_url: str, proxy_headers, start_time: float | None):
     """Shared transcode handler for Xtream stream endpoints."""
+    if not settings.enable_transcode:
+        raise HTTPException(status_code=503, detail="Transcoding support is disabled")
     source = HTTPMediaSource(url=upstream_url, headers=dict(proxy_headers.request))
     await source.resolve_file_size()
     return await handle_transcode(request, source, start_time=start_time)
@@ -55,6 +57,8 @@ async def _handle_xtream_transcode(request, upstream_url: str, proxy_headers, st
 
 async def _handle_xtream_hls_playlist(request, upstream_url: str, proxy_headers):
     """Generate HLS VOD playlist for an Xtream stream."""
+    if not settings.enable_transcode:
+        raise HTTPException(status_code=503, detail="Transcoding support is disabled")
     from urllib.parse import quote
 
     source = HTTPMediaSource(url=upstream_url, headers=dict(proxy_headers.request))
@@ -82,6 +86,8 @@ async def _handle_xtream_hls_playlist(request, upstream_url: str, proxy_headers)
 
 async def _handle_xtream_hls_init(request, upstream_url: str, proxy_headers):
     """Serve fMP4 init segment for an Xtream stream."""
+    if not settings.enable_transcode:
+        raise HTTPException(status_code=503, detail="Transcoding support is disabled")
     source = HTTPMediaSource(url=upstream_url, headers=dict(proxy_headers.request))
     await source.resolve_file_size()
     return await handle_transcode_hls_init(request, source)
@@ -96,6 +102,8 @@ async def _handle_xtream_hls_segment(
     seg: int | None = None,
 ):
     """Serve a single HLS fMP4 segment for an Xtream stream."""
+    if not settings.enable_transcode:
+        raise HTTPException(status_code=503, detail="Transcoding support is disabled")
     source = HTTPMediaSource(url=upstream_url, headers=dict(proxy_headers.request))
     await source.resolve_file_size()
     return await handle_transcode_hls_segment(

@@ -497,6 +497,8 @@ async def transcode_hls_playlist(
         proxy_headers: Headers to forward to the source.
         destination: URL of the source media file.
     """
+    if not settings.enable_transcode:
+        raise HTTPException(status_code=503, detail="Transcoding support is disabled")
     destination = sanitize_url(destination)
     source = HTTPMediaSource(url=destination, headers=dict(proxy_headers.request))
     await source.resolve_file_size()
@@ -536,6 +538,8 @@ async def transcode_hls_init(
         proxy_headers: Headers to forward to the source.
         destination: URL of the source media file.
     """
+    if not settings.enable_transcode:
+        raise HTTPException(status_code=503, detail="Transcoding support is disabled")
     destination = sanitize_url(destination)
     source = HTTPMediaSource(url=destination, headers=dict(proxy_headers.request))
     await source.resolve_file_size()
@@ -566,6 +570,8 @@ async def transcode_hls_segment(
         start_ms: Segment start time in milliseconds.
         end_ms: Segment end time in milliseconds.
     """
+    if not settings.enable_transcode:
+        raise HTTPException(status_code=503, detail="Transcoding support is disabled")
     destination = sanitize_url(destination)
     source = HTTPMediaSource(url=destination, headers=dict(proxy_headers.request))
     await source.resolve_file_size()
@@ -685,6 +691,8 @@ async def proxy_stream_endpoint(
 
     # Handle transcode mode — transcode uses time-based seeking, not byte ranges
     if transcode:
+        if not settings.enable_transcode:
+            raise HTTPException(status_code=503, detail="Transcoding support is disabled")
         transcode_headers = dict(proxy_headers.request)
         transcode_headers.pop("range", None)
         transcode_headers.pop("if-range", None)

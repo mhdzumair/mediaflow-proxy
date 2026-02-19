@@ -397,6 +397,9 @@ async def acestream_ts_stream(
         logger.info(f"[acestream_ts_stream] Streaming from: {ts_url}")
 
         if transcode:
+            if not settings.enable_transcode:
+                await acestream_manager.release_session(infohash)
+                raise HTTPException(status_code=503, detail="Transcoding support is disabled")
             # Acestream provides a live MPEG-TS stream that does NOT support
             # HTTP Range requests and is not seekable.  Use an ffmpeg subprocess
             # to remux video (passthrough) and transcode audio (AC3→AAC) to

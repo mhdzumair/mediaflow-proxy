@@ -91,6 +91,7 @@ class Settings(BaseSettings):
     telegram_request_timeout: int = 30  # Request timeout in seconds.
 
     # Transcode settings
+    enable_transcode: bool = True  # Whether to enable on-the-fly transcoding endpoints (MKV→fMP4, HLS VOD).
     transcode_prefer_gpu: bool = True  # Prefer GPU acceleration (NVENC/VideoToolbox/VAAPI) when available.
     transcode_video_bitrate: str = "4M"  # Target video bitrate for re-encoding (e.g. "4M", "2000k").
     transcode_audio_bitrate: int = 192000  # AAC audio bitrate in bits/s for the Python transcode pipeline.
