@@ -5,10 +5,9 @@ VERSION_OLD ?=
 VERSION_NEW ?=
 CONTRIBUTORS ?= $(shell git log --pretty=format:'%an' $(VERSION_OLD)..$(VERSION_NEW) | sort | uniq)
 
-# Claude API settings
-CLAUDE_MODEL ?= claude-sonnet-4-20250514
-MAX_TOKENS ?= 1024
-ANTHROPIC_VERSION ?= 2023-06-01
+# Gemini API settings
+GEMINI_MODEL ?= gemini-3-flash-preview
+MAX_TOKENS ?= 8000
 
 .PHONY: generate-notes prompt all
 
@@ -36,6 +35,7 @@ endif
 	}'
 	@echo "--- \n### 🤝 Contributors: $(CONTRIBUTORS)\n\n### 📄 Full Changelog:\nhttps://github.com/mhdzumair/mediaflow-proxy/compare/$(VERSION_OLD)...$(VERSION_NEW)";
 
+
 generate-notes:
 ifndef VERSION_OLD
 	@echo "Error: VERSION_OLD is not set"
@@ -45,22 +45,25 @@ ifndef VERSION_NEW
 	@echo "Error: VERSION_NEW is not set"
 	@exit 1
 endif
-ifndef ANTHROPIC_API_KEY
-	@echo "Error: ANTHROPIC_API_KEY is not set"
+ifndef GEMINI_API_KEY
+	@echo "Error: GEMINI_API_KEY is not set"
 	@exit 1
 endif
 	@PROMPT_CONTENT=$$(make prompt VERSION_OLD=$(VERSION_OLD) VERSION_NEW=$(VERSION_NEW) | jq -sRr @json); \
 	if [ -z "$$PROMPT_CONTENT" ]; then \
-	    echo "Failed to generate release notes using Claude AI, prompt content is empty"; \
+	    echo "Failed to generate release notes using Gemini AI, prompt content is empty"; \
 	    exit 1; \
 	fi; \
 	temp_file=$$(mktemp); \
-	curl -s https://api.anthropic.com/v1/messages \
-		--header "x-api-key: $(ANTHROPIC_API_KEY)" \
-		--header "anthropic-version: $(ANTHROPIC_VERSION)" \
+	curl -s "https://generativelanguage.googleapis.com/v1beta/models/$(GEMINI_MODEL):generateContent" \
+		--header "x-goog-api-key: $(GEMINI_API_KEY)" \
 		--header "content-type: application/json" \
-		--data "{\"model\":\"$(CLAUDE_MODEL)\",\"max_tokens\":$(MAX_TOKENS),\"messages\":[{\"role\":\"user\",\"content\":$$PROMPT_CONTENT}]}" > $$temp_file; \
-	jq -r '.content[] | select(.type=="text") | .text' $$temp_file || { echo "Failed to generate release notes using Claude AI, response: $$(cat $$temp_file)"; rm $$temp_file; exit 1; } ; \
+		--data "{\"contents\":[{\"parts\":[{\"text\":$$PROMPT_CONTENT}]}],\"generationConfig\":{\"maxOutputTokens\":$(MAX_TOKENS)}}" > $$temp_file; \
+	RESULT=$$(jq -r '[.candidates[0].content.parts[] | select(.thought != true) | .text] | join("")' $$temp_file 2>/dev/null); \
+	if [ -z "$$RESULT" ] || [ "$$RESULT" = "null" ]; then \
+	    echo "Failed to generate release notes using Gemini AI, response: $$(cat $$temp_file)"; rm $$temp_file; exit 1; \
+	fi; \
+	echo "$$RESULT"; \
 	rm $$temp_file
 
 all: generate-notes
