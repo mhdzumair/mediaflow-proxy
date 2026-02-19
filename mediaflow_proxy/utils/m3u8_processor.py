@@ -686,7 +686,10 @@ class M3U8Processor:
         if uri_match:
             original_uri = uri_match.group(1)
             uri = parse.urlparse(original_uri)
-            if self.key_url:
+            # Only substitute key_url scheme/netloc for actual EXT-X-KEY lines.
+            # EXT-X-MAP (init segments) and other tags must keep their original host,
+            # otherwise the proxied destination URL gets the wrong upstream hostname.
+            if self.key_url and line.startswith("#EXT-X-KEY"):
                 uri = uri._replace(scheme=self.key_url.scheme, netloc=self.key_url.netloc)
             # Check if this is a DLHD stream with key params (needs stream endpoint for header computation)
             query_params = dict(self.request.query_params)

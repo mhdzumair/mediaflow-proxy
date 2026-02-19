@@ -660,6 +660,43 @@ async def fetch_and_process_m3u8(
         return handle_exceptions(e)
 
 
+def _normalize_drm_key_value(value: str) -> str:
+    """
+    Normalize a DRM key_id or key value to lowercase hex.
+
+    Accepts either:
+    - A 32-char hex string (returned as-is, lowercased).
+    - A base64url-encoded value (decoded to hex).
+    - A comma-separated list of the above, for multi-key DRM scenarios.
+
+    Commas are treated as list separators, NOT as characters to pass into
+    base64 decoding.  Previously the ``len() != 32`` check was applied to
+    the entire comma-joined string, and ``urlsafe_b64decode`` silently
+    strips non-alphabet characters (including commas), causing adjacent keys
+    to be concatenated into an oversized byte string.
+
+    Args:
+        value: The key value string, or None.
+
+    Returns:
+        Normalized hex string (or comma-joined hex strings for multi-key),
+        or the original value unchanged if it is falsy.
+    """
+    if not value:
+        return value
+    if "," in value:
+        parts = [_normalize_single_key(p.strip()) for p in value.split(",") if p.strip()]
+        return ",".join(parts)
+    return _normalize_single_key(value)
+
+
+def _normalize_single_key(value: str) -> str:
+    """Convert a single key_id or key to a 32-char lowercase hex string."""
+    if len(value) != 32:
+        return base64.urlsafe_b64decode(pad_base64(value)).hex()
+    return value.lower()
+
+
 async def handle_drm_key_data(key_id, key, drm_info):
     """
     Handles the DRM key data, retrieving the key ID and key from the DRM info if not provided.
@@ -751,11 +788,13 @@ async def get_manifest(
 
     key_id, key = await handle_drm_key_data(manifest_params.key_id, manifest_params.key, drm_info)
 
-    # check if the provided key_id and key are valid
-    if key_id and len(key_id) != 32:
-        key_id = base64.urlsafe_b64decode(pad_base64(key_id)).hex()
-    if key and len(key) != 32:
-        key = base64.urlsafe_b64decode(pad_base64(key)).hex()
+    # Normalize key_id and key: convert from base64 to hex when needed.
+    # Each value may be a comma-separated list for multi-key DRM; each part is
+    # normalized independently so that commas are never passed to urlsafe_b64decode
+    # (base64 silently ignores non-alphabet characters, stripping commas and
+    # concatenating the keys into a single oversized value).
+    key_id = _normalize_drm_key_value(key_id)
+    key = _normalize_drm_key_value(key)
 
     return await process_manifest(
         request, mpd_dict, proxy_headers, key_id, key, manifest_params.resolution, skip_segments
