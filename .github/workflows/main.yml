@@ -74,6 +74,8 @@ jobs:
 
   generate_release_notes:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -83,15 +85,16 @@ jobs:
       - name: Install jq
         run: sudo apt-get install -y jq
 
+      - name: Persist GitHub-generated release body
+        run: |
+          cat << 'EOF' > github_generated_release_body.md
+          ${{ github.event.release.body }}
+          EOF
+
       - name: Extract versions
         id: extract_versions
         run: |
-          # Extract current version from release body using here-document to avoid command substitution
-          BODY=$(cat << 'EOF'
-          ${{ github.event.release.body }}
-          EOF
-          )
-          if ! PREVIOUS_VERSION=$(echo "$BODY" | grep -o '/compare/.*\.\.\.' | sed 's/\/compare\///' | sed 's/\.\.\.//' || true); then
+          if ! PREVIOUS_VERSION=$(grep -o '/compare/.*\.\.\.' github_generated_release_body.md | sed 's/\/compare\///' | sed 's/\.\.\.//' || true); then
             echo "Error: Failed to extract previous version from release body"
             exit 1
           fi
@@ -99,10 +102,11 @@ jobs:
 
       - name: Generate Release Notes
         run: |
-          make generate-notes VERSION_OLD=${{ steps.extract_versions.outputs.PREVIOUS_VERSION }} VERSION_NEW=${{ github.ref_name }} GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }} > release_notes.md
+          make generate-notes VERSION_OLD=${{ steps.extract_versions.outputs.PREVIOUS_VERSION }} VERSION_NEW=${{ github.ref_name }} GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }} GITHUB_RELEASE_BODY_FILE=github_generated_release_body.md > release_notes.md
 
       - name: Update Release Notes
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
           body_path: release_notes.md
           token: ${{ secrets.GITHUB_TOKEN }}
