@@ -604,7 +604,7 @@ def build_hls_playlist(
                 init_query_params["api_password"] = query_params["api_password"]
 
             for k, v in query_params.items():
-                if k.startswith('rp_') or k.startswith('h_'):
+                if k.startswith("rp_") or k.startswith("h_"):
                     init_query_params[k] = v
 
             init_map_url = encode_mediaflow_proxy_url(
