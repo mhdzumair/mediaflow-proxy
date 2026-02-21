@@ -13,7 +13,6 @@ from typing import Protocol, runtime_checkable
 from urllib.parse import urlparse, unquote
 
 from mediaflow_proxy.utils.http_client import create_aiohttp_session
-from mediaflow_proxy.utils.telegram import telegram_manager
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +141,9 @@ class TelegramMediaSource:
         return self._filename_hint
 
     async def stream(self, offset: int = 0, limit: int | None = None) -> AsyncIterator[bytes]:
+        # Lazy import to avoid loading Telegram dependencies for non-Telegram routes.
+        from mediaflow_proxy.utils.telegram import telegram_manager
+
         effective_limit = limit or self._file_size
         if self._use_single_client:
             async for chunk in telegram_manager.stream_media_single(

@@ -12,36 +12,49 @@ import asyncio
 import logging
 import re
 import secrets
-from typing import Annotated, Optional
+from functools import lru_cache
+from typing import Annotated, Optional, TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
-from telethon import TelegramClient
-from telethon.sessions import StringSession
-
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.remuxer.media_source import TelegramMediaSource
-from mediaflow_proxy.remuxer.transcode_handler import (
-    handle_transcode,
-    handle_transcode_hls_init,
-    handle_transcode_hls_playlist,
-    handle_transcode_hls_segment,
-)
 from mediaflow_proxy.utils.http_utils import (
     EnhancedStreamingResponse,
     ProxyRequestHeaders,
     apply_header_manipulation,
     get_proxy_headers,
 )
-from mediaflow_proxy.utils.telegram import (
-    TelegramMediaRef,
-    parse_telegram_url,
-    telegram_manager,
-)
 
 logger = logging.getLogger(__name__)
 telegram_router = APIRouter()
+
+if TYPE_CHECKING:
+    from mediaflow_proxy.utils.telegram import TelegramMediaRef
+
+
+def _telegram_utils():
+    from mediaflow_proxy.utils.telegram import TelegramMediaRef, parse_telegram_url, telegram_manager
+
+    return TelegramMediaRef, parse_telegram_url, telegram_manager
+
+
+@lru_cache(maxsize=1)
+def _load_transcode_handlers():
+    from mediaflow_proxy.remuxer.transcode_handler import (
+        handle_transcode,
+        handle_transcode_hls_init,
+        handle_transcode_hls_playlist,
+        handle_transcode_hls_segment,
+    )
+
+    return (
+        handle_transcode,
+        handle_transcode_hls_init,
+        handle_transcode_hls_playlist,
+        handle_transcode_hls_segment,
+    )
 
 
 def get_content_type(mime_type: str, file_name: Optional[str] = None) -> str:
@@ -165,6 +178,7 @@ async def telegram_stream(
     """
     if not settings.enable_telegram:
         raise HTTPException(status_code=503, detail="Telegram proxy support is disabled")
+    TelegramMediaRef, parse_telegram_url, telegram_manager = _telegram_utils()
 
     # Get the URL from either parameter
     telegram_url = d or url
@@ -359,7 +373,7 @@ async def telegram_stream(
 
 async def _handle_transcode(
     request: Request,
-    ref: TelegramMediaRef,
+    ref: "TelegramMediaRef",
     file_size: int,
     start_time: float | None = None,
     file_name: str = "",
@@ -371,6 +385,7 @@ async def _handle_transcode(
     passes it to the source-agnostic transcode handler which handles
     cue probing, seeking, and pipeline selection.
     """
+    handle_transcode, _, _, _ = _load_transcode_handlers()
     source = TelegramMediaSource(ref, file_size, file_name=file_name)
     return await handle_transcode(request, source, start_time=start_time)
 
@@ -406,6 +421,7 @@ async def _resolve_telegram_source(
         from fastapi import HTTPException
 
         raise HTTPException(status_code=503, detail="Telegram proxy support is disabled")
+    TelegramMediaRef, parse_telegram_url, telegram_manager = _telegram_utils()
 
     telegram_url = d or url
 
@@ -462,6 +478,7 @@ async def telegram_transcode_hls_playlist(
     """Generate an HLS VOD M3U8 playlist for a Telegram media file."""
     if not settings.enable_transcode:
         raise HTTPException(status_code=503, detail="Transcoding support is disabled")
+    _, _, handle_transcode_hls_playlist, _ = _load_transcode_handlers()
     source = await _resolve_telegram_source(
         d,
         url,
@@ -504,6 +521,7 @@ async def telegram_transcode_hls_init(
     """Serve the fMP4 init segment for a Telegram media file."""
     if not settings.enable_transcode:
         raise HTTPException(status_code=503, detail="Transcoding support is disabled")
+    _, handle_transcode_hls_init, _, _ = _load_transcode_handlers()
     source = await _resolve_telegram_source(
         d,
         url,
@@ -534,6 +552,7 @@ async def telegram_transcode_hls_segment(
     """Serve a single HLS fMP4 media segment for a Telegram media file."""
     if not settings.enable_transcode:
         raise HTTPException(status_code=503, detail="Transcoding support is disabled")
+    _, _, _, handle_transcode_hls_segment = _load_transcode_handlers()
     source = await _resolve_telegram_source(
         d,
         url,
@@ -628,6 +647,7 @@ async def telegram_info(
     """
     if not settings.enable_telegram:
         raise HTTPException(status_code=503, detail="Telegram proxy support is disabled")
+    TelegramMediaRef, parse_telegram_url, telegram_manager = _telegram_utils()
 
     telegram_url = d or url
 
@@ -718,6 +738,7 @@ async def telegram_status():
         }
 
     # Check if client is connected
+    _, _, telegram_manager = _telegram_utils()
     if telegram_manager.is_initialized:
         return {
             "enabled": True,
@@ -783,6 +804,9 @@ async def session_start(request: SessionStartRequest):
     session_id = secrets.token_urlsafe(16)
 
     try:
+        from telethon import TelegramClient
+        from telethon.sessions import StringSession
+
         client = TelegramClient(StringSession(), request.api_id, request.api_hash)
         await client.connect()
 
