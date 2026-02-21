@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     dash_prebuffer_emergency_threshold: int = 90  # Emergency threshold percentage to trigger aggressive cache cleanup.
     dash_prebuffer_inactivity_timeout: int = 60  # Seconds of inactivity before cleaning up stream state.
     dash_segment_cache_ttl: int = 60  # TTL (seconds) for cached media segments; longer = better for slow playback.
+    dash_player_lock_timeout: float = 2.5  # Max wait (seconds) for player requests when a segment lock is busy.
+    dash_prebuffer_lock_timeout: float = 0.25  # Max wait (seconds) for background prebuffer lock acquisition.
+    dash_prefetch_max_concurrent: int = 1  # Max concurrent live DASH prefetch downloads to reduce lock contention.
+    dash_live_initial_media_prebuffer: bool = (
+        False  # Whether manifest-time prebuffer should fetch live media segments (init segments are still prewarmed).
+    )
     mpd_live_init_cache_ttl: int = 60  # TTL (seconds) for live init segment cache; 0 disables caching.
     mpd_live_playlist_depth: int = 8  # Number of recent segments to expose per live playlist variant.
     remux_to_ts: bool = False  # Remux fMP4 segments to MPEG-TS for ExoPlayer/VLC compatibility.

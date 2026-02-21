@@ -1,6 +1,7 @@
 import logging
 import math
 import re
+import statistics
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Union
 from urllib.parse import urljoin
@@ -287,12 +288,18 @@ def parse_representation(
     # Extract segment template start number for adaptive sequence calculation
     segment_template_data = adaptation.get("SegmentTemplate") or representation.get("SegmentTemplate")
     if segment_template_data:
+        profile["segment_template_start_number_explicit"] = "@startNumber" in segment_template_data
         try:
             profile["segment_template_start_number"] = int(segment_template_data.get("@startNumber", 1))
         except (ValueError, TypeError):
             profile["segment_template_start_number"] = 1
+        try:
+            profile["segment_template_timescale"] = int(segment_template_data.get("@timescale", 1))
+        except (ValueError, TypeError):
+            profile["segment_template_timescale"] = 1
     else:
         profile["segment_template_start_number"] = 1
+        profile["segment_template_start_number_explicit"] = False
 
     # For SegmentBase profiles, we need to set initUrl even when not parsing segments
     # This is needed for the HLS playlist builder to reference the init URL
@@ -375,6 +382,14 @@ def parse_segment_template(
     """
     segments = []
     timescale = int(item.get("@timescale", 1))
+    profile["segment_template_timescale"] = timescale
+    profile["segment_template_start_number_explicit"] = "@startNumber" in item
+    try:
+        profile["segment_template_start_number"] = int(
+            item.get("@startNumber", profile.get("segment_template_start_number", 1))
+        )
+    except (ValueError, TypeError):
+        profile["segment_template_start_number"] = 1
 
     # Initialization
     if "@initialization" in item:
@@ -390,6 +405,10 @@ def parse_segment_template(
     if "SegmentTimeline" in item:
         segments.extend(parse_segment_timeline(parsed_dict, item, profile, mpd_url, timescale, base_url))
     elif "@duration" in item:
+        try:
+            profile["nominal_duration_mpd_timescale"] = int(item["@duration"])
+        except (ValueError, TypeError):
+            pass
         segments.extend(parse_segment_duration(parsed_dict, item, profile, mpd_url, timescale, base_url))
 
     return segments
@@ -420,11 +439,34 @@ def parse_segment_timeline(
     presentation_time_offset = int(item.get("@presentationTimeOffset", 0))
     start_number = int(item.get("@startNumber", 1))
 
+    timeline_segments = preprocess_timeline(timelines, start_number, period_start, presentation_time_offset, timescale)
+
+    nominal_duration = _resolve_nominal_timeline_duration(timeline_segments)
+    if nominal_duration:
+        profile["nominal_duration_mpd_timescale"] = nominal_duration
+
     segments = [
-        create_segment_data(timeline, item, profile, mpd_url, timescale, base_url)
-        for timeline in preprocess_timeline(timelines, start_number, period_start, presentation_time_offset, timescale)
+        create_segment_data(timeline, item, profile, mpd_url, timescale, base_url) for timeline in timeline_segments
     ]
     return segments
+
+
+def _resolve_nominal_timeline_duration(timeline_segments: List[Dict]) -> Optional[int]:
+    """
+    Resolve a stable nominal segment duration from expanded SegmentTimeline entries.
+
+    Live timelines often contain occasional shorter segments; using median keeps
+    sequence calculations stable when the window slides.
+    """
+    durations = []
+    for segment in timeline_segments:
+        duration = segment.get("duration_mpd_timescale")
+        if isinstance(duration, (int, float)) and duration > 0:
+            durations.append(int(duration))
+
+    if not durations:
+        return None
+    return int(statistics.median_low(durations))
 
 
 def preprocess_timeline(
@@ -491,25 +533,41 @@ def parse_segment_duration(
     """
     duration = int(item["@duration"])
     start_number = int(item.get("@startNumber", 1))
+    presentation_time_offset = int(item.get("@presentationTimeOffset", 0))
     segment_duration_sec = duration / timescale
 
     if parsed_dict["isLive"]:
-        segments = generate_live_segments(parsed_dict, segment_duration_sec, start_number)
+        profile["nominal_duration_mpd_timescale"] = duration
+        segments = generate_live_segments(
+            parsed_dict,
+            segment_duration_sec,
+            start_number,
+            duration_mpd_timescale=duration,
+            presentation_time_offset=presentation_time_offset,
+        )
     else:
         segments = generate_vod_segments(profile, duration, timescale, start_number)
 
     return [create_segment_data(seg, item, profile, mpd_url, timescale, base_url) for seg in segments]
 
 
-def generate_live_segments(parsed_dict: dict, segment_duration_sec: float, start_number: int) -> List[Dict]:
+def generate_live_segments(
+    parsed_dict: dict,
+    segment_duration_sec: float,
+    start_number: int,
+    duration_mpd_timescale: Optional[int] = None,
+    presentation_time_offset: int = 0,
+) -> List[Dict]:
     """
     Generates live segments based on the segment duration and start number.
     This is used for live MPD manifests.
 
     Args:
         parsed_dict (dict): The parsed MPD data.
-        segment_duration_sec (float): The segment duration in seconds.
-        start_number (int): The starting segment number.
+        segment_duration_sec: The segment duration in seconds.
+        start_number: The starting segment number.
+        duration_mpd_timescale: Segment duration in MPD timescale units.
+        presentation_time_offset: MPD presentationTimeOffset, in timescale units.
 
     Returns:
         List[Dict]: The list of generated live segments.
@@ -524,15 +582,22 @@ def generate_live_segments(parsed_dict: dict, segment_duration_sec: float, start
         start_number,
     )
 
-    return [
-        {
+    segments = []
+    for number in range(earliest_segment_number, earliest_segment_number + segment_count):
+        start_time = parsed_dict["availabilityStartTime"] + timedelta(
+            seconds=(number - start_number) * segment_duration_sec
+        )
+        segment = {
             "number": number,
-            "start_time": parsed_dict["availabilityStartTime"]
-            + timedelta(seconds=(number - start_number) * segment_duration_sec),
-            "duration": segment_duration_sec,
+            "start_time": start_time,
+            "end_time": start_time + timedelta(seconds=segment_duration_sec),
+            "duration": duration_mpd_timescale if duration_mpd_timescale is not None else segment_duration_sec,
         }
-        for number in range(earliest_segment_number, earliest_segment_number + segment_count)
-    ]
+        if duration_mpd_timescale is not None:
+            segment["duration_mpd_timescale"] = duration_mpd_timescale
+            segment["time"] = presentation_time_offset + (number - start_number) * duration_mpd_timescale
+        segments.append(segment)
+    return segments
 
 
 def generate_vod_segments(profile: dict, duration: int, timescale: int, start_number: int) -> List[Dict]:
@@ -580,8 +645,35 @@ def create_segment_data(
     media = media.replace("$Number$", str(segment["number"]))
     media = media.replace("$Bandwidth$", str(profile["bandwidth"]))
 
-    if "time" in segment and timescale is not None:
-        media = media.replace("$Time$", str(int(segment["time"])))
+    if "$Time$" in media and timescale is not None:
+        time_value = None
+        if "time" in segment:
+            time_value = int(segment["time"])
+        else:
+            duration_mpd_timescale = segment.get("duration_mpd_timescale")
+            if duration_mpd_timescale is None:
+                try:
+                    duration_mpd_timescale = int(item.get("@duration", 0))
+                except (TypeError, ValueError):
+                    duration_mpd_timescale = 0
+            if duration_mpd_timescale:
+                try:
+                    start_number = int(item.get("@startNumber", profile.get("segment_template_start_number", 1)))
+                except (TypeError, ValueError):
+                    start_number = profile.get("segment_template_start_number", 1)
+                try:
+                    presentation_time_offset = int(item.get("@presentationTimeOffset", 0))
+                except (TypeError, ValueError):
+                    presentation_time_offset = 0
+                time_value = presentation_time_offset + (int(segment["number"]) - start_number) * int(
+                    duration_mpd_timescale
+                )
+
+        if time_value is not None:
+            media = media.replace("$Time$", str(time_value))
+
+    if "$Time$" in media:
+        logger.warning("Unresolved $Time$ placeholder in segment URL template: %s", media_template)
 
     # Combine base_url and media, then resolve against mpd_url
     if base_url:
@@ -597,7 +689,9 @@ def create_segment_data(
     # Add time and duration metadata for adaptive sequence calculation
     if "time" in segment:
         segment_data["time"] = segment["time"]
-    if "duration" in segment:
+    if "duration_mpd_timescale" in segment:
+        segment_data["duration_mpd_timescale"] = segment["duration_mpd_timescale"]
+    elif "time" in segment and "duration" in segment and timescale is not None:
         segment_data["duration_mpd_timescale"] = segment["duration"]
 
     if "start_time" in segment and "end_time" in segment:
@@ -610,8 +704,14 @@ def create_segment_data(
             }
         )
     elif "start_time" in segment and "duration" in segment:
-        # duration here is in timescale units (from timeline segments)
-        duration_seconds = segment["duration"] / timescale if timescale else segment["duration"]
+        duration_mpd_timescale = segment.get("duration_mpd_timescale")
+        if duration_mpd_timescale is not None and timescale:
+            duration_seconds = duration_mpd_timescale / timescale
+        elif "time" in segment and timescale:
+            # Timeline-based segments store duration in MPD timescale units.
+            duration_seconds = segment["duration"] / timescale
+        else:
+            duration_seconds = segment["duration"]
         segment_data.update(
             {
                 "start_time": segment["start_time"],

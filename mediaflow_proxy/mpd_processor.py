@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import math
+import statistics
 import time
 
 from fastapi import Request, Response, HTTPException
@@ -28,6 +29,83 @@ def _resolve_ts_mode(request: Request) -> bool:
     if override is not None:
         return override.lower() in ("true", "1", "yes")
     return settings.remux_to_ts
+
+
+def _resolve_nominal_duration_mpd_timescale(profile: dict, segments: list[dict]) -> int | None:
+    """Resolve a stable nominal segment duration (MPD timescale units) for live sequence math."""
+    profile_duration = profile.get("nominal_duration_mpd_timescale")
+    if isinstance(profile_duration, (int, float)) and profile_duration > 0:
+        return int(profile_duration)
+
+    durations = []
+    for seg in segments:
+        seg_duration = seg.get("duration_mpd_timescale")
+        if isinstance(seg_duration, (int, float)) and seg_duration > 0:
+            durations.append(int(seg_duration))
+
+    if durations:
+        # Use median to avoid jumps when first/last live segments are shorter.
+        return int(statistics.median_low(durations))
+    return None
+
+
+def _compute_live_media_sequence(first_segment: dict, profile: dict, segments: list[dict]) -> int:
+    """
+    Compute a stable HLS media sequence for live playlists.
+
+    Strategy:
+    1) If MPD explicitly sets @startNumber, trust segment numbering.
+    2) Otherwise derive sequence from timeline time / nominal duration.
+    3) Fall back to segment number or template start number.
+    """
+    segment_number = first_segment.get("number")
+    if profile.get("segment_template_start_number_explicit") and segment_number is not None:
+        return max(int(segment_number), 1)
+
+    timeline_time = first_segment.get("time")
+    nominal_duration = _resolve_nominal_duration_mpd_timescale(profile, segments)
+    if timeline_time is not None and nominal_duration and nominal_duration > 0:
+        return max(math.floor(int(timeline_time) / nominal_duration), 1)
+
+    if segment_number is not None:
+        return max(int(segment_number), 1)
+
+    template_start = profile.get("segment_template_start_number")
+    if isinstance(template_start, int) and template_start > 0:
+        return template_start
+
+    return 1
+
+
+def _compute_live_playlist_depth(
+    is_ts_mode: bool,
+    effective_start_offset: float | None,
+    extinf_values: list[float],
+) -> int:
+    """
+    Compute a resilient live playlist depth to reduce segment expiry skips.
+
+    We keep a larger floor for fMP4 live (direct mode), and further expand
+    depth based on requested start_offset so players have enough headroom
+    during transient stalls.
+    """
+    configured_depth = max(settings.mpd_live_playlist_depth, 1)
+    depth_floor = 20 if is_ts_mode else 15
+    depth = max(configured_depth, depth_floor)
+
+    if effective_start_offset is not None and effective_start_offset < 0:
+        if extinf_values:
+            segment_duration = statistics.median(extinf_values)
+            if segment_duration <= 0:
+                segment_duration = 4.0
+        else:
+            segment_duration = 4.0
+
+        segments_behind_live_edge = math.ceil(abs(effective_start_offset) / segment_duration)
+        safety_margin = 10 if is_ts_mode else 12
+        depth = max(depth, segments_behind_live_edge + safety_margin)
+
+    return max(depth, 1)
 
 
 async def process_manifest(
@@ -462,8 +540,8 @@ def build_hls_playlist(
             continue
 
         if is_live:
-            # TS mode uses deeper playlist for ExoPlayer buffering
-            depth = 20 if is_ts_mode else max(settings.mpd_live_playlist_depth, 1)
+            extinf_values_for_depth = [s["extinf"] for s in segments if "extinf" in s]
+            depth = _compute_live_playlist_depth(is_ts_mode, effective_start_offset, extinf_values_for_depth)
             trimmed_segments = segments[-depth:]
         else:
             trimmed_segments = segments
@@ -479,31 +557,13 @@ def build_hls_playlist(
             else:
                 target_duration = math.ceil(max(extinf_values)) if extinf_values else 3
 
-            # Align HLS media sequence with MPD-provided numbering when available
-            if is_ts_mode and is_live:
-                # For live TS, derive sequence from timeline first for stable continuity
-                time_val = first_segment.get("time")
-                duration_val = first_segment.get("duration_mpd_timescale")
-                if time_val is not None and duration_val and duration_val > 0:
-                    sequence = math.floor(time_val / duration_val)
-                else:
-                    sequence = first_segment.get("number") or profile.get("segment_template_start_number") or 1
+            if is_live:
+                sequence = _compute_live_media_sequence(first_segment, profile, trimmed_segments)
             else:
                 mpd_start_number = profile.get("segment_template_start_number")
                 sequence = first_segment.get("number")
-
                 if sequence is None:
-                    # Fallback to MPD template start number
-                    if mpd_start_number is not None:
-                        sequence = mpd_start_number
-                    else:
-                        # As a last resort, derive from timeline information
-                        time_val = first_segment.get("time")
-                        duration_val = first_segment.get("duration_mpd_timescale")
-                        if time_val is not None and duration_val and duration_val > 0:
-                            sequence = math.floor(time_val / duration_val)
-                        else:
-                            sequence = 1
+                    sequence = mpd_start_number if mpd_start_number is not None else 1
 
             hls.extend(
                 [

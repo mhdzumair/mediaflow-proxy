@@ -877,10 +877,12 @@ async def get_segment(
         # - Waiting for existing downloads (via asyncio.Event)
         # - Starting new download if needed
         # - Caching the result
-        # Use a short timeout (1s) for player requests to avoid blocking if prebuffer is busy
-        # This ensures players get fast responses even when background prefetching is active
+        # Player requests should get priority over background prebuffer activity.
+        # Use a configurable lock timeout to balance responsiveness and cache reuse.
         if settings.enable_dash_prebuffer:
-            segment_content = await dash_prebuffer.get_or_download(segment_url, proxy_headers.request, timeout=1.0)
+            segment_content = await dash_prebuffer.get_or_download(
+                segment_url, proxy_headers.request, timeout=settings.dash_player_lock_timeout
+            )
         else:
             # Prebuffer disabled - check cache then download directly
             segment_content = await get_cached_segment(segment_url)
