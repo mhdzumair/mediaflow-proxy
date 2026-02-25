@@ -70,13 +70,14 @@ def _content_disposition_inline(filename: str) -> str:
     may contain unicode (e.g. Cyrillic), so we use RFC 6266 `filename*` when needed.
     """
     safe = (filename or "").strip()
+    safe = safe.replace("\n", " ").replace("\r", " ").replace('\\', '\\\\').replace('"', '\\"')
     if not safe:
         return "inline"
     try:
         safe.encode("latin-1")
         return f'inline; filename="{safe}"'
     except UnicodeEncodeError:
-        encoded = quote(safe.encode("utf-8"))
+        encoded = quote(safe, encoding="utf-8", safe="")
         return f"inline; filename*=UTF-8''{encoded}"
 
 
