@@ -686,9 +686,18 @@ class M3U8Processor:
         if uri_match:
             original_uri = uri_match.group(1)
             uri = parse.urlparse(original_uri)
-            if self.key_url:
+            # Only substitute key_url scheme/netloc for actual EXT-X-KEY lines.
+            # EXT-X-MAP (init segments) and other tags must keep their original host,
+            # otherwise the proxied destination URL gets the wrong upstream hostname.
+            if self.key_url and line.startswith("#EXT-X-KEY"):
                 uri = uri._replace(scheme=self.key_url.scheme, netloc=self.key_url.netloc)
-            new_uri = await self.proxy_url(uri.geturl(), base_url)
+            # Check if this is a DLHD stream with key params (needs stream endpoint for header computation)
+            query_params = dict(self.request.query_params)
+            is_dlhd_key_request = "dlhd_salt" in query_params and "/key/" in uri.geturl()
+            # Use stream endpoint for DLHD key URLs, manifest endpoint for others
+            new_uri = await self.proxy_url(
+                uri.geturl(), base_url, use_full_url=True, is_playlist=not is_dlhd_key_request
+            )
             line = line.replace(f'URI="{original_uri}"', f'URI="{new_uri}"')
         return line
 
@@ -810,25 +819,31 @@ class M3U8Processor:
         if is_playlist:
             proxy_url = self.mediaflow_proxy_url
         else:
-            # Determine segment extension from the URL
-            # Default to .ts for traditional HLS, but detect fMP4 extensions
-            segment_ext = "ts"
-            url_lower = full_url.lower()
-            # Check for fMP4/CMAF extensions
-            if url_lower.endswith(".m4s"):
-                segment_ext = "m4s"
-            elif url_lower.endswith(".mp4"):
-                segment_ext = "mp4"
-            elif url_lower.endswith(".m4a"):
-                segment_ext = "m4a"
-            elif url_lower.endswith(".m4v"):
-                segment_ext = "m4v"
-            elif url_lower.endswith(".aac"):
-                segment_ext = "aac"
-            # Build segment proxy URL with correct extension
-            proxy_url = f"{self.segment_proxy_base_url}.{segment_ext}"
-            # Remove h_range header - each segment should handle its own range requests
-            query_params.pop("h_range", None)
+            # Check if this is a DLHD key URL (needs /stream endpoint for header computation)
+            is_dlhd_key = "dlhd_salt" in query_params and "/key/" in full_url
+            if is_dlhd_key:
+                # Use /stream endpoint for DLHD key URLs
+                proxy_url = self.mediaflow_proxy_url.replace("/hls/manifest.m3u8", "/stream")
+            else:
+                # Determine segment extension from the URL
+                # Default to .ts for traditional HLS, but detect fMP4 extensions
+                segment_ext = "ts"
+                url_lower = full_url.lower()
+                # Check for fMP4/CMAF extensions
+                if url_lower.endswith(".m4s"):
+                    segment_ext = "m4s"
+                elif url_lower.endswith(".mp4"):
+                    segment_ext = "mp4"
+                elif url_lower.endswith(".m4a"):
+                    segment_ext = "m4a"
+                elif url_lower.endswith(".m4v"):
+                    segment_ext = "m4v"
+                elif url_lower.endswith(".aac"):
+                    segment_ext = "aac"
+                # Build segment proxy URL with correct extension
+                proxy_url = f"{self.segment_proxy_base_url}.{segment_ext}"
+                # Remove h_range header - each segment should handle its own range requests
+                query_params.pop("h_range", None)
 
         return encode_mediaflow_proxy_url(
             proxy_url,

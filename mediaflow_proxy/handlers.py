@@ -97,6 +97,13 @@ def handle_exceptions(exception: Exception, context: str = "") -> Response:
         # Client errors are often network issues - warning level
         logger.warning(f"Client error{ctx}: {exception}")
         return Response(status_code=502, content=f"Upstream connection error: {exception}")
+    elif isinstance(exception, HTTPException):
+        # HTTPException is intentionally raised (e.g. segment unavailable) - not unexpected
+        if exception.status_code >= 500:
+            logger.warning(f"HTTP exception{ctx}: {exception.status_code}: {exception.detail}")
+        else:
+            logger.debug(f"HTTP exception{ctx}: {exception.status_code}: {exception.detail}")
+        return Response(status_code=exception.status_code, content=exception.detail)
     elif isinstance(exception, ValueError) and "HTML instead of m3u8" in str(exception):
         # Expected error when upstream returns error page instead of playlist
         logger.warning(f"Upstream returned HTML{ctx}: stream may be offline or unavailable")
@@ -387,6 +394,11 @@ async def handle_stream_request(
         range_header = proxy_headers.request.get("range", "not set")
         logger.info(f"[handle_stream] Starting upstream {method} request - range: {range_header}")
 
+        # Track if this is an auto-added "bytes=0-" range (client didn't send range)
+        # We detect this by checking if range equals exactly "bytes=0-" which indicates
+        # a proxy-added default range, not a client seeking request
+        auto_added_range = proxy_headers.request.get("range") == "bytes=0-"
+
         # Use the same HTTP method for upstream request (HEAD for HEAD, GET for GET)
         # This prevents unnecessary data download when client just wants headers
         await streamer.create_streaming_response(video_url, proxy_headers.request, method=method)
@@ -400,11 +412,29 @@ async def handle_stream_request(
         )
         logger.debug(f"Prepared response headers: {response_headers}")
 
-        # If we're removing content-range but upstream returned 206, change to 200
-        # (206 Partial Content requires Content-Range header per HTTP spec)
+        # When client didn't send a Range header but upstream returns 206 Partial Content:
+        # - Convert status to 200 (full content, not partial)
+        # - Remove content-range header to avoid confusing the client
+        # This handles cases where we added bytes=0- range but upstream still treats it as a range request
         status_code = streamer.response.status
-        if status_code == 206 and "content-range" in [h.lower() for h in proxy_headers.remove]:
-            status_code = 200
+        if status_code == 206:
+            if "content-range" in [h.lower() for h in proxy_headers.remove]:
+                # Explicitly requested to remove content-range
+                status_code = 200
+                # Also remove content-range from response headers if present
+                response_headers.pop("content-range", None)
+            elif auto_added_range:
+                # We auto-added bytes=0- range but got 206 - convert to 200
+                # This happens when client didn't send a range but upstream responds with 206
+                status_code = 200
+                # Remove content-range to avoid confusing client
+                response_headers.pop("content-range", None)
+                # Update content-length to total size (remove range suffix if present)
+                content_range = streamer.response.headers.get("Content-Range", "")
+                if "/" in content_range:
+                    # Extract total size from "bytes X-Y/total"
+                    total_size = content_range.split("/")[-1].strip()
+                    response_headers["content-length"] = total_size
 
         # Get transformer instance if specified
         transformer = get_transformer(transformer_id)
@@ -630,6 +660,43 @@ async def fetch_and_process_m3u8(
         return handle_exceptions(e)
 
 
+def _normalize_drm_key_value(value: str) -> str:
+    """
+    Normalize a DRM key_id or key value to lowercase hex.
+
+    Accepts either:
+    - A 32-char hex string (returned as-is, lowercased).
+    - A base64url-encoded value (decoded to hex).
+    - A comma-separated list of the above, for multi-key DRM scenarios.
+
+    Commas are treated as list separators, NOT as characters to pass into
+    base64 decoding.  Previously the ``len() != 32`` check was applied to
+    the entire comma-joined string, and ``urlsafe_b64decode`` silently
+    strips non-alphabet characters (including commas), causing adjacent keys
+    to be concatenated into an oversized byte string.
+
+    Args:
+        value: The key value string, or None.
+
+    Returns:
+        Normalized hex string (or comma-joined hex strings for multi-key),
+        or the original value unchanged if it is falsy.
+    """
+    if not value:
+        return value
+    if "," in value:
+        parts = [_normalize_single_key(p.strip()) for p in value.split(",") if p.strip()]
+        return ",".join(parts)
+    return _normalize_single_key(value)
+
+
+def _normalize_single_key(value: str) -> str:
+    """Convert a single key_id or key to a 32-char lowercase hex string."""
+    if len(value) != 32:
+        return base64.urlsafe_b64decode(pad_base64(value)).hex()
+    return value.lower()
+
+
 async def handle_drm_key_data(key_id, key, drm_info):
     """
     Handles the DRM key data, retrieving the key ID and key from the DRM info if not provided.
@@ -721,11 +788,13 @@ async def get_manifest(
 
     key_id, key = await handle_drm_key_data(manifest_params.key_id, manifest_params.key, drm_info)
 
-    # check if the provided key_id and key are valid
-    if key_id and len(key_id) != 32:
-        key_id = base64.urlsafe_b64decode(pad_base64(key_id)).hex()
-    if key and len(key) != 32:
-        key = base64.urlsafe_b64decode(pad_base64(key)).hex()
+    # Normalize key_id and key: convert from base64 to hex when needed.
+    # Each value may be a comma-separated list for multi-key DRM; each part is
+    # normalized independently so that commas are never passed to urlsafe_b64decode
+    # (base64 silently ignores non-alphabet characters, stripping commas and
+    # concatenating the keys into a single oversized value).
+    key_id = _normalize_drm_key_value(key_id)
+    key = _normalize_drm_key_value(key)
 
     return await process_manifest(
         request, mpd_dict, proxy_headers, key_id, key, manifest_params.resolution, skip_segments
@@ -808,10 +877,12 @@ async def get_segment(
         # - Waiting for existing downloads (via asyncio.Event)
         # - Starting new download if needed
         # - Caching the result
-        # Use a short timeout (1s) for player requests to avoid blocking if prebuffer is busy
-        # This ensures players get fast responses even when background prefetching is active
+        # Player requests should get priority over background prebuffer activity.
+        # Use a configurable lock timeout to balance responsiveness and cache reuse.
         if settings.enable_dash_prebuffer:
-            segment_content = await dash_prebuffer.get_or_download(segment_url, proxy_headers.request, timeout=1.0)
+            segment_content = await dash_prebuffer.get_or_download(
+                segment_url, proxy_headers.request, timeout=settings.dash_player_lock_timeout
+            )
         else:
             # Prebuffer disabled - check cache then download directly
             segment_content = await get_cached_segment(segment_url)

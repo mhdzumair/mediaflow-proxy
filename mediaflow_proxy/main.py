@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sys
 from contextlib import asynccontextmanager
 from importlib import resources
 
@@ -11,25 +12,35 @@ from starlette.staticfiles import StaticFiles
 
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.middleware import UIAccessControlMiddleware
-from mediaflow_proxy.routes import (
-    proxy_router,
-    extractor_router,
-    speedtest_router,
-    playlist_builder_router,
-    xtream_root_router,
-    acestream_router,
-    telegram_router,
-)
+from mediaflow_proxy.routes.proxy import proxy_router
+from mediaflow_proxy.routes.extractor import extractor_router
+from mediaflow_proxy.routes.speedtest import speedtest_router
+from mediaflow_proxy.routes.playlist_builder import playlist_builder_router
+from mediaflow_proxy.routes.xtream import xtream_root_router
 from mediaflow_proxy.schemas import GenerateUrlRequest, GenerateMultiUrlRequest, MultiUrlRequestItem
 from mediaflow_proxy.utils.crypto_utils import EncryptionHandler, EncryptionMiddleware
 from mediaflow_proxy.utils import redis_utils
 from mediaflow_proxy.utils.http_utils import encode_mediaflow_proxy_url
 from mediaflow_proxy.utils.base64_utils import encode_url_to_base64, decode_base64_url, is_base64_url
-from mediaflow_proxy.utils.acestream import acestream_manager
-from mediaflow_proxy.utils.telegram import telegram_manager
 
 logging.basicConfig(level=settings.log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+# Suppress Telethon's "RuntimeError: coroutine ignored GeneratorExit" warnings.
+# These are harmless GC noise from Telethon's internal _recv_loop coroutines
+# when parallel download connections are cleaned up after client disconnect.
+_default_unraisable_hook = sys.unraisablehook
+
+
+def _filtered_unraisable_hook(unraisable):
+    if isinstance(unraisable.exc_value, RuntimeError) and "coroutine ignored GeneratorExit" in str(
+        unraisable.exc_value
+    ):
+        return  # Suppress Telethon GC noise
+    _default_unraisable_hook(unraisable)
+
+
+sys.unraisablehook = _filtered_unraisable_hook
 
 
 @asynccontextmanager
@@ -48,11 +59,17 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down...")
     # Close acestream sessions
-    await acestream_manager.close()
-    logger.info("Acestream manager closed")
+    if settings.enable_acestream:
+        from mediaflow_proxy.utils.acestream import acestream_manager
+
+        await acestream_manager.close()
+        logger.info("Acestream manager closed")
     # Close telegram session
-    await telegram_manager.close()
-    logger.info("Telegram manager closed")
+    if settings.enable_telegram:
+        from mediaflow_proxy.utils.telegram import telegram_manager
+
+        await telegram_manager.close()
+        logger.info("Telegram manager closed")
     # Close Redis connections
     await redis_utils.close_redis()
     logger.info("Redis connections closed")
@@ -286,8 +303,14 @@ async def check_base64_url(url: str):
 
 
 app.include_router(proxy_router, prefix="/proxy", tags=["proxy"], dependencies=[Depends(verify_api_key)])
-app.include_router(acestream_router, prefix="/proxy", tags=["acestream"], dependencies=[Depends(verify_api_key)])
-app.include_router(telegram_router, prefix="/proxy", tags=["telegram"], dependencies=[Depends(verify_api_key)])
+if settings.enable_acestream:
+    from mediaflow_proxy.routes.acestream import acestream_router
+
+    app.include_router(acestream_router, prefix="/proxy", tags=["acestream"], dependencies=[Depends(verify_api_key)])
+if settings.enable_telegram:
+    from mediaflow_proxy.routes.telegram import telegram_router
+
+    app.include_router(telegram_router, prefix="/proxy", tags=["telegram"], dependencies=[Depends(verify_api_key)])
 app.include_router(extractor_router, prefix="/extractor", tags=["extractors"], dependencies=[Depends(verify_api_key)])
 app.include_router(speedtest_router, prefix="/speedtest", tags=["speedtest"], dependencies=[Depends(verify_api_key)])
 app.include_router(playlist_builder_router, prefix="/playlist", tags=["playlist"])

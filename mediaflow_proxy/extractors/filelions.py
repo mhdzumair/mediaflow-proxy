@@ -24,4 +24,5 @@ class FileLionsExtractor(BaseExtractor):
             "destination_url": final_url,
             "request_headers": self.base_headers,
             "mediaflow_endpoint": self.mediaflow_endpoint,
+            "stream_transformer": "ts_stream",
         }

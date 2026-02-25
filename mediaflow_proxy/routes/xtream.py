@@ -22,6 +22,7 @@ Configuration:
 import base64
 import logging
 import re
+from functools import lru_cache
 from typing import Annotated
 from urllib.parse import urljoin, urlencode, urlparse
 
@@ -37,6 +38,94 @@ from mediaflow_proxy.utils.http_client import create_aiohttp_session
 
 logger = logging.getLogger(__name__)
 xtream_root_router = APIRouter()
+
+
+@lru_cache(maxsize=1)
+def _load_transcode_components():
+    from mediaflow_proxy.remuxer.media_source import HTTPMediaSource
+    from mediaflow_proxy.remuxer.transcode_handler import (
+        handle_transcode,
+        handle_transcode_hls_init,
+        handle_transcode_hls_playlist,
+        handle_transcode_hls_segment,
+    )
+
+    return (
+        HTTPMediaSource,
+        handle_transcode,
+        handle_transcode_hls_init,
+        handle_transcode_hls_playlist,
+        handle_transcode_hls_segment,
+    )
+
+
+async def _handle_xtream_transcode(request, upstream_url: str, proxy_headers, start_time: float | None):
+    """Shared transcode handler for Xtream stream endpoints."""
+    if not settings.enable_transcode:
+        raise HTTPException(status_code=503, detail="Transcoding support is disabled")
+    HTTPMediaSource, handle_transcode, _, _, _ = _load_transcode_components()
+    source = HTTPMediaSource(url=upstream_url, headers=dict(proxy_headers.request))
+    await source.resolve_file_size()
+    return await handle_transcode(request, source, start_time=start_time)
+
+
+async def _handle_xtream_hls_playlist(request, upstream_url: str, proxy_headers):
+    """Generate HLS VOD playlist for an Xtream stream."""
+    if not settings.enable_transcode:
+        raise HTTPException(status_code=503, detail="Transcoding support is disabled")
+    HTTPMediaSource, _, _, handle_transcode_hls_playlist, _ = _load_transcode_components()
+    from urllib.parse import quote
+
+    source = HTTPMediaSource(url=upstream_url, headers=dict(proxy_headers.request))
+    await source.resolve_file_size()
+
+    # Build URLs using the generic proxy transcode endpoints with upstream URL
+    encoded_url = quote(upstream_url, safe="")
+    base_params = f"d={encoded_url}"
+    original = request.query_params
+    if "api_password" in original:
+        base_params += f"&api_password={quote(original['api_password'], safe='')}"
+
+    init_url = f"/proxy/transcode/init.mp4?{base_params}"
+    segment_url_template = (
+        f"/proxy/transcode/segment.m4s?{base_params}&seg={{seg}}&start_ms={{start_ms}}&end_ms={{end_ms}}"
+    )
+
+    return await handle_transcode_hls_playlist(
+        request,
+        source,
+        init_url=init_url,
+        segment_url_template=segment_url_template,
+    )
+
+
+async def _handle_xtream_hls_init(request, upstream_url: str, proxy_headers):
+    """Serve fMP4 init segment for an Xtream stream."""
+    if not settings.enable_transcode:
+        raise HTTPException(status_code=503, detail="Transcoding support is disabled")
+    HTTPMediaSource, _, handle_transcode_hls_init, _, _ = _load_transcode_components()
+    source = HTTPMediaSource(url=upstream_url, headers=dict(proxy_headers.request))
+    await source.resolve_file_size()
+    return await handle_transcode_hls_init(request, source)
+
+
+async def _handle_xtream_hls_segment(
+    request,
+    upstream_url: str,
+    proxy_headers,
+    start_ms: float,
+    end_ms: float,
+    seg: int | None = None,
+):
+    """Serve a single HLS fMP4 segment for an Xtream stream."""
+    if not settings.enable_transcode:
+        raise HTTPException(status_code=503, detail="Transcoding support is disabled")
+    HTTPMediaSource, _, _, _, handle_transcode_hls_segment = _load_transcode_components()
+    source = HTTPMediaSource(url=upstream_url, headers=dict(proxy_headers.request))
+    await source.resolve_file_size()
+    return await handle_transcode_hls_segment(
+        request, source, start_time_ms=start_ms, end_time_ms=end_ms, segment_number=seg
+    )
 
 
 def decode_upstream_url(upstream_encoded: str) -> str:
@@ -692,6 +781,13 @@ async def movie_stream(
     ext: str,
     request: Request,
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+    transcode: bool = Query(False, description="Transcode to browser-compatible fMP4"),
+    hls: bool = Query(False, description="Generate HLS VOD playlist for transcode (seekable)"),
+    hls_init: bool = Query(False, description="Serve fMP4 init segment"),
+    seg: int | None = Query(None, description="HLS segment number (informational)"),
+    start_ms: float | None = Query(None, description="HLS segment start time in milliseconds"),
+    end_ms: float | None = Query(None, description="HLS segment end time in milliseconds"),
+    start: float | None = Query(None, description="Seek start time in seconds (transcode mode)"),
 ):
     """
     VOD/movie stream endpoint.
@@ -703,6 +799,18 @@ async def movie_stream(
     upstream_url = urljoin(upstream_base, stream_path)
 
     logger.info(f"XC movie stream: {stream_path}")
+
+    if hls:
+        return await _handle_xtream_hls_playlist(request, upstream_url, proxy_headers)
+    if hls_init:
+        return await _handle_xtream_hls_init(request, upstream_url, proxy_headers)
+    if (start_ms is None) != (end_ms is None):
+        raise HTTPException(status_code=400, detail="Both start_ms and end_ms are required for segment requests")
+    if start_ms is not None and end_ms is not None:
+        return await _handle_xtream_hls_segment(request, upstream_url, proxy_headers, start_ms, end_ms, seg)
+    if transcode:
+        return await _handle_xtream_transcode(request, upstream_url, proxy_headers, start)
+
     return await proxy_stream(request.method, upstream_url, proxy_headers)
 
 
@@ -715,6 +823,13 @@ async def series_stream(
     ext: str,
     request: Request,
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+    transcode: bool = Query(False, description="Transcode to browser-compatible fMP4"),
+    hls: bool = Query(False, description="Generate HLS VOD playlist for transcode (seekable)"),
+    hls_init: bool = Query(False, description="Serve fMP4 init segment"),
+    seg: int | None = Query(None, description="HLS segment number (informational)"),
+    start_ms: float | None = Query(None, description="HLS segment start time in milliseconds"),
+    end_ms: float | None = Query(None, description="HLS segment end time in milliseconds"),
+    start: float | None = Query(None, description="Seek start time in seconds (transcode mode)"),
 ):
     """
     Series/episode stream endpoint.
@@ -726,6 +841,18 @@ async def series_stream(
     upstream_url = urljoin(upstream_base, stream_path)
 
     logger.info(f"XC series stream: {stream_path}")
+
+    if hls:
+        return await _handle_xtream_hls_playlist(request, upstream_url, proxy_headers)
+    if hls_init:
+        return await _handle_xtream_hls_init(request, upstream_url, proxy_headers)
+    if (start_ms is None) != (end_ms is None):
+        raise HTTPException(status_code=400, detail="Both start_ms and end_ms are required for segment requests")
+    if start_ms is not None and end_ms is not None:
+        return await _handle_xtream_hls_segment(request, upstream_url, proxy_headers, start_ms, end_ms, seg)
+    if transcode:
+        return await _handle_xtream_transcode(request, upstream_url, proxy_headers, start)
+
     return await proxy_stream(request.method, upstream_url, proxy_headers)
 
 
@@ -740,6 +867,8 @@ async def timeshift_stream(
     ext: str,
     request: Request,
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+    transcode: bool = Query(False, description="Transcode to browser-compatible fMP4"),
+    seek: float | None = Query(None, description="Seek start time in seconds (transcode mode)"),
 ):
     """
     Timeshift/catch-up stream endpoint.
@@ -751,6 +880,10 @@ async def timeshift_stream(
     upstream_url = urljoin(upstream_base, stream_path)
 
     logger.info(f"XC timeshift stream: {stream_path}")
+
+    if transcode:
+        return await _handle_xtream_transcode(request, upstream_url, proxy_headers, seek)
+
     return await proxy_stream(request.method, upstream_url, proxy_headers)
 
 
@@ -932,6 +1065,13 @@ async def movie_stream_no_ext(
     stream_id: str,
     request: Request,
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+    transcode: bool = Query(False, description="Transcode to browser-compatible fMP4"),
+    hls: bool = Query(False, description="Generate HLS VOD playlist for transcode (seekable)"),
+    hls_init: bool = Query(False, description="Serve fMP4 init segment"),
+    seg: int | None = Query(None, description="HLS segment number (informational)"),
+    start_ms: float | None = Query(None, description="HLS segment start time in milliseconds"),
+    end_ms: float | None = Query(None, description="HLS segment end time in milliseconds"),
+    start: float | None = Query(None, description="Seek start time in seconds (transcode mode)"),
 ):
     """
     Movie stream endpoint without extension.
@@ -944,6 +1084,17 @@ async def movie_stream_no_ext(
 
     logger.info(f"XC movie stream (no ext): {stream_path}")
 
+    if hls:
+        return await _handle_xtream_hls_playlist(request, upstream_url, proxy_headers)
+    if hls_init:
+        return await _handle_xtream_hls_init(request, upstream_url, proxy_headers)
+    if (start_ms is None) != (end_ms is None):
+        raise HTTPException(status_code=400, detail="Both start_ms and end_ms are required for segment requests")
+    if start_ms is not None and end_ms is not None:
+        return await _handle_xtream_hls_segment(request, upstream_url, proxy_headers, start_ms, end_ms, seg)
+    if transcode:
+        return await _handle_xtream_transcode(request, upstream_url, proxy_headers, start)
+
     return await proxy_stream(request.method, upstream_url, proxy_headers)
 
 
@@ -955,6 +1106,13 @@ async def series_stream_no_ext(
     stream_id: str,
     request: Request,
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
+    transcode: bool = Query(False, description="Transcode to browser-compatible fMP4"),
+    hls: bool = Query(False, description="Generate HLS VOD playlist for transcode (seekable)"),
+    hls_init: bool = Query(False, description="Serve fMP4 init segment"),
+    seg: int | None = Query(None, description="HLS segment number (informational)"),
+    start_ms: float | None = Query(None, description="HLS segment start time in milliseconds"),
+    end_ms: float | None = Query(None, description="HLS segment end time in milliseconds"),
+    start: float | None = Query(None, description="Seek start time in seconds (transcode mode)"),
 ):
     """
     Series stream endpoint without extension.
@@ -966,6 +1124,17 @@ async def series_stream_no_ext(
     upstream_url = urljoin(upstream_base, stream_path)
 
     logger.info(f"XC series stream (no ext): {stream_path}")
+
+    if hls:
+        return await _handle_xtream_hls_playlist(request, upstream_url, proxy_headers)
+    if hls_init:
+        return await _handle_xtream_hls_init(request, upstream_url, proxy_headers)
+    if (start_ms is None) != (end_ms is None):
+        raise HTTPException(status_code=400, detail="Both start_ms and end_ms are required for segment requests")
+    if start_ms is not None and end_ms is not None:
+        return await _handle_xtream_hls_segment(request, upstream_url, proxy_headers, start_ms, end_ms, seg)
+    if transcode:
+        return await _handle_xtream_transcode(request, upstream_url, proxy_headers, start)
 
     return await proxy_stream(request.method, upstream_url, proxy_headers)
 

@@ -56,6 +56,15 @@ MediaFlow Proxy is a powerful and flexible solution for proxifying various types
 - Optional IP-based access control for encrypted URLs
 - URL expiration support for encrypted URLs
 
+### On-the-fly Transcoding
+- **Universal video/audio transcoding** to browser-compatible fMP4 (H.264 + AAC)
+- **GPU hardware acceleration** (NVIDIA NVENC, Apple VideoToolbox, Intel VAAPI/QSV) with automatic CPU fallback
+- Supports **any input container** (MKV, MP4, TS, WebM, FLV, etc.) and codec (HEVC, VP8/VP9, MPEG-2, MPEG-4, AC3, EAC3, Vorbis, Opus, etc.)
+- **On-the-fly streaming** -- no full-file buffering; pipe-based demuxing for MKV/TS/WebM and moov-atom probing for MP4
+- **Smart format detection** -- filename extension hints + magic byte sniffing to avoid wasteful probe attempts
+- Available on **all proxy endpoints**: `/proxy/stream`, Telegram, Acestream, and Xtream Codes
+- Triggered by `&transcode=true` query parameter with optional `&start=<seconds>` for seeking
+
 ### Additional Features
 - Built-in speed test for RealDebrid and AllDebrid services
 - Custom header injection and modification
@@ -247,6 +256,8 @@ MediaFlow Proxy can act as a proxy for Acestream P2P streams, converting them to
 |-----------|-------------|
 | `id` | Acestream content ID (alternative to infohash) |
 | `infohash` | Acestream infohash (40-char hex from magnet link) |
+| `transcode` | Set to `true` to transcode to browser-compatible fMP4 (H.264 + AAC) |
+| `start` | Seek start time in seconds (used with `transcode=true`) |
 
 **Example URLs:**
 ```
@@ -255,6 +266,9 @@ https://your-mediaflow/proxy/acestream/stream?id=YOUR_CONTENT_ID&api_password=yo
 
 # MPEG-TS stream (infohash from magnet)
 https://your-mediaflow/proxy/acestream/stream?infohash=b04372b9543d763bd2dbd2a1842d9723fd080076&api_password=your_password
+
+# Transcode to browser-compatible fMP4
+https://your-mediaflow/proxy/acestream/stream?id=YOUR_CONTENT_ID&transcode=true&api_password=your_password
 
 # HLS manifest (alternative)
 https://your-mediaflow/proxy/acestream/manifest.m3u8?id=YOUR_CONTENT_ID&api_password=your_password
@@ -328,6 +342,9 @@ TELEGRAM_SESSION_STRING=your_session_string_here
 |----------|-------------|
 | `/proxy/telegram/stream` | Stream media from t.me link or file_id |
 | `/proxy/telegram/stream/{filename}` | Stream with custom filename |
+| `/proxy/telegram/transcode/playlist.m3u8` | HLS transcode playlist (recommended for browser playback and smooth seeking) |
+| `/proxy/telegram/transcode/init.mp4` | fMP4 init segment for Telegram transcode playlist |
+| `/proxy/telegram/transcode/segment.m4s` | fMP4 media segment for Telegram transcode playlist |
 | `/proxy/telegram/info` | Get media metadata |
 | `/proxy/telegram/status` | Session status and health check |
 
@@ -340,6 +357,8 @@ TELEGRAM_SESSION_STRING=your_session_string_here
 | `message_id` | Message ID within the chat (use with `chat_id`) |
 | `file_id` | Bot API file_id (use with `file_size`) |
 | `file_size` | File size in bytes (required when using `file_id`) |
+| `transcode` | Set to `true` for direct transcode mode on `/proxy/telegram/stream` (URL Generator defaults to `/proxy/telegram/transcode/playlist.m3u8` when no start time is set) |
+| `start` | Seek start time in seconds (direct transcode mode only, used with `transcode=true`) |
 
 #### Supported Input Formats
 
@@ -1075,6 +1094,12 @@ Ideal for users who want a reliable, plug-and-play solution without the technica
 6. `/proxy/ip`: Get the public IP address of the MediaFlow Proxy server
 7. `/extractor/video`: Extract direct video stream URLs from supported hosts (see below)
 8. `/playlist/builder`: Build and customize playlists from multiple sources
+9. `/proxy/transcode/playlist.m3u8`: Generate HLS VOD playlist for generic stream transcode
+10. `/proxy/transcode/init.mp4`: fMP4 init segment for generic transcode playlist
+11. `/proxy/transcode/segment.m4s`: fMP4 media segment for generic transcode playlist
+12. `/proxy/telegram/transcode/playlist.m3u8`: Generate HLS VOD playlist for Telegram transcode
+13. `/proxy/telegram/transcode/init.mp4`: fMP4 init segment for Telegram transcode playlist
+14. `/proxy/telegram/transcode/segment.m4s`: fMP4 media segment for Telegram transcode playlist
 
 Once the server is running, for more details on the available endpoints and their parameters, visit the Swagger UI at `http://localhost:8888/docs`.
 
@@ -1306,6 +1331,27 @@ Apply stream content transformations for specific hosting providers.
 - **Example:** `&transformer=ts_stream&x_headers=content-length,content-range` for streams with PNG wrappers.
 - **Note:** This parameter is automatically set when using extractors for supported hosts.
 
+**`/proxy/transcode/playlist.m3u8` and `/proxy/telegram/transcode/playlist.m3u8` (recommended)**  
+Use HLS transcode playlists for smooth browser playback and robust seeking with fMP4 segments.  
+- **Usage:** Open the playlist endpoint directly with `d` (or Telegram params), optional `api_password`, and optional `h_*` headers.  
+- **Effect:** Generates an HLS VOD playlist that references `init.mp4` + `segment.m4s` endpoints with browser-compatible H.264/AAC output.  
+- **URL Generator behavior:** When transcode is enabled and no start time is provided, URL Generator outputs these playlist URLs by default.
+
+**`&transcode=true` (direct mode)**  
+Transcode the stream directly to browser-compatible fragmented MP4 (fMP4) with H.264 video and AAC audio.  
+- **Usage:** Add `&transcode=true` to `/proxy/stream`, `/proxy/telegram/stream`, `/proxy/acestream/stream`, or Xtream Codes live/movie/series stream URLs.  
+- **Effect:** Re-encodes unsupported video codecs (HEVC, VP8/VP9, MPEG-2, MPEG-4, etc.) to H.264 and unsupported audio codecs (AC3, EAC3, Vorbis, Opus, FLAC, DTS, etc.) to AAC. Browser-compatible codecs (H.264 video, AAC audio) are passed through without re-encoding.  
+- **GPU Acceleration:** Automatically uses GPU encoding when available (NVIDIA NVENC, Apple VideoToolbox, Intel VAAPI/QSV). Falls back to CPU (libx264) otherwise.  
+- **On-the-fly:** Streaming is real-time with pipe-based demuxing. For MP4 inputs, the moov atom is probed and rewritten for immediate playback without downloading the full file.
+
+**`&start=120`**  
+Seek to a specific time position before starting transcoded playback.  
+- **Usage:** Add `&start=120` (value in seconds) alongside `&transcode=true` in direct transcode mode  
+- **Effect:** Starts transcoding from the specified time offset. For indexed containers (MKV cues, MP4 moov), this seeks to the nearest keyframe. For non-indexed formats (TS), this is a byte-estimate seek.  
+- **Supported Endpoints:** `/proxy/stream`, `/proxy/telegram/stream`, `/proxy/acestream/stream`, Xtream Codes live/movie/series endpoints  
+- **Note:** `start` is not used by `/proxy/transcode/playlist.m3u8` or `/proxy/telegram/transcode/playlist.m3u8` endpoints.
+- **Example:** `&transcode=true&start=300` starts playback from 5 minutes into the stream
+
 **`&ratelimit=vidoza`**  
 Apply host-specific rate limiting to prevent CDN 509 (Bandwidth Limit Exceeded) errors. Requires Redis to be configured.  
 - **Usage:** Add `&ratelimit=handler_id` to the `/proxy/stream` URL  
@@ -1415,6 +1461,51 @@ mpv "http://localhost:8888/proxy/acestream/manifest.m3u8?id=your_content_id&star
 ```
 
 **Note:** The `start_offset` parameter is particularly useful for live streams where the prebuffer system cannot prefetch segments when sitting at the live edge. By starting slightly behind (e.g., `-18` seconds), there are future segments available for prebuffering, resulting in smoother playback. This works for both native HLS and DASH/MPD streams converted to HLS.
+
+#### Transcode Stream for Browser Playback
+
+```bash
+# Recommended: HLS transcode playlist for generic streams
+mpv "http://localhost:8888/proxy/transcode/playlist.m3u8?d=https://example.com/video.mkv&api_password=your_password"
+
+# Recommended: HLS transcode playlist for Telegram streams
+mpv "http://localhost:8888/proxy/telegram/transcode/playlist.m3u8?d=https://t.me/channelname/123&api_password=your_password"
+
+# Direct transcode mode with explicit seek start (start at 5 minutes)
+mpv "http://localhost:8888/proxy/stream?d=https://example.com/video.mp4&transcode=true&start=300&api_password=your_password"
+
+# Acestream transcode (direct mode)
+mpv "http://localhost:8888/proxy/acestream/stream?id=YOUR_CONTENT_ID&transcode=true&api_password=your_password"
+```
+
+**Note:** Transcoding uses GPU hardware acceleration when available (NVIDIA, Apple VideoToolbox, Intel). Browser-compatible codecs (H.264 video, AAC audio) are passed through without re-encoding to minimize resource usage.
+
+#### Transcode Performance Benchmarks
+
+Benchmark results for on-the-fly HEVC (H.265) to H.264 transcoding. Source: 4K (3840x2160) 30-second clip at 24fps with EAC3 5.1 audio, from a real movie file.
+
+**MediaFlow Proxy (on-the-fly streaming via PyAV pipeline):**
+
+| Source | Encoder | Wall Clock | Video Frames | Effective FPS | Output |
+|--------|---------|-----------|--------------|---------------|--------|
+| 4K HEVC MKV (EAC3) | VideoToolbox (GPU) | **11.7s** | 722 | **61.7 fps** | 15.1 MB |
+| 4K HEVC MKV (EAC3) | libx264 (CPU) | 26.2s | 722 | 27.6 fps | 15.1 MB |
+
+**Direct FFmpeg CLI baseline (local file, no HTTP proxy):**
+
+| Source | Encoder | Wall Clock | CPU Time | CPU Usage |
+|--------|---------|-----------|----------|-----------|
+| 4K HEVC MKV | VideoToolbox (GPU) | **11.9s** | 10.7s | 92% |
+| 4K HEVC MKV | libx264 (CPU) | 11.4s | 81.7s | 725% |
+
+**Key observations:**
+- **GPU MediaFlow matches direct FFmpeg** -- the optimized pipeline adds near-zero overhead (11.7s vs 11.9s)
+- GPU **exceeds real-time by 2.5x** for 4K 24fps content (62 fps), meaning no buffering delays
+- **GPU uses ~7x less CPU** than software encoding (92% vs 725%), leaving resources free for concurrent streams
+- The pipeline optimizations (thread-safe queues, eliminated async round-trips, skip redundant decoder flush) reduced GPU wall-clock from ~17s to ~11.7s (**31% improvement**)
+- On servers with NVIDIA GPUs, hardware HEVC decoding (`hevc_cuvid`) would further reduce both wall-clock time and CPU usage
+
+*Tested on Apple Silicon (M4) with PyAV 16.1.0 and FFmpeg 8.0. Results vary by hardware, content complexity, and network conditions.*
 
 #### Stream with Header Removal (Fix Content-Length Issues)
 

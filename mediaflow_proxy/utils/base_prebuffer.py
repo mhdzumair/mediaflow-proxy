@@ -90,6 +90,7 @@ class BasePrebuffer(ABC):
         max_memory_percent: float,
         emergency_threshold: float,
         segment_ttl: int = 60,
+        prebuffer_lock_timeout: float = 1.0,
     ):
         """
         Initialize the base prebuffer.
@@ -100,12 +101,14 @@ class BasePrebuffer(ABC):
             max_memory_percent: Maximum memory usage percentage before skipping prebuffer
             emergency_threshold: Memory threshold for emergency cleanup
             segment_ttl: TTL for cached segments in seconds
+            prebuffer_lock_timeout: Lock acquisition timeout (seconds) for background prebuffer tasks
         """
         self.max_cache_size = max_cache_size
         self.prebuffer_segment_count = prebuffer_segments
         self.max_memory_percent = max_memory_percent
         self.emergency_threshold = emergency_threshold
         self.segment_ttl = segment_ttl
+        self.prebuffer_lock_timeout = prebuffer_lock_timeout
 
         # Statistics (per-worker, not shared - but that's fine for monitoring)
         self.stats = PrebufferStats()
@@ -310,7 +313,7 @@ class BasePrebuffer(ABC):
         try:
             # Try to acquire lock with short timeout for prebuffering
             # If lock is held by another process, skip this segment
-            lock_acquired = await redis_utils.acquire_lock(lock_key, ttl=30, timeout=1.0)
+            lock_acquired = await redis_utils.acquire_lock(lock_key, ttl=30, timeout=self.prebuffer_lock_timeout)
 
             if not lock_acquired:
                 # Another process is downloading, skip this segment

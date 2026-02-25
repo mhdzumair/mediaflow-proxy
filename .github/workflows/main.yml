@@ -71,3 +71,42 @@ jobs:
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         password: ${{ secrets.PYPI_API_TOKEN }}
+
+  generate_release_notes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Persist GitHub-generated release body
+        run: |
+          cat << 'EOF' > github_generated_release_body.md
+          ${{ github.event.release.body }}
+          EOF
+
+      - name: Extract versions
+        id: extract_versions
+        run: |
+          if ! PREVIOUS_VERSION=$(grep -o '/compare/.*\.\.\.' github_generated_release_body.md | sed 's/\/compare\///' | sed 's/\.\.\.//' || true); then
+            echo "Error: Failed to extract previous version from release body"
+            exit 1
+          fi
+          echo "PREVIOUS_VERSION=${PREVIOUS_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Release Notes
+        run: |
+          make generate-notes VERSION_OLD=${{ steps.extract_versions.outputs.PREVIOUS_VERSION }} VERSION_NEW=${{ github.ref_name }} GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }} GITHUB_RELEASE_BODY_FILE=github_generated_release_body.md > release_notes.md
+
+      - name: Update Release Notes
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          body_path: release_notes.md
+          token: ${{ secrets.GITHUB_TOKEN }}

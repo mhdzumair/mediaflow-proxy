@@ -9,7 +9,8 @@ Provides endpoints for proxying acestream content:
 
 import asyncio
 import logging
-from typing import Annotated
+from functools import lru_cache
+from typing import Annotated, TYPE_CHECKING
 from urllib.parse import urlencode, urljoin, urlparse
 
 import aiohttp
@@ -17,7 +18,7 @@ from fastapi import APIRouter, Query, Request, HTTPException, Response, Depends
 from starlette.background import BackgroundTask
 
 from mediaflow_proxy.configs import settings
-from mediaflow_proxy.utils.acestream import acestream_manager, AcestreamSession
+from mediaflow_proxy.utils.http_client import create_aiohttp_session
 from mediaflow_proxy.utils.http_utils import (
     get_original_scheme,
     get_proxy_headers,
@@ -28,10 +29,25 @@ from mediaflow_proxy.utils.http_utils import (
 )
 from mediaflow_proxy.utils.m3u8_processor import M3U8Processor
 from mediaflow_proxy.utils.hls_prebuffer import hls_prebuffer
-from mediaflow_proxy.utils.http_client import create_aiohttp_session
 
 logger = logging.getLogger(__name__)
 acestream_router = APIRouter()
+
+if TYPE_CHECKING:
+    from mediaflow_proxy.utils.acestream import AcestreamSession
+
+
+def _get_acestream_manager():
+    from mediaflow_proxy.utils.acestream import acestream_manager
+
+    return acestream_manager
+
+
+@lru_cache(maxsize=1)
+def _load_transcode_pipeline():
+    from mediaflow_proxy.remuxer.transcode_pipeline import stream_transcode_universal
+
+    return stream_transcode_universal
 
 
 class AcestreamM3U8Processor(M3U8Processor):
@@ -45,7 +61,7 @@ class AcestreamM3U8Processor(M3U8Processor):
     def __init__(
         self,
         request: Request,
-        session: AcestreamSession,
+        session: "AcestreamSession",
         key_url: str = None,
         force_playlist_proxy: bool = True,
         key_only_proxy: bool = False,
@@ -139,6 +155,7 @@ async def acestream_hls_manifest(
     """
     if not settings.enable_acestream:
         raise HTTPException(status_code=503, detail="Acestream support is disabled")
+    acestream_manager = _get_acestream_manager()
 
     if not infohash and not id:
         raise HTTPException(status_code=400, detail="Either 'infohash' or 'id' parameter is required")
@@ -277,6 +294,7 @@ async def acestream_segment_proxy(
     """
     if not settings.enable_acestream:
         raise HTTPException(status_code=503, detail="Acestream support is disabled")
+    acestream_manager = _get_acestream_manager()
 
     # Use id or infohash for session lookup
     session_key = id or infohash
@@ -342,6 +360,8 @@ async def acestream_ts_stream(
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
     infohash: str = Query(None, description="Acestream infohash"),
     id: str = Query(None, description="Acestream content ID (alternative to infohash)"),
+    transcode: bool = Query(False, description="Transcode to browser-compatible fMP4"),
+    start: float | None = Query(None, description="Seek start time in seconds (transcode mode)"),
 ):
     """
     Proxy Acestream MPEG-TS stream with fan-out to multiple clients.
@@ -349,17 +369,23 @@ async def acestream_ts_stream(
     Creates or reuses an acestream session and streams MPEG-TS content.
     Multiple clients can share the same upstream connection.
 
+    When transcode=true, the MPEG-TS stream is transcoded on-the-fly to
+    browser-compatible fMP4 (H.264 + AAC).
+
     Args:
         request: The incoming HTTP request.
         proxy_headers: Headers for proxy requests.
         infohash: The acestream infohash.
         id: Alternative content ID.
+        transcode: Transcode to browser-compatible format.
+        start: Seek start time in seconds (transcode mode).
 
     Returns:
-        MPEG-TS stream.
+        MPEG-TS stream (or fMP4 if transcode=true).
     """
     if not settings.enable_acestream:
         raise HTTPException(status_code=503, detail="Acestream support is disabled")
+    acestream_manager = _get_acestream_manager()
 
     if not infohash and not id:
         raise HTTPException(status_code=400, detail="Either 'infohash' or 'id' parameter is required")
@@ -387,6 +413,68 @@ async def acestream_ts_stream(
             ts_url = f"{base_url}/ace/getstream?infohash={infohash}&pid={session.pid}"
 
         logger.info(f"[acestream_ts_stream] Streaming from: {ts_url}")
+
+        if transcode:
+            if not settings.enable_transcode:
+                await acestream_manager.release_session(infohash)
+                raise HTTPException(status_code=503, detail="Transcoding support is disabled")
+            # Acestream provides a live MPEG-TS stream that does NOT support
+            # HTTP Range requests and is not seekable.  Use an ffmpeg subprocess
+            # to remux video (passthrough) and transcode audio (AC3→AAC) to
+            # fragmented MP4.  The subprocess approach isolates native FFmpeg
+            # crashes from the Python server process.
+
+            if request.method == "HEAD":
+                await acestream_manager.release_session(infohash)
+                return Response(
+                    status_code=200,
+                    headers={
+                        "access-control-allow-origin": "*",
+                        "cache-control": "no-cache, no-store",
+                        "content-type": "video/mp4",
+                        "content-disposition": "inline",
+                    },
+                )
+
+            async def _acestream_ts_source():
+                """Single-connection async byte generator for the live TS stream."""
+                try:
+                    async with create_aiohttp_session(ts_url) as (session, proxy_url):
+                        async with session.get(
+                            ts_url,
+                            proxy=proxy_url,
+                            allow_redirects=True,
+                        ) as resp:
+                            resp.raise_for_status()
+                            async for chunk in resp.content.iter_any():
+                                yield chunk
+                except asyncio.CancelledError:
+                    logger.debug("[acestream_ts_stream] Transcode source cancelled")
+                except GeneratorExit:
+                    logger.debug("[acestream_ts_stream] Transcode source closed")
+
+            # Use our custom PyAV pipeline with forced video re-encoding
+            # (live MPEG-TS sources often have corrupt H.264 bitstreams
+            # that browsers reject; re-encoding produces a clean stream).
+            stream_transcode_universal = _load_transcode_pipeline()
+            content = stream_transcode_universal(
+                _acestream_ts_source(),
+                force_video_reencode=True,
+            )
+
+            async def release_transcode_session():
+                await acestream_manager.release_session(infohash)
+
+            return EnhancedStreamingResponse(
+                content=content,
+                media_type="video/mp4",
+                headers={
+                    "access-control-allow-origin": "*",
+                    "cache-control": "no-cache, no-store",
+                    "content-disposition": "inline",
+                },
+                background=BackgroundTask(release_transcode_session),
+            )
 
         streamer = await create_streamer(ts_url)
         try:
@@ -440,6 +528,7 @@ async def acestream_status(
     """
     if not settings.enable_acestream:
         raise HTTPException(status_code=503, detail="Acestream support is disabled")
+    acestream_manager = _get_acestream_manager()
 
     if infohash:
         session = acestream_manager.get_session(infohash)

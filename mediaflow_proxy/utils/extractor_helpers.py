@@ -78,8 +78,17 @@ async def check_and_extract_dlhd_stream(
 
         logger.info(f"DLHD extraction successful. Stream URL: {result.get('destination_url')}")
 
-        # Cache the result
-        _dlhd_extraction_cache[destination] = {"data": result, "timestamp": current_time}
+        # Handle dlhd_key_params - encode them for URL passing
+        if "dlhd_key_params" in result:
+            key_params = result.pop("dlhd_key_params")
+            # Add key params as special query parameters for key URL handling
+            result["dlhd_channel_salt"] = key_params.get("channel_salt", "")
+            result["dlhd_auth_token"] = key_params.get("auth_token", "")
+            result["dlhd_iframe_url"] = key_params.get("iframe_url", "")
+            logger.info("DLHD key params extracted for dynamic header computation")
+
+        # Cache a copy of result to prevent downstream mutations from corrupting the cache
+        _dlhd_extraction_cache[destination] = {"data": result.copy(), "timestamp": current_time}
         logger.info(f"DLHD data cached for {_dlhd_cache_duration}s")
 
         return result

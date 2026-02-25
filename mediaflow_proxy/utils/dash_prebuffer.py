@@ -52,6 +52,7 @@ class DASHPreBuffer(BasePrebuffer):
             max_memory_percent=settings.dash_prebuffer_max_memory_percent,
             emergency_threshold=settings.dash_prebuffer_emergency_threshold,
             segment_ttl=settings.dash_segment_cache_ttl,
+            prebuffer_lock_timeout=settings.dash_prebuffer_lock_timeout,
         )
 
         self.inactivity_timeout = settings.dash_prebuffer_inactivity_timeout
@@ -122,8 +123,10 @@ class DASHPreBuffer(BasePrebuffer):
                 "last_access": time.time(),
             }
 
-            # Prebuffer init segments and media segments
-            await self._prebuffer_profiles(profiles_with_segments, headers, is_live)
+            # For live streams we only prewarm init segments by default; media prefetch
+            # is driven by player/playlist requests to avoid lock contention storms.
+            include_media = not is_live or settings.dash_live_initial_media_prebuffer
+            await self._prebuffer_profiles(profiles_with_segments, headers, is_live, include_media=include_media)
 
             # Start cleanup task if not running
             self._ensure_cleanup_task_running()
@@ -140,6 +143,7 @@ class DASHPreBuffer(BasePrebuffer):
         profiles: List[dict],
         headers: Dict[str, str],
         is_live: bool = False,
+        include_media: bool = True,
     ) -> None:
         """
         Pre-buffer init segments and media segments for all profiles.
@@ -151,6 +155,7 @@ class DASHPreBuffer(BasePrebuffer):
             profiles: List of parsed profiles with resolved URLs
             headers: Headers to use for requests
             is_live: Whether this is a live stream
+            include_media: Whether media segments should be prebuffered (init segments are always prewarmed)
         """
         if self._should_skip_for_memory():
             logger.warning("Memory usage too high, skipping prebuffer")
@@ -165,6 +170,9 @@ class DASHPreBuffer(BasePrebuffer):
             init_url = profile.get("initUrl")
             if init_url:
                 init_urls.append(init_url)
+
+            if not include_media:
+                continue
 
             # Get segments to prebuffer
             segments = profile.get("segments", [])
@@ -283,7 +291,13 @@ class DASHPreBuffer(BasePrebuffer):
                 if segment_urls:
                     logger.debug(f"Prefetching {len(segment_urls)} upcoming segments from index {current_index + 1}")
                     # Run prefetch in background
-                    asyncio.create_task(self.prebuffer_segments_batch(segment_urls, headers, max_concurrent=3))
+                    asyncio.create_task(
+                        self.prebuffer_segments_batch(
+                            segment_urls,
+                            headers,
+                            max_concurrent=max(settings.dash_prefetch_max_concurrent, 1),
+                        )
+                    )
 
         except Exception as e:
             logger.warning(f"Failed to prefetch upcoming segments: {e}")
@@ -322,7 +336,13 @@ class DASHPreBuffer(BasePrebuffer):
 
         if segment_urls:
             logger.debug(f"Live playlist prefetch: {len(segment_urls)} segments")
-            asyncio.create_task(self.prebuffer_segments_batch(segment_urls, headers, max_concurrent=3))
+            asyncio.create_task(
+                self.prebuffer_segments_batch(
+                    segment_urls,
+                    headers,
+                    max_concurrent=max(settings.dash_prefetch_max_concurrent, 1),
+                )
+            )
 
     def _ensure_cleanup_task_running(self) -> None:
         """Ensure the cleanup task is running."""
