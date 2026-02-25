@@ -12,6 +12,7 @@ import asyncio
 import logging
 import re
 import secrets
+from urllib.parse import quote
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -34,6 +35,24 @@ from mediaflow_proxy.utils.telegram import (
 
 logger = logging.getLogger(__name__)
 telegram_router = APIRouter()
+
+
+def _content_disposition_inline(filename: str) -> str:
+    """
+    Build a Content-Disposition header value that is always latin-1 safe.
+
+    Starlette/FastAPI requires header values to be latin-1 encodable. Telegram filenames
+    may contain unicode (e.g. Cyrillic), so we use RFC 6266 `filename*` when needed.
+    """
+    safe = (filename or "").strip()
+    if not safe:
+        return "inline"
+    try:
+        safe.encode("latin-1")
+        return f'inline; filename="{safe}"'
+    except UnicodeEncodeError:
+        encoded = quote(safe.encode("utf-8"))
+        return f"inline; filename*=UTF-8''{encoded}"
 
 
 def get_content_type(mime_type: str, file_name: Optional[str] = None) -> str:
@@ -204,7 +223,7 @@ async def telegram_stream(
                 "access-control-allow-origin": "*",
             }
             if media_filename:
-                headers["content-disposition"] = f'inline; filename="{media_filename}"'
+                headers["content-disposition"] = _content_disposition_inline(media_filename)
             return Response(headers=headers)
 
         # Build response headers
@@ -222,7 +241,7 @@ async def telegram_stream(
             base_headers["content-range"] = f"bytes {start}-{end}/{actual_file_size}"
 
         if media_filename:
-            base_headers["content-disposition"] = f'inline; filename="{media_filename}"'
+            base_headers["content-disposition"] = _content_disposition_inline(media_filename)
 
         response_headers = apply_header_manipulation(base_headers, proxy_headers)
 
