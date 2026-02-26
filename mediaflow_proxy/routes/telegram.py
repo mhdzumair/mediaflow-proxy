@@ -65,15 +65,20 @@ def _content_disposition_inline(filename: str) -> str:
     Starlette/FastAPI requires header values to be latin-1 encodable. Telegram filenames
     may contain unicode (e.g. Cyrillic), so we use RFC 6266 `filename*` when needed.
     """
-    safe = (filename or "").strip()
-    safe = safe.replace("\n", " ").replace("\r", " ").replace('\\', '\\\\').replace('"', '\\"')
-    if not safe:
+    # Sanitize newlines and carriage returns
+    sanitized = (filename or "").strip().replace("\n", " ").replace("\r", " ")
+    if not sanitized:
         return "inline"
+
     try:
-        safe.encode("latin-1")
-        return f'inline; filename="{safe}"'
+        # Try if the filename is latin-1 encodable
+        sanitized.encode("latin-1")
+        # For the filename= parameter, we must escape backslashes and double quotes
+        escaped = sanitized.replace('\\', '\\\\').replace('"', '\\"')
+        return f'inline; filename="{escaped}"'
     except UnicodeEncodeError:
-        encoded = quote(safe, encoding="utf-8", safe="")
+        # For filename*, use percent-encoding with the original (unescaped) sanitized name
+        encoded = quote(sanitized, encoding="utf-8", safe="")
         return f"inline; filename*=UTF-8''{encoded}"
 
 
