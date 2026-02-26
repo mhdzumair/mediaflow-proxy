@@ -12,13 +12,9 @@ import asyncio
 import logging
 import re
 import secrets
-<<<<<<< HEAD
 from urllib.parse import quote
-from typing import Annotated, Optional
-=======
 from functools import lru_cache
 from typing import Annotated, Optional, TYPE_CHECKING
->>>>>>> origin/main
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
