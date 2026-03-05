@@ -153,6 +153,87 @@ def parse_range_header(range_header: Optional[str], file_size: int) -> tuple[int
     return start, end
 
 
+def _parse_chat_id_value(chat_id: str) -> int | str:
+    """Parse chat_id as integer when possible; otherwise keep username form."""
+    try:
+        return int(chat_id)
+    except ValueError:
+        return chat_id
+
+
+def _build_telegram_ref_from_params(
+    TelegramMediaRef,
+    parse_telegram_url,
+    *,
+    telegram_url: str | None,
+    chat_id: str | None,
+    message_id: int | None,
+    file_id: str | None,
+    document_id: int | None,
+    file_size: int | None,
+    require_file_size_for_file_id: bool,
+):
+    """
+    Build a TelegramMediaRef with route-level priority:
+    URL -> chat_id+message_id -> chat_id+document_id -> chat_id+file_id -> file_id.
+    """
+    if telegram_url:
+        return parse_telegram_url(telegram_url)
+
+    if chat_id and message_id is not None:
+        return TelegramMediaRef(
+            chat_id=_parse_chat_id_value(chat_id),
+            message_id=message_id,
+            file_id=file_id,
+            document_id=document_id,
+        )
+
+    if chat_id and document_id is not None:
+        return TelegramMediaRef(chat_id=_parse_chat_id_value(chat_id), document_id=document_id)
+
+    if chat_id and file_id:
+        return TelegramMediaRef(chat_id=_parse_chat_id_value(chat_id), file_id=file_id)
+
+    if file_id:
+        if require_file_size_for_file_id and not file_size:
+            raise HTTPException(
+                status_code=400,
+                detail="file_size parameter is required when using file_id. "
+                "The file_id doesn't contain size information needed for range requests.",
+            )
+        return TelegramMediaRef(file_id=file_id)
+
+    raise HTTPException(
+        status_code=400,
+        detail="Provide either 'd' (t.me URL), 'chat_id' + 'message_id', "
+        "'chat_id' + 'document_id', or 'file_id' (+ 'file_size' for stream/transcode)",
+    )
+
+
+async def _resolve_media_info_with_file_id_fallback(telegram_manager, TelegramMediaRef, ref, file_size: int | None):
+    """
+    Resolve media info and keep compatibility with direct file_id mode.
+
+    If chat-scoped resolution (chat_id + message_id/document_id/file_id) fails to locate
+    a message, and file_id is available, fall back to direct file_id resolution.
+    """
+    try:
+        return ref, await telegram_manager.get_media_info(ref, file_size=file_size)
+    except Exception as e:
+        error_name = type(e).__name__
+        can_fallback_to_file_id = (
+            ref.file_id is not None
+            and ref.chat_id is not None
+            and error_name in {"TelegramDocumentNotFoundError", "TelegramMessageNotFoundError"}
+        )
+        if not can_fallback_to_file_id:
+            raise
+
+        fallback_ref = TelegramMediaRef(file_id=ref.file_id)
+        media_info = await telegram_manager.get_media_info(fallback_ref, file_size=file_size)
+        return fallback_ref, media_info
+
+
 @telegram_router.head("/telegram/stream")
 @telegram_router.get("/telegram/stream")
 @telegram_router.head("/telegram/stream/{filename:path}")
@@ -164,6 +245,7 @@ async def telegram_stream(
     url: Optional[str] = Query(None, description="Alias for 'd' parameter"),
     chat_id: Optional[str] = Query(None, description="Chat/Channel ID (use with message_id)"),
     message_id: Optional[int] = Query(None, description="Message ID (use with chat_id)"),
+    document_id: Optional[int] = Query(None, description="Document ID (use with chat_id)"),
     file_id: Optional[str] = Query(None, description="Bot API file_id (requires file_size parameter)"),
     file_size: Optional[int] = Query(None, description="File size in bytes (required for file_id streaming)"),
     transcode: bool = Query(False, description="Transcode to browser-compatible fMP4 (EAC3/AC3->AAC)"),
@@ -176,6 +258,7 @@ async def telegram_stream(
     Supports:
     - t.me links: https://t.me/channel/123, https://t.me/c/123456789/456
     - chat_id + message_id: Direct reference by IDs (e.g., chat_id=-100123456&message_id=789)
+    - chat_id + document_id: Resolve by scanning recent messages in the chat
     - file_id + file_size: Direct streaming by Bot API file_id (requires file_size)
 
     When transcode=true, the media is remuxed to fragmented MP4 with
@@ -193,6 +276,7 @@ async def telegram_stream(
         url: Alias for 'd' parameter
         chat_id: Chat/Channel ID (numeric or username)
         message_id: Message ID within the chat
+        document_id: Telegram document ID within the chat
         file_id: Bot API file_id (requires file_size parameter)
         file_size: File size in bytes (required for file_id streaming)
         transcode: Transcode to browser-compatible format (EAC3/AC3->AAC)
@@ -208,37 +292,23 @@ async def telegram_stream(
     # Get the URL from either parameter
     telegram_url = d or url
 
-    # Determine which input method was used
-    if not telegram_url and not file_id and not (chat_id and message_id):
-        raise HTTPException(
-            status_code=400,
-            detail="Provide either 'd' (t.me URL), 'chat_id' + 'message_id', or 'file_id' + 'file_size' parameters",
+    try:
+        ref = _build_telegram_ref_from_params(
+            TelegramMediaRef,
+            parse_telegram_url,
+            telegram_url=telegram_url,
+            chat_id=chat_id,
+            message_id=message_id,
+            file_id=file_id,
+            document_id=document_id,
+            file_size=file_size,
+            require_file_size_for_file_id=True,
         )
 
-    try:
-        # Parse the reference based on input type
-        if telegram_url:
-            ref = parse_telegram_url(telegram_url)
-        elif chat_id and message_id:
-            # Direct chat_id + message_id
-            # Try to parse chat_id as int, otherwise treat as username
-            try:
-                parsed_chat_id: int | str = int(chat_id)
-            except ValueError:
-                parsed_chat_id = chat_id  # Username
-            ref = TelegramMediaRef(chat_id=parsed_chat_id, message_id=message_id)
-        else:
-            # file_id mode
-            if not file_size:
-                raise HTTPException(
-                    status_code=400,
-                    detail="file_size parameter is required when using file_id. "
-                    "The file_id doesn't contain size information needed for range requests.",
-                )
-            ref = TelegramMediaRef(file_id=file_id)
-
         # Get media info (pass file_size for file_id mode)
-        media_info = await telegram_manager.get_media_info(ref, file_size=file_size)
+        ref, media_info = await _resolve_media_info_with_file_id_fallback(
+            telegram_manager, TelegramMediaRef, ref, file_size
+        )
         actual_file_size = media_info.file_size
         mime_type = media_info.mime_type
         media_filename = filename or media_info.file_name
@@ -365,6 +435,10 @@ async def telegram_stream(
             )
         elif error_name == "MessageIdInvalidError":
             raise HTTPException(status_code=404, detail="Message not found in the specified chat.")
+        elif error_name == "TelegramMessageNotFoundError":
+            raise HTTPException(status_code=404, detail=str(e))
+        elif error_name == "TelegramDocumentNotFoundError":
+            raise HTTPException(status_code=404, detail=str(e))
         elif error_name == "AuthKeyError":
             raise HTTPException(
                 status_code=401, detail="Telegram session is invalid. Please regenerate the session string."
@@ -425,6 +499,7 @@ async def _resolve_telegram_source(
     url: str | None = None,
     chat_id: str | None = None,
     message_id: int | None = None,
+    document_id: int | None = None,
     file_id: str | None = None,
     file_size: int | None = None,
     filename: str | None = None,
@@ -443,40 +518,31 @@ async def _resolve_telegram_source(
             DC connections per request is wasteful.
     """
     if not settings.enable_telegram:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=503, detail="Telegram proxy support is disabled")
     TelegramMediaRef, parse_telegram_url, telegram_manager = _telegram_utils()
 
     telegram_url = d or url
 
-    if not telegram_url and not file_id and not (chat_id and message_id):
-        from fastapi import HTTPException
+    ref = _build_telegram_ref_from_params(
+        TelegramMediaRef,
+        parse_telegram_url,
+        telegram_url=telegram_url,
+        chat_id=chat_id,
+        message_id=message_id,
+        file_id=file_id,
+        document_id=document_id,
+        file_size=file_size,
+        require_file_size_for_file_id=True,
+    )
 
-        raise HTTPException(
-            status_code=400,
-            detail="Provide either 'd' (t.me URL), 'chat_id' + 'message_id', or 'file_id' + 'file_size'",
+    try:
+        ref, media_info = await _resolve_media_info_with_file_id_fallback(
+            telegram_manager, TelegramMediaRef, ref, file_size
         )
-
-    if telegram_url:
-        ref = parse_telegram_url(telegram_url)
-    elif chat_id and message_id:
-        try:
-            parsed_chat_id: int | str = int(chat_id)
-        except ValueError:
-            parsed_chat_id = chat_id
-        ref = TelegramMediaRef(chat_id=parsed_chat_id, message_id=message_id)
-    else:
-        if not file_size:
-            from fastapi import HTTPException
-
-            raise HTTPException(
-                status_code=400,
-                detail="file_size is required when using file_id",
-            )
-        ref = TelegramMediaRef(file_id=file_id)
-
-    media_info = await telegram_manager.get_media_info(ref, file_size=file_size)
+    except Exception as e:
+        if type(e).__name__ in {"TelegramDocumentNotFoundError", "TelegramMessageNotFoundError"}:
+            raise HTTPException(status_code=404, detail=str(e))
+        raise
     actual_file_size = media_info.file_size
     media_filename = filename or media_info.file_name
 
@@ -496,6 +562,7 @@ async def telegram_transcode_hls_playlist(
     url: Optional[str] = Query(None, description="Alias for 'd'"),
     chat_id: Optional[str] = Query(None, description="Chat/Channel ID"),
     message_id: Optional[int] = Query(None, description="Message ID"),
+    document_id: Optional[int] = Query(None, description="Document ID"),
     file_id: Optional[str] = Query(None, description="Bot API file_id"),
     file_size: Optional[int] = Query(None, description="File size in bytes"),
     filename: Optional[str] = Query(None, description="Optional filename"),
@@ -509,6 +576,7 @@ async def telegram_transcode_hls_playlist(
         url,
         chat_id,
         message_id,
+        document_id,
         file_id,
         file_size,
         filename,
@@ -539,6 +607,7 @@ async def telegram_transcode_hls_init(
     url: Optional[str] = Query(None, description="Alias for 'd'"),
     chat_id: Optional[str] = Query(None, description="Chat/Channel ID"),
     message_id: Optional[int] = Query(None, description="Message ID"),
+    document_id: Optional[int] = Query(None, description="Document ID"),
     file_id: Optional[str] = Query(None, description="Bot API file_id"),
     file_size: Optional[int] = Query(None, description="File size in bytes"),
     filename: Optional[str] = Query(None, description="Optional filename"),
@@ -552,6 +621,7 @@ async def telegram_transcode_hls_init(
         url,
         chat_id,
         message_id,
+        document_id,
         file_id,
         file_size,
         filename,
@@ -570,6 +640,7 @@ async def telegram_transcode_hls_segment(
     url: Optional[str] = Query(None, description="Alias for 'd'"),
     chat_id: Optional[str] = Query(None, description="Chat/Channel ID"),
     message_id: Optional[int] = Query(None, description="Message ID"),
+    document_id: Optional[int] = Query(None, description="Document ID"),
     file_id: Optional[str] = Query(None, description="Bot API file_id"),
     file_size: Optional[int] = Query(None, description="File size in bytes"),
     filename: Optional[str] = Query(None, description="Optional filename"),
@@ -583,6 +654,7 @@ async def telegram_transcode_hls_segment(
         url,
         chat_id,
         message_id,
+        document_id,
         file_id,
         file_size,
         filename,
@@ -629,7 +701,18 @@ def _build_telegram_hls_resolved_params(
 
     # Carry over non-identifying params from the original request
     # (api_password, filename, etc.)
-    _skip_keys = {"d", "url", "chat_id", "message_id", "file_id", "file_size", "seg", "start_ms", "end_ms"}
+    _skip_keys = {
+        "d",
+        "url",
+        "chat_id",
+        "message_id",
+        "document_id",
+        "file_id",
+        "file_size",
+        "seg",
+        "start_ms",
+        "end_ms",
+    }
     for key in request.query_params:
         if key not in _skip_keys:
             params[key] = request.query_params[key]
@@ -639,6 +722,9 @@ def _build_telegram_hls_resolved_params(
     if ref.chat_id is not None and ref.message_id is not None:
         params["chat_id"] = str(ref.chat_id)
         params["message_id"] = str(ref.message_id)
+    elif ref.chat_id is not None and ref.document_id is not None:
+        params["chat_id"] = str(ref.chat_id)
+        params["document_id"] = str(ref.document_id)
     elif ref.file_id:
         params["file_id"] = ref.file_id
     # Always include file_size -- it prevents unnecessary lookups
@@ -653,6 +739,7 @@ async def telegram_info(
     url: Optional[str] = Query(None, description="Alias for 'd' parameter"),
     chat_id: Optional[str] = Query(None, description="Chat/Channel ID (use with message_id)"),
     message_id: Optional[int] = Query(None, description="Message ID (use with chat_id)"),
+    document_id: Optional[int] = Query(None, description="Document ID (use with chat_id)"),
     file_id: Optional[str] = Query(None, description="Bot API file_id"),
     file_size: Optional[int] = Query(None, description="File size in bytes (optional for file_id)"),
 ):
@@ -664,6 +751,7 @@ async def telegram_info(
         url: Alias for 'd' parameter
         chat_id: Chat/Channel ID (numeric or username)
         message_id: Message ID within the chat
+        document_id: Telegram document ID within the chat
         file_id: Bot API file_id
         file_size: File size in bytes (optional, will be 0 if not provided for file_id)
 
@@ -676,25 +764,22 @@ async def telegram_info(
 
     telegram_url = d or url
 
-    if not telegram_url and not file_id and not (chat_id and message_id):
-        raise HTTPException(
-            status_code=400,
-            detail="Provide either 'd' (t.me URL), 'chat_id' + 'message_id', or 'file_id' parameter",
+    try:
+        ref = _build_telegram_ref_from_params(
+            TelegramMediaRef,
+            parse_telegram_url,
+            telegram_url=telegram_url,
+            chat_id=chat_id,
+            message_id=message_id,
+            file_id=file_id,
+            document_id=document_id,
+            file_size=file_size,
+            require_file_size_for_file_id=False,
         )
 
-    try:
-        if telegram_url:
-            ref = parse_telegram_url(telegram_url)
-        elif chat_id and message_id:
-            try:
-                parsed_chat_id: int | str = int(chat_id)
-            except ValueError:
-                parsed_chat_id = chat_id
-            ref = TelegramMediaRef(chat_id=parsed_chat_id, message_id=message_id)
-        else:
-            ref = TelegramMediaRef(file_id=file_id)
-
-        media_info = await telegram_manager.get_media_info(ref, file_size=file_size)
+        ref, media_info = await _resolve_media_info_with_file_id_fallback(
+            telegram_manager, TelegramMediaRef, ref, file_size
+        )
 
         return {
             "file_id": media_info.file_id,
@@ -718,6 +803,10 @@ async def telegram_info(
             )
         elif error_name == "MessageIdInvalidError":
             raise HTTPException(status_code=404, detail="Message not found in the specified chat.")
+        elif error_name == "TelegramMessageNotFoundError":
+            raise HTTPException(status_code=404, detail=str(e))
+        elif error_name == "TelegramDocumentNotFoundError":
+            raise HTTPException(status_code=404, detail=str(e))
         elif error_name == "FileReferenceExpiredError":
             raise HTTPException(
                 status_code=410,

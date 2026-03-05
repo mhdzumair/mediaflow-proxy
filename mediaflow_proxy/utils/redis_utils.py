@@ -455,6 +455,58 @@ async def set_cached_extractor(key: str, data: dict, ttl: int = EXTRACTOR_CACHE_
 
 
 # =============================================================================
+# Telegram Document -> Message Cache
+# =============================================================================
+# Caches (session_fingerprint, chat_id, document_id) -> message_id mappings.
+
+TELEGRAM_DOC_MSG_CACHE_PREFIX = "mfp:telegram_doc_msg:"
+
+
+def _telegram_doc_msg_key(session_fingerprint: str, chat_id: str, document_id: int) -> str:
+    raw = f"{session_fingerprint}:{chat_id}:{document_id}"
+    raw_hash = hashlib.md5(raw.encode()).hexdigest()
+    return f"{TELEGRAM_DOC_MSG_CACHE_PREFIX}{raw_hash}"
+
+
+async def get_cached_telegram_doc_message_id(
+    session_fingerprint: str,
+    chat_id: str,
+    document_id: int,
+) -> Optional[int]:
+    """Get cached Telegram message_id for a chat/document pair."""
+    r = await get_redis()
+    if r is None:
+        return None
+
+    redis_key = _telegram_doc_msg_key(session_fingerprint, chat_id, document_id)
+    data = await r.get(redis_key)
+    if data is None:
+        return None
+
+    try:
+        return int(data)
+    except (TypeError, ValueError):
+        return None
+
+
+async def set_cached_telegram_doc_message_id(
+    session_fingerprint: str,
+    chat_id: str,
+    document_id: int,
+    message_id: int,
+    ttl: Optional[int] = None,
+) -> None:
+    """Cache Telegram message_id for a chat/document pair."""
+    r = await get_redis()
+    if r is None:
+        return
+
+    redis_key = _telegram_doc_msg_key(session_fingerprint, chat_id, document_id)
+    cache_ttl = ttl if ttl is not None else settings.telegram_document_cache_ttl
+    await r.set(redis_key, str(message_id), ex=max(1, int(cache_ttl)))
+
+
+# =============================================================================
 # MPD Cache
 # =============================================================================
 # Caches parsed MPD manifests (JSON) across all workers

@@ -95,6 +95,8 @@ class Settings(BaseSettings):
     telegram_session_string: SecretStr | None = None  # Persistent session string (avoids re-authentication).
     telegram_max_connections: int = 8  # Max parallel DC connections for downloads (max 20, careful of floods).
     telegram_request_timeout: int = 30  # Request timeout in seconds.
+    telegram_document_scan_limit: int = 500  # Max recent messages to scan when resolving chat_id+document_id.
+    telegram_document_cache_ttl: int = 3600  # TTL (seconds) for cached document_id->message_id mappings.
 
     # Transcode settings
     enable_transcode: bool = True  # Whether to enable on-the-fly transcoding endpoints (MKV→fMP4, HLS VOD).

@@ -132,6 +132,8 @@ class TelegramMediaSource:
             raw = f"file_id:{ref.file_id}"
         elif ref.chat_id is not None and ref.message_id is not None:
             raw = f"chat:{ref.chat_id}:msg:{ref.message_id}"
+        elif ref.chat_id is not None and ref.document_id is not None:
+            raw = f"chat:{ref.chat_id}:doc:{ref.document_id}"
         else:
             return ""
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
