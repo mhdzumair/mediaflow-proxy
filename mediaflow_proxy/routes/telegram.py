@@ -74,7 +74,7 @@ def _content_disposition_inline(filename: str) -> str:
         # Try if the filename is latin-1 encodable
         sanitized.encode("latin-1")
         # For the filename= parameter, we must escape backslashes and double quotes
-        escaped = sanitized.replace('\\', '\\\\').replace('"', '\\"')
+        escaped = sanitized.replace("\\", "\\\\").replace('"', '\\"')
         return f'inline; filename="{escaped}"'
     except UnicodeEncodeError:
         # For filename*, use percent-encoding with the original (unescaped) sanitized name

@@ -895,7 +895,9 @@ class TelegramSessionManager:
         if fallback_document_id is None:
             raise ValueError("message_id or document_id is required with chat_id")
 
-        message, resolved_chat_id = await self._resolve_document_message(ref.chat_id, fallback_document_id, file_size=file_size)
+        message, resolved_chat_id = await self._resolve_document_message(
+            ref.chat_id, fallback_document_id, file_size=file_size
+        )
         ref.chat_id = resolved_chat_id
         ref.message_id = int(message.id)
         ref.document_id = int(fallback_document_id)

@@ -37,9 +37,22 @@ class VavooExtractor(BaseExtractor):
             "locale": "de",
             "theme": "dark",
             "metadata": {
-                "device": {"type": "Desktop", "brand": "Unknown", "model": "Unknown", "name": "Unknown", "uniqueId": unique_id},
+                "device": {
+                    "type": "Desktop",
+                    "brand": "Unknown",
+                    "model": "Unknown",
+                    "name": "Unknown",
+                    "uniqueId": unique_id,
+                },
                 "os": {"name": "windows", "version": "10.0.22631", "abis": [], "host": "electron"},
-                "app": {"platform": "electron", "version": "3.1.4", "buildId": "288045000", "engine": "jsc", "signatures": [], "installer": "unknown"},
+                "app": {
+                    "platform": "electron",
+                    "version": "3.1.4",
+                    "buildId": "288045000",
+                    "engine": "jsc",
+                    "signatures": [],
+                    "installer": "unknown",
+                },
                 "version": {"package": "tv.vavoo.app", "binary": "3.1.4", "js": "3.1.4"},
             },
             "appFocusTime": 27229,
@@ -161,7 +174,9 @@ class VavooExtractor(BaseExtractor):
                 m3u8 = re.findall(r'(https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*)', text)
                 if m3u8:
                     return m3u8[0]
-                generic = re.findall(r'(https?://[^\s"\'<>]+(?:\.ts|/live/|/stream/|/playlist|/index)[^\s"\'<>]*)', text)
+                generic = re.findall(
+                    r'(https?://[^\s"\'<>]+(?:\.ts|/live/|/stream/|/playlist|/index)[^\s"\'<>]*)', text
+                )
                 if generic:
                     return generic[0]
             return final_url
@@ -178,7 +193,9 @@ class VavooExtractor(BaseExtractor):
         base = re.sub(r"/index\.m3u8(?:\?.*)?$", "", url.replace("vavoo-iptv", "live2")).rstrip("/")
         ts_url = f"{base}.ts?n=1&b=5&vavoo_auth={quote(ts_sig, safe='')}"
         try:
-            resp = await self._make_request(ts_url, method="GET", headers={"User-Agent": self.TS_UA}, timeout=15, retries=1)
+            resp = await self._make_request(
+                ts_url, method="GET", headers={"User-Agent": self.TS_UA}, timeout=15, retries=1
+            )
             if getattr(resp, "status", 400) < 400:
                 return ts_url
         except Exception:
@@ -198,8 +215,7 @@ class VavooExtractor(BaseExtractor):
             )
             status = getattr(resp, "status", 0)
             if status in (301, 302, 303, 307, 308):
-                location = (getattr(resp, "headers", {}).get("Location")
-                            or getattr(resp, "headers", {}).get("location"))
+                location = getattr(resp, "headers", {}).get("Location") or getattr(resp, "headers", {}).get("location")
                 if location:
                     logger.info("Vavoo web-vod redirected to: %s", location)
                     return location
