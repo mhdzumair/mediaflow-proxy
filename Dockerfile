@@ -18,8 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Add Rust to PATH
 ENV PATH="/root/.cargo/bin:$PATH"
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# Install uv without relying on a platform-specific external stage
+RUN pip install --no-cache-dir uv
 
 # Copy only requirements to cache them in docker layer
 COPY pyproject.toml uv.lock* /build/
