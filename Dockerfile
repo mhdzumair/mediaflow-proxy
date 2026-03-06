@@ -8,6 +8,14 @@ WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    pkg-config \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavfilter-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswresample-dev \
+    libswscale-dev \
     libxml2-dev \
     libxslt-dev \
     zlib1g-dev \
@@ -37,6 +45,7 @@ ENV PORT="8888"
 
 # Install only runtime dependencies (no dev packages)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
     libxml2 \
     libxslt1.1 \
     && apt-get clean \
