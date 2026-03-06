@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     pkg-config \
+    libffi-dev \
     libavcodec-dev \
     libavdevice-dev \
     libavfilter-dev \
@@ -46,6 +47,7 @@ ENV PORT="8888"
 # Install only runtime dependencies (no dev packages)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    libffi8 \
     libxml2 \
     libxslt1.1 \
     && apt-get clean \
