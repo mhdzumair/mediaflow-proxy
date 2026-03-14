@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+from functools import lru_cache
 from typing import Annotated
 from urllib.parse import quote, unquote
 
@@ -41,17 +42,29 @@ from mediaflow_proxy.utils.http_utils import (
 from mediaflow_proxy.utils.http_client import create_aiohttp_session
 from mediaflow_proxy.utils.m3u8_processor import M3U8Processor
 from mediaflow_proxy.utils.stream_transformers import apply_transformer_to_bytes
-from mediaflow_proxy.remuxer.media_source import HTTPMediaSource
-from mediaflow_proxy.remuxer.transcode_handler import (
-    handle_transcode,
-    handle_transcode_hls_init,
-    handle_transcode_hls_playlist,
-    handle_transcode_hls_segment,
-)
 
 
 logger = logging.getLogger(__name__)
 proxy_router = APIRouter()
+
+
+@lru_cache(maxsize=1)
+def _load_transcode_components():
+    from mediaflow_proxy.remuxer.media_source import HTTPMediaSource
+    from mediaflow_proxy.remuxer.transcode_handler import (
+        handle_transcode,
+        handle_transcode_hls_init,
+        handle_transcode_hls_playlist,
+        handle_transcode_hls_segment,
+    )
+
+    return (
+        HTTPMediaSource,
+        handle_transcode,
+        handle_transcode_hls_init,
+        handle_transcode_hls_playlist,
+        handle_transcode_hls_segment,
+    )
 
 
 def sanitize_url(url: str) -> str:
@@ -499,6 +512,7 @@ async def transcode_hls_playlist(
     """
     if not settings.enable_transcode:
         raise HTTPException(status_code=503, detail="Transcoding support is disabled")
+    HTTPMediaSource, _, _, handle_transcode_hls_playlist, _ = _load_transcode_components()
     destination = sanitize_url(destination)
     source = HTTPMediaSource(url=destination, headers=dict(proxy_headers.request))
     await source.resolve_file_size()
@@ -540,6 +554,7 @@ async def transcode_hls_init(
     """
     if not settings.enable_transcode:
         raise HTTPException(status_code=503, detail="Transcoding support is disabled")
+    HTTPMediaSource, _, handle_transcode_hls_init, _, _ = _load_transcode_components()
     destination = sanitize_url(destination)
     source = HTTPMediaSource(url=destination, headers=dict(proxy_headers.request))
     await source.resolve_file_size()
@@ -572,6 +587,7 @@ async def transcode_hls_segment(
     """
     if not settings.enable_transcode:
         raise HTTPException(status_code=503, detail="Transcoding support is disabled")
+    HTTPMediaSource, _, _, _, handle_transcode_hls_segment = _load_transcode_components()
     destination = sanitize_url(destination)
     source = HTTPMediaSource(url=destination, headers=dict(proxy_headers.request))
     await source.resolve_file_size()
@@ -693,6 +709,7 @@ async def proxy_stream_endpoint(
     if transcode:
         if not settings.enable_transcode:
             raise HTTPException(status_code=503, detail="Transcoding support is disabled")
+        HTTPMediaSource, handle_transcode, _, _, _ = _load_transcode_components()
         transcode_headers = dict(proxy_headers.request)
         transcode_headers.pop("range", None)
         transcode_headers.pop("if-range", None)

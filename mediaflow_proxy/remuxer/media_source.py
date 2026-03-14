@@ -13,7 +13,6 @@ from typing import Protocol, runtime_checkable
 from urllib.parse import urlparse, unquote
 
 from mediaflow_proxy.utils.http_client import create_aiohttp_session
-from mediaflow_proxy.utils.telegram import telegram_manager
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +132,8 @@ class TelegramMediaSource:
             raw = f"file_id:{ref.file_id}"
         elif ref.chat_id is not None and ref.message_id is not None:
             raw = f"chat:{ref.chat_id}:msg:{ref.message_id}"
+        elif ref.chat_id is not None and ref.document_id is not None:
+            raw = f"chat:{ref.chat_id}:doc:{ref.document_id}"
         else:
             return ""
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
@@ -142,6 +143,9 @@ class TelegramMediaSource:
         return self._filename_hint
 
     async def stream(self, offset: int = 0, limit: int | None = None) -> AsyncIterator[bytes]:
+        # Lazy import to avoid loading Telegram dependencies for non-Telegram routes.
+        from mediaflow_proxy.utils.telegram import telegram_manager
+
         effective_limit = limit or self._file_size
         if self._use_single_client:
             async for chunk in telegram_manager.stream_media_single(

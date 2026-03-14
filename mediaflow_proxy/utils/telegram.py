@@ -11,6 +11,7 @@ Based on FastTelethon technique from mautrix-telegram for parallel downloads.
 
 import asyncio
 import base64
+import hashlib
 import logging
 import math
 import re
@@ -41,6 +42,10 @@ from telethon.tl.types import (
 )
 
 from mediaflow_proxy.configs import settings
+from mediaflow_proxy.utils.redis_utils import (
+    get_cached_telegram_doc_message_id,
+    set_cached_telegram_doc_message_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +206,15 @@ class TelegramMediaRef:
     chat_id: Optional[Union[int, str]] = None  # Channel/group/user ID or username
     message_id: Optional[int] = None  # Message ID for t.me links
     file_id: Optional[str] = None  # Direct file reference
+    document_id: Optional[int] = None  # Document ID used for chat scan resolution
+
+
+class TelegramDocumentNotFoundError(Exception):
+    """Raised when document_id cannot be resolved to a chat message."""
+
+
+class TelegramMessageNotFoundError(Exception):
+    """Raised when message_id cannot be resolved in a chat."""
 
 
 @dataclass
@@ -654,6 +668,7 @@ class TelegramSessionManager:
         self._media_info_cache: dict[str, tuple["MediaInfo", float]] = {}
         # Persistent sender pool for single-connection downloads (HLS).
         self._sender_pool = _SingleSenderPool()
+        self._session_fingerprint_cache: Optional[str] = None
 
     async def get_client(self) -> TelegramClient:
         """
@@ -703,30 +718,190 @@ class TelegramSessionManager:
             logger.info("Telegram client initialized successfully")
             return self._client
 
-    async def get_message(self, ref: TelegramMediaRef) -> Message:
+    def _session_fingerprint(self) -> str:
+        """Build a stable fingerprint for the active Telegram session."""
+        if self._session_fingerprint_cache:
+            return self._session_fingerprint_cache
+
+        if settings.telegram_session_string:
+            raw_session = settings.telegram_session_string.get_secret_value()
+        else:
+            raw_session = "telegram-session-missing"
+
+        self._session_fingerprint_cache = hashlib.sha256(raw_session.encode()).hexdigest()[:16]
+        return self._session_fingerprint_cache
+
+    @staticmethod
+    def _chat_id_candidates(chat_id: Union[int, str]) -> list[Union[int, str]]:
+        """Return plausible chat_id forms (original first, then normalized forms)."""
+        candidates: list[Union[int, str]] = [chat_id]
+
+        if isinstance(chat_id, int):
+            if chat_id > 0:
+                candidates.append(int(f"-100{chat_id}"))
+        elif isinstance(chat_id, str):
+            raw = chat_id.strip()
+            if raw and not raw.startswith("@"):
+                try:
+                    numeric = int(raw)
+                    candidates.extend(TelegramSessionManager._chat_id_candidates(numeric))
+                except ValueError:
+                    pass
+
+        # de-duplicate while preserving order
+        unique: list[Union[int, str]] = []
+        seen = set()
+        for candidate in candidates:
+            marker = f"{type(candidate).__name__}:{candidate}"
+            if marker in seen:
+                continue
+            seen.add(marker)
+            unique.append(candidate)
+        return unique
+
+    @staticmethod
+    def _is_entity_lookup_error(exc: Exception) -> bool:
+        """True when Telethon cannot resolve the chat/entity from the provided chat_id."""
+        error_name = type(exc).__name__
+        if error_name in {"PeerIdInvalidError", "ChannelInvalidError", "UsernameNotOccupiedError"}:
+            return True
+        if isinstance(exc, ValueError):
+            message = str(exc).lower()
+            return "input entity" in message or "peeruser" in message or "peerchannel" in message
+        return False
+
+    @staticmethod
+    def _extract_document_id_from_file_id(file_id: str) -> Optional[int]:
+        """Extract document id from a Bot API file_id when possible."""
+        media = utils.resolve_bot_file_id(file_id)
+        if isinstance(media, (Document, Photo)):
+            return int(media.id)
+        try:
+            decoded = decode_file_id(file_id)
+            return int(decoded.id)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _is_matching_document_message(message: Message | None, document_id: int, file_size: Optional[int]) -> bool:
+        """Check if message media is the requested Telegram document."""
+        if message is None or message.media is None:
+            return False
+        if not isinstance(message.media, MessageMediaDocument):
+            return False
+
+        document = message.media.document
+        if not isinstance(document, Document):
+            return False
+        if int(document.id) != int(document_id):
+            return False
+        if file_size is not None and int(document.size) != int(file_size):
+            return False
+        return True
+
+    async def _try_get_message_by_id(self, chat_id: Union[int, str], message_id: int) -> Message | None:
+        """Fetch a message by ID and normalize 'not found' to None."""
+        client = await self.get_client()
+
+        try:
+            message = await client.get_messages(chat_id, ids=message_id)
+        except Exception as e:
+            if type(e).__name__ == "MessageIdInvalidError" or self._is_entity_lookup_error(e):
+                return None
+            raise
+
+        if isinstance(message, list):
+            message = message[0] if message else None
+
+        if not message or getattr(message, "id", None) is None:
+            return None
+        return message
+
+    async def _resolve_document_message(
+        self,
+        chat_id: Union[int, str],
+        document_id: int,
+        file_size: Optional[int] = None,
+    ) -> tuple[Message, Union[int, str]]:
         """
-        Get a message by its reference.
+        Resolve a document_id to a message in the given chat.
 
-        Args:
-            ref: TelegramMediaRef with chat_id and message_id
-
-        Returns:
-            The Message object
-
-        Raises:
-            ValueError: If reference is incomplete
-            Various Telegram errors: ChannelPrivateError, MessageIdInvalidError, etc.
+        Lookup order:
+        1) Redis cache (session+chat+document -> message_id)
+        2) scan recent chat messages (up to configured limit)
         """
-        if ref.chat_id is None or ref.message_id is None:
-            raise ValueError("chat_id and message_id are required to fetch a message")
+        chat_key = str(chat_id)
+        session_fp = self._session_fingerprint()
+        chat_candidates = self._chat_id_candidates(chat_id)
+
+        cached_message_id = await get_cached_telegram_doc_message_id(session_fp, chat_key, int(document_id))
+        if cached_message_id is not None:
+            for candidate in chat_candidates:
+                cached_message = await self._try_get_message_by_id(candidate, cached_message_id)
+                if self._is_matching_document_message(cached_message, document_id, file_size):
+                    return cached_message, candidate
 
         client = await self.get_client()
-        messages = await client.get_messages(ref.chat_id, ids=ref.message_id)
+        scan_limit = max(1, int(settings.telegram_document_scan_limit))
+        for candidate in chat_candidates:
+            try:
+                async for message in client.iter_messages(candidate, limit=scan_limit):
+                    if not self._is_matching_document_message(message, document_id, file_size):
+                        continue
 
-        if not messages:
-            raise ValueError(f"Message {ref.message_id} not found in {ref.chat_id}")
+                    if getattr(message, "id", None) is not None:
+                        await set_cached_telegram_doc_message_id(
+                            session_fp,
+                            chat_key,
+                            int(document_id),
+                            int(message.id),
+                            ttl=settings.telegram_document_cache_ttl,
+                        )
+                    return message, candidate
+            except Exception as e:
+                if self._is_entity_lookup_error(e):
+                    continue
+                raise
 
-        return messages
+        raise TelegramDocumentNotFoundError(
+            f"document_id {document_id} not found in chat {chat_id} (scanned last {scan_limit} messages)"
+        )
+
+    async def get_message(self, ref: TelegramMediaRef, file_size: Optional[int] = None) -> Message:
+        """
+        Get a message by message_id or by resolving document_id within chat history.
+
+        Fallback behavior:
+        - If chat_id+message_id is provided, try it first.
+        - If not found and file_id is provided, decode document_id from file_id and scan.
+        - If chat_id+document_id is provided, scan directly.
+        """
+        if ref.chat_id is None:
+            raise ValueError("chat_id is required to fetch a message")
+
+        fallback_document_id = ref.document_id
+        if fallback_document_id is None and ref.file_id:
+            fallback_document_id = self._extract_document_id_from_file_id(ref.file_id)
+
+        if ref.message_id is not None:
+            for chat_candidate in self._chat_id_candidates(ref.chat_id):
+                message = await self._try_get_message_by_id(chat_candidate, ref.message_id)
+                if message is not None:
+                    ref.chat_id = chat_candidate
+                    return message
+            if fallback_document_id is None:
+                raise TelegramMessageNotFoundError(f"Message {ref.message_id} not found in {ref.chat_id}")
+
+        if fallback_document_id is None:
+            raise ValueError("message_id or document_id is required with chat_id")
+
+        message, resolved_chat_id = await self._resolve_document_message(
+            ref.chat_id, fallback_document_id, file_size=file_size
+        )
+        ref.chat_id = resolved_chat_id
+        ref.message_id = int(message.id)
+        ref.document_id = int(fallback_document_id)
+        return message
 
     def resolve_file_id(self, file_id: str) -> tuple[Union[Document, Photo], int]:
         """
@@ -783,10 +958,12 @@ class TelegramSessionManager:
 
     def _media_info_cache_key(self, ref: TelegramMediaRef) -> str:
         """Derive an in-memory cache key for a TelegramMediaRef."""
-        if ref.file_id and not ref.message_id:
+        if ref.file_id and ref.chat_id is None and not ref.message_id:
             return f"fid:{ref.file_id}"
         if ref.chat_id is not None and ref.message_id is not None:
             return f"chat:{ref.chat_id}:msg:{ref.message_id}"
+        if ref.chat_id is not None and ref.document_id is not None:
+            return f"chat:{ref.chat_id}:doc:{ref.document_id}"
         return ""
 
     async def get_media_info(self, ref: TelegramMediaRef, file_size: Optional[int] = None) -> MediaInfo:
@@ -832,7 +1009,7 @@ class TelegramSessionManager:
     ) -> MediaInfo:
         """Uncached implementation of get_media_info."""
         # Handle file_id reference
-        if ref.file_id and not ref.message_id:
+        if ref.file_id and ref.chat_id is None and not ref.message_id:
             media, dc_id = self.resolve_file_id(ref.file_id)
 
             if isinstance(media, Document):
@@ -904,7 +1081,7 @@ class TelegramSessionManager:
             raise ValueError(f"Unsupported media type from file_id: {type(media)}")
 
         # Handle message-based reference
-        message = await self.get_message(ref)
+        message = await self.get_message(ref, file_size=file_size)
 
         if not message.media:
             raise ValueError(f"Message {ref.message_id} does not contain media")
@@ -984,7 +1161,7 @@ class TelegramSessionManager:
         """
         client = await self.get_client()
 
-        if ref.file_id and not ref.message_id:
+        if ref.file_id and ref.chat_id is None and not ref.message_id:
             media, dc_id = self.resolve_file_id(ref.file_id)
 
             if isinstance(media, Document):
@@ -1038,7 +1215,7 @@ class TelegramSessionManager:
             ``(file_location, dc_id, actual_file_size)``
         """
         # Handle file_id reference (no message needed, fast local parse)
-        if ref.file_id and not ref.message_id:
+        if ref.file_id and ref.chat_id is None and not ref.message_id:
             media, dc_id = self.resolve_file_id(ref.file_id)
 
             if isinstance(media, Document):
@@ -1076,7 +1253,7 @@ class TelegramSessionManager:
                 raise ValueError(f"Unsupported media type from file_id: {type(media)}")
 
         # Handle message-based reference (requires Telegram API call)
-        message = await self.get_message(ref)
+        message = await self.get_message(ref, file_size=file_size)
 
         if not message.media:
             raise ValueError(f"Message {ref.message_id} does not contain media")

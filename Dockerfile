@@ -8,6 +8,15 @@ WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    pkg-config \
+    libffi-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavfilter-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswresample-dev \
+    libswscale-dev \
     libxml2-dev \
     libxslt-dev \
     zlib1g-dev \
@@ -18,8 +27,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Add Rust to PATH
 ENV PATH="/root/.cargo/bin:$PATH"
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# Install uv without relying on a platform-specific external stage
+RUN pip install --no-cache-dir uv
 
 # Copy only requirements to cache them in docker layer
 COPY pyproject.toml uv.lock* /build/
@@ -37,6 +46,8 @@ ENV PORT="8888"
 
 # Install only runtime dependencies (no dev packages)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libffi8 \
     libxml2 \
     libxslt1.1 \
     && apt-get clean \
