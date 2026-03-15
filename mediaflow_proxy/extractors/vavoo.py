@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 class VavooExtractor(BaseExtractor):
     """Vavoo URL extractor per risolvere link vavoo.to"""
 
-    API_UA = "electron-fetch/1.0 electron (+https://github.com/arantes555/electron-fetch)"
+    API_UA = "okhttp/4.11.0"
+    RESOLVE_UA = "MediaHubMX/2"
     TS_UA = "VAVOO/2.6"
 
     def __init__(self, request_headers: dict):
@@ -21,59 +22,61 @@ class VavooExtractor(BaseExtractor):
         self.mediaflow_endpoint = "proxy_stream_endpoint"
 
     async def _get_auth_signature(self) -> Optional[str]:
-        """Get authentication signature via /api/app/ping (electron flow)."""
+        """Get authentication signature via lokke.app/api/app/ping (aligned with working plugin)."""
         unique_id = uuid.uuid4().hex[:16]
+        now_ms = int(time.time() * 1000)
         headers = {
             "user-agent": self.API_UA,
-            "accept": "*/*",
-            "Accept-Language": "de",
-            "Accept-Encoding": "gzip, deflate",
+            "accept": "application/json",
             "content-type": "application/json; charset=utf-8",
-            "Connection": "close",
+            "accept-encoding": "gzip",
         }
         body = {
-            "token": "8Us2TfjeOFrzqFFTEjL3E5KfdAWGa5PV3wQe60uK4BmzlkJRMYFu0ufaM_eeDXKS2U04XUuhbDTgGRJrJARUwzDyCcRToXhW5AcDekfFMfwNUjuieeQ1uzeDB9YWyBL2cn5Al3L3gTnF8Vk1t7rPwkBob0swvxA",
-            "reason": "player.enter",
+            "token": "ldCvE092e7gER0rVIajfsXIvRhwlrAzP6_1oEJ4q6HH89QHt24v6NNL_jQJO219hiLOXF2hqEfsUuEWitEIGN4EaHHEHb7Cd7gojc5SQYRFzU3XWo_kMeryAUbcwWnQrnf0-",
+            "reason": "app-blur",
             "locale": "de",
             "theme": "dark",
             "metadata": {
                 "device": {
-                    "type": "Desktop",
-                    "brand": "Unknown",
-                    "model": "Unknown",
-                    "name": "Unknown",
+                    "type": "Handset",
+                    "brand": "google",
+                    "model": "Nexus",
+                    "name": "21081111RG",
                     "uniqueId": unique_id,
                 },
-                "os": {"name": "windows", "version": "10.0.22631", "abis": [], "host": "electron"},
+                "os": {"name": "android", "version": "7.1.2", "abis": ["arm64-v8a"], "host": "android"},
                 "app": {
-                    "platform": "electron",
-                    "version": "3.1.4",
-                    "buildId": "288045000",
-                    "engine": "jsc",
-                    "signatures": [],
-                    "installer": "unknown",
+                    "platform": "android",
+                    "version": "1.1.0",
+                    "buildId": "97215000",
+                    "engine": "hbc85",
+                    "signatures": ["6e8a975e3cbf07d5de823a760d4c2547f86c1403105020adee5de67ac510999e"],
+                    "installer": "com.android.vending",
                 },
-                "version": {"package": "tv.vavoo.app", "binary": "3.1.4", "js": "3.1.4"},
+                "version": {"package": "app.lokke.main", "binary": "1.1.0", "js": "1.1.0"},
+                "platform": {"isAndroid": True, "isIOS": False, "isTV": False, "isWeb": False,
+                             "isMobile": True, "isWebTV": False, "isElectron": False},
             },
-            "appFocusTime": 27229,
-            "playerActive": True,
+            "appFocusTime": 0,
+            "playerActive": False,
             "playDuration": 0,
-            "devMode": False,
-            "hasAddon": False,
+            "devMode": True,
+            "hasAddon": True,
             "castConnected": False,
-            "package": "tv.vavoo.app",
-            "version": "3.1.4",
+            "package": "app.lokke.main",
+            "version": "1.1.0",
             "process": "app",
-            "firstAppStart": int(time.time() * 1000) - 86400000,
-            "lastAppStart": int(time.time() * 1000),
-            "ipLocation": "",
+            "firstAppStart": now_ms - 86400000,
+            "lastAppStart": now_ms,
+            "ipLocation": None,
             "adblockEnabled": False,
-            "proxy": {"supported": ["ss"], "engine": "ss", "enabled": False, "autoServer": True, "id": "ca-bhs"},
+            "proxy": {"supported": ["ss", "openvpn"], "engine": "openvpn", "ssVersion": 1,
+                      "enabled": False, "autoServer": True, "id": "fi-hel"},
             "iap": {"supported": True},
         }
         try:
             resp = await self._make_request(
-                "https://www.vavoo.tv/api/app/ping",
+                "https://www.lokke.app/api/app/ping",
                 method="POST",
                 json=body,
                 headers=headers,
@@ -83,13 +86,13 @@ class VavooExtractor(BaseExtractor):
             try:
                 result = resp.json()
             except Exception:
-                logger.warning("Vavoo ping returned non-json response (status=%s).", resp.status)
+                logger.warning("Lokke ping returned non-json response (status=%s).", resp.status)
                 return None
             addon_sig = result.get("addonSig") if isinstance(result, dict) else None
             if addon_sig:
-                logger.info("Successfully obtained Vavoo auth signature (electron mode)")
+                logger.info("Successfully obtained auth signature from lokke.app")
                 return addon_sig
-            logger.warning("No addonSig in Vavoo API response: %s", result)
+            logger.warning("No addonSig in lokke API response: %s", result)
             return None
         except Exception as e:
             logger.debug("_get_auth_signature error: %s", e)
@@ -116,17 +119,15 @@ class VavooExtractor(BaseExtractor):
             return None
 
     async def _resolve_with_auth(self, url: str, signature: str) -> Optional[str]:
-        """Resolve a Vavoo link using the MediaHubMX API with electron-mode signature."""
+        """Resolve a Vavoo link using the MediaHubMX API with auth signature."""
         headers = {
-            "user-agent": self.API_UA,
-            "accept": "*/*",
-            "Accept-Language": "de",
-            "Accept-Encoding": "gzip, deflate",
+            "user-agent": self.RESOLVE_UA,
+            "accept": "application/json",
             "content-type": "application/json; charset=utf-8",
-            "Connection": "close",
+            "accept-encoding": "gzip",
             "mediahubmx-signature": signature,
         }
-        payload = {"language": "de", "region": "AT", "url": url, "clientVersion": "3.1.4"}
+        payload = {"language": "de", "region": "AT", "url": url, "clientVersion": "3.0.2"}
         try:
             resp = await self._make_request(
                 "https://vavoo.to/mediahubmx-resolve.json",
@@ -265,10 +266,9 @@ class VavooExtractor(BaseExtractor):
                 candidate = await self._follow_stream_url(candidate)
                 resolved_url = candidate
                 stream_headers = {
-                    "user-agent": self.API_UA,
+                    "user-agent": self.RESOLVE_UA,
                     "referer": "https://vavoo.to/",
                     "origin": "https://vavoo.to",
-                    "mediahubmx-signature": sig,
                 }
                 logger.info("Using Auth Resolve Mode: %s", resolved_url)
 
