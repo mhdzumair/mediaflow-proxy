@@ -412,10 +412,11 @@ async def handle_stream_request(
         )
         logger.debug(f"Prepared response headers: {response_headers}")
 
-        # When client didn't send a Range header but upstream returns 206 Partial Content:
-        # - Convert status to 200 (full content, not partial)
-        # - Remove content-range header to avoid confusing the client
-        # This handles cases where we added bytes=0- range but upstream still treats it as a range request
+        # Handle 206 Partial Content responses based on context:
+        # 1. If content-range removal is explicitly requested -> convert to 200
+        # 2. If we auto-added "bytes=0-" range -> preserve 206 for file-like clients
+        #    such as Stremio/AIOStreams that rely on partial content for seeking
+        # 3. Otherwise preserve the upstream 206 response unchanged
         status_code = streamer.response.status
         if status_code == 206:
             if "content-range" in [h.lower() for h in proxy_headers.remove]:
@@ -424,23 +425,26 @@ async def handle_stream_request(
                 # Also remove content-range from response headers if present
                 response_headers.pop("content-range", None)
             elif auto_added_range:
-                # We auto-added bytes=0- range but got 206 - convert to 200
-                # This happens when client didn't send a range but upstream responds with 206
-                status_code = 200
-                # Remove content-range to avoid confusing client
-                response_headers.pop("content-range", None)
-                # Update content-length to total size (remove range suffix if present)
-                content_range = streamer.response.headers.get("Content-Range", "")
-                if "/" in content_range:
-                    # Extract total size from "bytes X-Y/total"
-                    total_size = content_range.split("/")[-1].strip()
-                    response_headers["content-length"] = total_size
+                # Preserve upstream ranged response semantics for file-like clients
+                # such as Stremio/AIOStreams. Rewriting 206->200 here breaks
+                # seek/timeshift in practice.
+                pass
+
 
         # Get transformer instance if specified
         transformer = get_transformer(transformer_id)
 
-        # Cache headers in Redis for future HEAD probes (if rate limiting enabled)
-        if needs_rate_limiting and rate_handler.use_head_cache and status_code in (200, 206):
+        # Cache only plain 200 metadata for future HEAD probes.
+        # Skip ranged/re-written flows because the HEAD cache key is URL-only
+        # and cannot safely distinguish partial-content semantics.
+        should_cache_head = (
+            needs_rate_limiting
+            and rate_handler.use_head_cache
+            and status_code == 200
+            and not auto_added_range
+            and "content-range" not in [h.lower() for h in proxy_headers.remove]
+        )
+        if should_cache_head:
             await set_cached_head(video_url, dict(streamer.response.headers), status_code)
 
         if method == "HEAD":
