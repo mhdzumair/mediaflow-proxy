@@ -417,9 +417,11 @@ async def handle_stream_request(
         # 2. If we auto-added "bytes=0-" range -> preserve 206 for file-like clients
         #    such as Stremio/AIOStreams that rely on partial content for seeking
         # 3. Otherwise preserve the upstream 206 response unchanged
+        remove_set = {h.lower() for h in proxy_headers.remove}
+
         status_code = streamer.response.status
         if status_code == 206:
-            if "content-range" in [h.lower() for h in proxy_headers.remove]:
+            if "content-range" in remove_set:
                 # Explicitly requested to remove content-range
                 status_code = 200
                 # Also remove content-range from response headers if present
@@ -442,7 +444,7 @@ async def handle_stream_request(
             and rate_handler.use_head_cache
             and status_code == 200
             and not auto_added_range
-            and "content-range" not in [h.lower() for h in proxy_headers.remove]
+            and "content-range" not in remove_set
         )
         if should_cache_head:
             await set_cached_head(video_url, dict(streamer.response.headers), status_code)
