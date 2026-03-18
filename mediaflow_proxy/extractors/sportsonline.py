@@ -116,10 +116,12 @@ class SportsonlineExtractor(BaseExtractor):
                 timeout=15,
             )
             main_html = main_response.text
+            parsed_main = urlparse(main_response.url)
+            main_origin = f"{parsed_main.scheme}://{parsed_main.netloc}"
 
             # Extract first iframe (src can appear in any attribute order)
-            iframe_match = re.search(r'<iframe[^>]+src=["\']([^"\']+)["\']', main_html, re.IGNORECASE)
-            iframe_url = url
+            iframe_match = re.search(r'<iframe[^>]+(?<!data-)src=["\']([^"\']+)["\']', main_html, re.IGNORECASE)
+            iframe_url = main_response.url
             iframe_html = main_html
 
             if iframe_match:
@@ -129,7 +131,7 @@ class SportsonlineExtractor(BaseExtractor):
                 # Step 2: Fetch iframe with source page as referer
                 iframe_headers = {
                     "Referer": main_response.url,
-                    "Origin": source_origin,
+                    "Origin": main_origin,
                     "User-Agent": user_agent,
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                     "Accept-Language": "en-US,en;q=0.9,it;q=0.8",
