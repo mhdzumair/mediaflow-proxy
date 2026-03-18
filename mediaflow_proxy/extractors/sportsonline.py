@@ -140,6 +140,7 @@ class SportsonlineExtractor(BaseExtractor):
 
                 iframe_response = await self._make_request(iframe_url, headers=iframe_headers, timeout=15)
                 iframe_html = iframe_response.text
+                iframe_url = iframe_response.url
                 logger.debug(f"Iframe HTML length: {len(iframe_html)}")
             else:
                 logger.warning("No iframe found on page, attempting extraction from main HTML")

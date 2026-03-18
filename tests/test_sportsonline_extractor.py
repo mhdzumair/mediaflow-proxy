@@ -1,4 +1,5 @@
 import pytest
+from typing import Any, cast
 
 from mediaflow_proxy.extractors.base import HttpResponse
 from mediaflow_proxy.extractors.sportsonline import SportsonlineExtractor
@@ -179,8 +180,34 @@ async def test_sportsonline_prefers_iframe_src_over_data_src(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_sportsonline_uses_resolved_iframe_url_after_redirect(monkeypatch):
+    extractor = SportsonlineExtractor({})
+
+    main_url = "https://sportsonline.st/game-iframe-redirect"
+    iframe_initial = "https://closethreaten.net/embed/abc123"
+    iframe_resolved = "https://closethreaten.net/embed/abc123?stream=1"
+    main_html = '<html><iframe src="https://closethreaten.net/embed/abc123"></iframe></html>'
+    iframe_html = '<script>const file="/live/edge.m3u8";</script>'
+
+    async def fake_make_request(url: str, **kwargs):
+        if url == main_url:
+            return _response(main_url, main_html)
+        if url == iframe_initial:
+            return _response(iframe_resolved, iframe_html)
+        raise AssertionError(f"Unexpected URL requested: {url}")
+
+    monkeypatch.setattr(extractor, "_make_request", fake_make_request)
+
+    result = await extractor.extract(main_url)
+
+    assert result["destination_url"] == "https://closethreaten.net/live/edge.m3u8"
+    assert result["request_headers"]["Referer"] == iframe_resolved
+    assert result["request_headers"]["Origin"] == "https://closethreaten.net"
+
+
+@pytest.mark.asyncio
 async def test_sportsonline_helper_matches_domain_label_case_insensitive(monkeypatch):
-    called = {"count": 0}
+    called: dict[str, Any] = {"count": 0}
 
     class DummyExtractor:
         async def extract(self, destination: str):
@@ -199,7 +226,7 @@ async def test_sportsonline_helper_matches_domain_label_case_insensitive(monkeyp
 
     proxy_headers = ProxyRequestHeaders(request={}, response={}, remove=[], propagate={})
     result = await check_and_extract_sportsonline_stream(
-        request=None,
+        request=cast(Any, None),
         destination="https://W1.SPORTZSONLINE.click/channels/pt/sporttv1.php",
         proxy_headers=proxy_headers,
         force_refresh=True,
@@ -213,7 +240,7 @@ async def test_sportsonline_helper_matches_domain_label_case_insensitive(monkeyp
 
 @pytest.mark.asyncio
 async def test_sportsonline_helper_ignores_non_matching_hostname(monkeypatch):
-    called = {"count": 0}
+    called: dict[str, Any] = {"count": 0}
 
     class DummyExtractor:
         async def extract(self, destination: str):
@@ -227,7 +254,7 @@ async def test_sportsonline_helper_ignores_non_matching_hostname(monkeypatch):
 
     proxy_headers = ProxyRequestHeaders(request={}, response={}, remove=[], propagate={})
     result = await check_and_extract_sportsonline_stream(
-        request=None,
+        request=cast(Any, None),
         destination="https://notsportzonlineexample.com/channel",
         proxy_headers=proxy_headers,
         force_refresh=True,
