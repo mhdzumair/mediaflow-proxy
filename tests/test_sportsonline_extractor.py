@@ -14,6 +14,28 @@ def _response(url: str, text: str) -> HttpResponse:
     )
 
 
+def test_detect_packed_blocks_extracts_multiple_blocks_from_one_script_tag():
+    extractor = SportsonlineExtractor({})
+
+    packed_1 = "eval(function(p,a,c,k,e,d){return p;}('var src=\"/one.m3u8\";',1,1,'x'.split('|'),0,{}))"
+    packed_2 = "eval(function(p,a,c,k,e,d){return p;}('var src=\"/two.m3u8\";',1,1,'x'.split('|'),0,{}))"
+    html = f"<html><script>{packed_1};var x=1;{packed_2}</script></html>"
+
+    blocks = extractor._detect_packed_blocks(html)
+
+    assert len(blocks) == 2
+    assert "/one.m3u8" in blocks[0]
+    assert "/two.m3u8" in blocks[1]
+
+
+def test_extract_m3u8_candidate_skips_non_m3u8_var_src():
+    text = 'var src="/player.js"; var file="https://cdn.example.test/live/master.m3u8?token=abc";'
+
+    candidate = SportsonlineExtractor._extract_m3u8_candidate(text)
+
+    assert candidate == "https://cdn.example.test/live/master.m3u8?token=abc"
+
+
 @pytest.mark.asyncio
 async def test_sportsonline_extracts_iframe_with_non_first_src_attr(monkeypatch):
     extractor = SportsonlineExtractor({})
@@ -24,7 +46,7 @@ async def test_sportsonline_extracts_iframe_with_non_first_src_attr(monkeypatch)
     main_html = (
         '<html><iframe allowfullscreen="true" src="//closethreaten.net/embed/abc123" frameborder="0"></iframe></html>'
     )
-    iframe_html = "<script>eval(function(p,a,c,k,e,d){/* packed */})</script>"
+    iframe_html = "<script>eval(function(p,a,c,k,e,d){return p;}('0',1,1,'x'.split('|'),0,{}))</script>"
 
     async def fake_make_request(url: str, **kwargs):
         if url == main_url:

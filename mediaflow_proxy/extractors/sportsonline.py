@@ -34,6 +34,8 @@ class SportsonlineExtractor(BaseExtractor):
         Detect and extract packed eval blocks from HTML.
         """
         raw_matches: list[str] = []
+        strict_eval_pattern = re.compile(r"eval\(function\(p,a,c,k,e,.*?\}\(.*?\)\)", re.DOTALL)
+        relaxed_eval_pattern = re.compile(r"eval\(function\(p,a,c,k,e,[dr]\).*?\}\(.*?\)\)", re.DOTALL)
 
         # Prefer script-body extraction first. This is more resilient when the packed
         # code has nested parentheses/semicolons that are hard to capture with a
@@ -41,26 +43,31 @@ class SportsonlineExtractor(BaseExtractor):
         script_pattern = re.compile(r"<script[^>]*>(.*?)</script>", re.IGNORECASE | re.DOTALL)
         for script_body in script_pattern.findall(html):
             if "eval(function(p,a,c,k,e" in script_body:
-                raw_matches.append(script_body)
+                strict_matches = strict_eval_pattern.findall(script_body)
+                if strict_matches:
+                    raw_matches.extend(strict_matches)
+                    continue
+
+                relaxed_matches = relaxed_eval_pattern.findall(script_body)
+                if relaxed_matches:
+                    raw_matches.extend(relaxed_matches)
 
         if raw_matches:
             return raw_matches
 
         # Fallback: direct eval(...) extraction from raw HTML.
-        pattern = re.compile(r"eval\(function\(p,a,c,k,e,.*?\}\(.*?\)\)", re.DOTALL)
-        raw_matches = pattern.findall(html)
+        raw_matches = strict_eval_pattern.findall(html)
 
         # If no matches with the strict pattern, try a more relaxed one
         if not raw_matches:
-            pattern = re.compile(r"eval\(function\(p,a,c,k,e,[dr]\).*?\}\(.*?\)\)", re.DOTALL)
-            raw_matches = pattern.findall(html)
+            raw_matches = relaxed_eval_pattern.findall(html)
 
         return raw_matches
 
     @staticmethod
     def _extract_m3u8_candidate(text: str) -> str | None:
         patterns = [
-            r"var\s+src\s*=\s*[\"']([^\"']+)[\"']",
+            r"var\s+src\s*=\s*[\"']([^\"']+\.m3u8[^\"']*)[\"']",
             r"src\s*=\s*[\"']([^\"']+\.m3u8[^\"']*)[\"']",
             r"file\s*:\s*[\"']([^\"']+\.m3u8[^\"']*)[\"']",
             r"[\"']([^\"']*https?://[^\"']+\.m3u8[^\"']*)[\"']",
@@ -135,9 +142,10 @@ class SportsonlineExtractor(BaseExtractor):
             else:
                 logger.warning("No iframe found on page, attempting extraction from main HTML")
 
+            parsed_iframe = urlparse(iframe_url)
             playback_headers = {
                 "Referer": iframe_url,
-                "Origin": f"{urlparse(iframe_url).scheme}://{urlparse(iframe_url).netloc}",
+                "Origin": f"{parsed_iframe.scheme}://{parsed_iframe.netloc}",
                 "User-Agent": user_agent,
             }
 
@@ -192,8 +200,6 @@ class SportsonlineExtractor(BaseExtractor):
                         m3u8_url = self._extract_m3u8_candidate(unpacked_code)
                         if m3u8_url:
                             logger.info(f"Found m3u8 in block {i}")
-
-                        if m3u8_url:
                             break
                     except Exception as e:
                         logger.debug(f"Failed to process block {i}: {e}")

@@ -5,6 +5,7 @@ This module provides caching and extraction helpers for DLHD/DaddyLive
 and Sportsonline/Sportzonline streams that are auto-detected in proxy routes.
 """
 
+import copy
 import logging
 import re
 import time
@@ -65,7 +66,7 @@ async def check_and_extract_dlhd_stream(
 
         if cache_age < _dlhd_cache_duration:
             logger.info(f"Using cached DLHD data (age: {cache_age:.1f}s)")
-            return cached_entry["data"]
+            return copy.deepcopy(cached_entry["data"])
         else:
             logger.info(f"DLHD cache expired (age: {cache_age:.1f}s), re-extracting...")
             del _dlhd_extraction_cache[destination]
@@ -88,7 +89,7 @@ async def check_and_extract_dlhd_stream(
             logger.info("DLHD key params extracted for dynamic header computation")
 
         # Cache a copy of result to prevent downstream mutations from corrupting the cache
-        _dlhd_extraction_cache[destination] = {"data": result.copy(), "timestamp": current_time}
+        _dlhd_extraction_cache[destination] = {"data": copy.deepcopy(result), "timestamp": current_time}
         logger.info(f"DLHD data cached for {_dlhd_cache_duration}s")
 
         return result
@@ -132,7 +133,7 @@ async def check_and_extract_sportsonline_stream(
         cached_entry = _sportsonline_extraction_cache[destination]
         if current_time - cached_entry["timestamp"] < _sportsonline_cache_duration:
             logger.info(f"Using cached Sportsonline data (age: {current_time - cached_entry['timestamp']:.1f}s)")
-            return cached_entry["data"]
+            return copy.deepcopy(cached_entry["data"])
         else:
             logger.info("Sportsonline cache expired, re-extracting...")
             del _sportsonline_extraction_cache[destination]
@@ -143,7 +144,7 @@ async def check_and_extract_sportsonline_stream(
         result = await extractor.extract(destination)
         logger.info(f"Sportsonline extraction successful. Stream URL: {result.get('destination_url')}")
         # Cache a copy of result to prevent downstream mutations from corrupting the cache
-        _sportsonline_extraction_cache[destination] = {"data": result.copy(), "timestamp": current_time}
+        _sportsonline_extraction_cache[destination] = {"data": copy.deepcopy(result), "timestamp": current_time}
         logger.info(f"Sportsonline data cached for {_sportsonline_cache_duration}s")
         return result
     except (ExtractorError, DownloadError) as e:
