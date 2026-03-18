@@ -394,10 +394,9 @@ async def handle_stream_request(
         range_header = proxy_headers.request.get("range", "not set")
         logger.info(f"[handle_stream] Starting upstream {method} request - range: {range_header}")
 
-        # Track if this is an auto-added "bytes=0-" range (client didn't send range)
-        # We detect this by checking if range equals exactly "bytes=0-" which indicates
-        # a proxy-added default range, not a client seeking request
-        auto_added_range = proxy_headers.request.get("range") == "bytes=0-"
+        # Check if the range header was auto-added by proxy (not from client)
+        # This is set in proxy.py when we add bytes=0- because client didn't send a range
+        auto_added_range = getattr(proxy_headers, "auto_added_range", False)
 
         # Use the same HTTP method for upstream request (HEAD for HEAD, GET for GET)
         # This prevents unnecessary data download when client just wants headers
