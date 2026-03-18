@@ -414,9 +414,16 @@ async def handle_stream_request(
         # When client didn't send a Range header but upstream returns 206 Partial Content:
         # - Convert status to 200 (full content, not partial)
         # - Remove content-range header to avoid confusing the client
+        # - BUT keep Accept-Ranges: bytes so client knows seeking is supported
         # This handles cases where we added bytes=0- range but upstream still treats it as a range request
         status_code = streamer.response.status
         if status_code == 206:
+            # Always ensure Accept-Ranges: bytes is present for 206 responses
+            # This tells clients like ExoPlayer that they can seek by sending Range requests
+            # Some upstream servers (like TorBox) don't send this header even though they support ranges
+            if "accept-ranges" not in [h.lower() for h in response_headers.keys()]:
+                response_headers["accept-ranges"] = "bytes"
+
             if "content-range" in [h.lower() for h in proxy_headers.remove]:
                 # Explicitly requested to remove content-range
                 status_code = 200
