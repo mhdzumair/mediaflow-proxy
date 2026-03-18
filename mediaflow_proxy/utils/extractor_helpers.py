@@ -118,10 +118,9 @@ async def check_and_extract_sportsonline_stream(
     Returns:
         dict | None: Extracted stream data if Sportsonline link detected, None otherwise.
     """
-    parsed_netloc = urlparse(destination).netloc
-    is_sportsonline_link = any(
-        domain in parsed_netloc for domain in ("sportzonline.", "sportsonline.", "sportzsonline.")
-    )
+    hostname = (urlparse(destination).hostname or "").lower()
+    hostname_labels = {part for part in hostname.split(".") if part}
+    is_sportsonline_link = bool(hostname_labels & {"sportzonline", "sportsonline", "sportzsonline"})
 
     if not is_sportsonline_link:
         return None

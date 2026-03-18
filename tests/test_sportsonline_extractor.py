@@ -2,6 +2,8 @@ import pytest
 
 from mediaflow_proxy.extractors.base import HttpResponse
 from mediaflow_proxy.extractors.sportsonline import SportsonlineExtractor
+from mediaflow_proxy.utils.extractor_helpers import check_and_extract_sportsonline_stream
+from mediaflow_proxy.utils.http_utils import ProxyRequestHeaders
 
 
 def _response(url: str, text: str) -> HttpResponse:
@@ -174,3 +176,62 @@ async def test_sportsonline_prefers_iframe_src_over_data_src(monkeypatch):
 
     assert result["destination_url"] == "https://cdn.example.test/live/final.m3u8"
     assert result["request_headers"]["Referer"] == iframe_url
+
+
+@pytest.mark.asyncio
+async def test_sportsonline_helper_matches_domain_label_case_insensitive(monkeypatch):
+    called = {"count": 0}
+
+    class DummyExtractor:
+        async def extract(self, destination: str):
+            called["count"] += 1
+            called["destination"] = destination
+            return {
+                "destination_url": "https://cdn.example.test/live/final.m3u8",
+                "request_headers": {"Referer": "https://example.test/"},
+                "mediaflow_endpoint": "hls_manifest_proxy",
+            }
+
+    monkeypatch.setattr(
+        "mediaflow_proxy.utils.extractor_helpers.ExtractorFactory.get_extractor",
+        lambda host, headers: DummyExtractor(),
+    )
+
+    proxy_headers = ProxyRequestHeaders(request={}, response={}, remove=[], propagate={})
+    result = await check_and_extract_sportsonline_stream(
+        request=None,
+        destination="https://W1.SPORTZSONLINE.click/channels/pt/sporttv1.php",
+        proxy_headers=proxy_headers,
+        force_refresh=True,
+    )
+
+    assert called["count"] == 1
+    assert called["destination"].endswith("/channels/pt/sporttv1.php")
+    assert result is not None
+    assert result["destination_url"] == "https://cdn.example.test/live/final.m3u8"
+
+
+@pytest.mark.asyncio
+async def test_sportsonline_helper_ignores_non_matching_hostname(monkeypatch):
+    called = {"count": 0}
+
+    class DummyExtractor:
+        async def extract(self, destination: str):
+            called["count"] += 1
+            return {"destination_url": destination}
+
+    monkeypatch.setattr(
+        "mediaflow_proxy.utils.extractor_helpers.ExtractorFactory.get_extractor",
+        lambda host, headers: DummyExtractor(),
+    )
+
+    proxy_headers = ProxyRequestHeaders(request={}, response={}, remove=[], propagate={})
+    result = await check_and_extract_sportsonline_stream(
+        request=None,
+        destination="https://notsportzonlineexample.com/channel",
+        proxy_headers=proxy_headers,
+        force_refresh=True,
+    )
+
+    assert result is None
+    assert called["count"] == 0
