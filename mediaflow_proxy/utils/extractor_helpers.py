@@ -140,7 +140,8 @@ async def check_and_extract_sportsonline_stream(
         extractor = ExtractorFactory.get_extractor("Sportsonline", proxy_headers.request)
         result = await extractor.extract(destination)
         logger.info(f"Sportsonline extraction successful. Stream URL: {result.get('destination_url')}")
-        _sportsonline_extraction_cache[destination] = {"data": result, "timestamp": current_time}
+        # Cache a copy of result to prevent downstream mutations from corrupting the cache
+        _sportsonline_extraction_cache[destination] = {"data": result.copy(), "timestamp": current_time}
         logger.info(f"Sportsonline data cached for {_sportsonline_cache_duration}s")
         return result
     except (ExtractorError, DownloadError) as e:

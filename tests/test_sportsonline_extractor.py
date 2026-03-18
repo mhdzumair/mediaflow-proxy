@@ -1,0 +1,94 @@
+import pytest
+
+from mediaflow_proxy.extractors.base import HttpResponse
+from mediaflow_proxy.extractors.sportsonline import SportsonlineExtractor
+
+
+def _response(url: str, text: str) -> HttpResponse:
+    return HttpResponse(
+        status=200,
+        headers={},
+        text=text,
+        content=text.encode("utf-8"),
+        url=url,
+    )
+
+
+@pytest.mark.asyncio
+async def test_sportsonline_extracts_iframe_with_non_first_src_attr(monkeypatch):
+    extractor = SportsonlineExtractor({})
+
+    main_url = "https://sportsonline.st/game-1"
+    iframe_url = "https://closethreaten.net/embed/abc123"
+
+    main_html = (
+        '<html><iframe allowfullscreen="true" src="//closethreaten.net/embed/abc123" frameborder="0"></iframe></html>'
+    )
+    iframe_html = "<script>eval(function(p,a,c,k,e,d){/* packed */})</script>"
+
+    async def fake_make_request(url: str, **kwargs):
+        if url == main_url:
+            return _response(main_url, main_html)
+        if url == iframe_url:
+            return _response(iframe_url, iframe_html)
+        raise AssertionError(f"Unexpected URL requested: {url}")
+
+    monkeypatch.setattr(extractor, "_make_request", fake_make_request)
+    monkeypatch.setattr(
+        "mediaflow_proxy.extractors.sportsonline.unpack",
+        lambda _packed: 'var src="/hls/live/index.m3u8?token=abc";',
+    )
+
+    result = await extractor.extract(main_url)
+
+    assert result["destination_url"] == "https://closethreaten.net/hls/live/index.m3u8?token=abc"
+    assert result["request_headers"]["Referer"] == iframe_url
+    assert result["request_headers"]["Origin"] == "https://closethreaten.net"
+    assert result["mediaflow_endpoint"] == "hls_manifest_proxy"
+
+
+@pytest.mark.asyncio
+async def test_sportsonline_fallback_to_direct_m3u8_when_not_packed(monkeypatch):
+    extractor = SportsonlineExtractor({})
+
+    main_url = "https://sportsonline.st/game-2"
+    iframe_url = "https://closethreaten.net/embed/xyz"
+
+    main_html = '<html><iframe src="https://closethreaten.net/embed/xyz"></iframe></html>'
+    iframe_html = '<script>const file="//cdn.example.test/live/stream.m3u8?k=v";</script>'
+
+    async def fake_make_request(url: str, **kwargs):
+        if url == main_url:
+            return _response(main_url, main_html)
+        if url == iframe_url:
+            return _response(iframe_url, iframe_html)
+        raise AssertionError(f"Unexpected URL requested: {url}")
+
+    monkeypatch.setattr(extractor, "_make_request", fake_make_request)
+
+    result = await extractor.extract(main_url)
+
+    assert result["destination_url"] == "https://cdn.example.test/live/stream.m3u8?k=v"
+    assert result["request_headers"]["Referer"] == iframe_url
+    assert result["request_headers"]["Origin"] == "https://closethreaten.net"
+
+
+@pytest.mark.asyncio
+async def test_sportsonline_extracts_without_iframe_from_main_html(monkeypatch):
+    extractor = SportsonlineExtractor({})
+
+    main_url = "https://sportsonline.st/game-3"
+    main_html = '<html><script>const src="/manifest.m3u8";</script></html>'
+
+    async def fake_make_request(url: str, **kwargs):
+        if url == main_url:
+            return _response(main_url, main_html)
+        raise AssertionError(f"Unexpected URL requested: {url}")
+
+    monkeypatch.setattr(extractor, "_make_request", fake_make_request)
+
+    result = await extractor.extract(main_url)
+
+    assert result["destination_url"] == "https://sportsonline.st/manifest.m3u8"
+    assert result["request_headers"]["Referer"] == main_url
+    assert result["request_headers"]["Origin"] == "https://sportsonline.st"
