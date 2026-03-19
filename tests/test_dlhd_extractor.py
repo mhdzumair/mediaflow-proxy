@@ -110,7 +110,7 @@ async def test_dlhd_recomputes_iframe_domain_after_redirect(monkeypatch):
     async def fake_lovecdn(iframe_url: str, iframe_content: str, headers: dict):
         return {
             "destination_url": "https://cdn.example/live.m3u8",
-            "request_headers": {"Referer": iframe_url},
+            "request_headers": {"Referer": headers["Referer"]},
             "mediaflow_endpoint": "hls_manifest_proxy",
         }
 
@@ -133,3 +133,45 @@ async def test_dlhd_recomputes_iframe_domain_after_redirect(monkeypatch):
     result = await extractor.extract(main_url)
 
     assert result["destination_url"] == "https://cdn.example/live.m3u8"
+    assert result["request_headers"]["Referer"] == iframe_redirected
+
+
+@pytest.mark.asyncio
+async def test_dlhd_resolves_relative_player_and_iframe_against_document_url(monkeypatch):
+    extractor = DLHDExtractor({})
+
+    main_url = "https://dlstreams.top/cast/stream-49.php"
+    player_url = "https://dlstreams.top/cast/player/49"
+    iframe_url = "https://dlstreams.top/cast/player/embed/49"
+    lookup_url = "https://ai.the-sunmoon.site/server_lookup?channel_id=premium49"
+
+    main_html = '<html><button data-url="player/49">Player 1</button></html>'
+    player_html = '<html><iframe src="embed/49"></iframe></html>'
+    iframe_html = "const CHANNEL_KEY = 'premium49'; const M3U8_SERVER = 'ai.the-sunmoon.site';"
+    lookup_json = '{"server_key":"wind"}'
+
+    called_urls: list[str] = []
+
+    async def fake_direct(channel_id: str):
+        raise ExtractorError("simulated direct extraction failure")
+
+    async def fake_make_request(url: str, **kwargs):
+        called_urls.append(url)
+        if url == main_url:
+            return _response(main_url, main_html)
+        if url == player_url:
+            return _response(player_url, player_html)
+        if url == iframe_url:
+            return _response(iframe_url, iframe_html)
+        if url == lookup_url:
+            return _response(lookup_url, lookup_json)
+        raise AssertionError(f"Unexpected URL requested: {url}")
+
+    monkeypatch.setattr(extractor, "_extract_direct_stream", fake_direct)
+    monkeypatch.setattr(extractor, "_make_request", fake_make_request)
+
+    result = await extractor.extract(main_url)
+
+    assert player_url in called_urls
+    assert iframe_url in called_urls
+    assert result["destination_url"] == "https://ai.the-sunmoon.site/proxy/wind/premium49/mono.css"

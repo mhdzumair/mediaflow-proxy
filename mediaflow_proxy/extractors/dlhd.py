@@ -663,6 +663,7 @@ class DLHDExtractor(BaseExtractor):
         """Legacy iframe-based extraction flow - used as fallback."""
         parsed_url = urlparse(url)
         baseurl = f"{parsed_url.scheme}://{parsed_url.netloc}/"
+        main_page_url = url
 
         daddy_origin = urlparse(baseurl).scheme + "://" + urlparse(baseurl).netloc
         daddylive_headers = {
@@ -677,6 +678,7 @@ class DLHDExtractor(BaseExtractor):
         resp1 = await self._make_request(url, headers=daddylive_headers, timeout=15, use_flaresolverr=use_flaresolverr)
         resp1_text = resp1.text
         if resp1.url:
+            main_page_url = resp1.url
             baseurl = f"{urlparse(resp1.url).scheme}://{urlparse(resp1.url).netloc}/"
             daddylive_headers["Referer"] = baseurl
             daddylive_headers["Origin"] = urlparse(baseurl).scheme + "://" + urlparse(baseurl).netloc
@@ -690,7 +692,7 @@ class DLHDExtractor(BaseExtractor):
         iframe_candidates: list[tuple[str, str]] = []
 
         def add_iframe_candidate(candidate_url: str, referer_url: str):
-            normalized_url = urljoin(baseurl, candidate_url)
+            normalized_url = urljoin(referer_url or main_page_url, candidate_url)
             key = (normalized_url, referer_url)
             if key not in iframe_candidates:
                 iframe_candidates.append(key)
@@ -705,7 +707,7 @@ class DLHDExtractor(BaseExtractor):
         for player_url in player_links:
             try:
                 if not player_url.startswith("http"):
-                    player_url = urljoin(baseurl, player_url)
+                    player_url = urljoin(main_page_url, player_url)
 
                 parsed_player = urlparse(player_url)
                 player_origin = f"{parsed_player.scheme}://{parsed_player.netloc}"
@@ -750,21 +752,27 @@ class DLHDExtractor(BaseExtractor):
                 resp3 = await self._make_request(iframe_candidate, headers=iframe_headers, timeout=12)
                 iframe_content = resp3.text
                 iframe_candidate = resp3.url or iframe_candidate
-                iframe_domain = urlparse(iframe_candidate).netloc
+                parsed_iframe = urlparse(iframe_candidate)
+                iframe_domain = parsed_iframe.netloc
+                resolved_iframe_headers = iframe_headers.copy()
+                resolved_iframe_headers["Referer"] = iframe_candidate
+                resolved_iframe_headers["Origin"] = f"{parsed_iframe.scheme}://{parsed_iframe.netloc}"
                 logger.info(f"Successfully loaded iframe from: {iframe_domain}")
 
                 try:
                     logger.info("Attempting proxy-server flow extraction.")
-                    return await self._extract_proxy_server_flow(iframe_candidate, iframe_content, iframe_headers)
+                    return await self._extract_proxy_server_flow(
+                        iframe_candidate, iframe_content, resolved_iframe_headers
+                    )
                 except ExtractorError:
                     pass
 
                 if "lovecdn.ru" in iframe_domain:
                     logger.info("Detected lovecdn.ru iframe - using alternative extraction")
-                    return await self._extract_lovecdn_stream(iframe_candidate, iframe_content, iframe_headers)
+                    return await self._extract_lovecdn_stream(iframe_candidate, iframe_content, resolved_iframe_headers)
                 else:
                     logger.info("Attempting new auth flow extraction.")
-                    return await self._extract_new_auth_flow(iframe_candidate, iframe_content, iframe_headers)
+                    return await self._extract_new_auth_flow(iframe_candidate, iframe_content, resolved_iframe_headers)
 
             except Exception as e:
                 logger.warning(f"Failed to process iframe {iframe_candidate}: {e}")
