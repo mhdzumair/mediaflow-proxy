@@ -710,7 +710,6 @@ class DLHDExtractor(BaseExtractor):
                 parsed_player = urlparse(player_url)
                 player_origin = f"{parsed_player.scheme}://{parsed_player.netloc}"
                 player_headers = daddylive_headers.copy()
-                player_headers["Referer"] = player_url
                 player_headers["Origin"] = player_origin
 
                 resp2 = await self._make_request(player_url, headers=player_headers, timeout=12)
@@ -751,6 +750,7 @@ class DLHDExtractor(BaseExtractor):
                 resp3 = await self._make_request(iframe_candidate, headers=iframe_headers, timeout=12)
                 iframe_content = resp3.text
                 iframe_candidate = resp3.url or iframe_candidate
+                iframe_domain = urlparse(iframe_candidate).netloc
                 logger.info(f"Successfully loaded iframe from: {iframe_domain}")
 
                 try:

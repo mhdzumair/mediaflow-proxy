@@ -195,6 +195,9 @@ async def _extract_url_impl(
                     "request_headers",
                     "propagate_response_headers",
                     "remove_response_headers",
+                    "encryption_handler",
+                    "expiration",
+                    "ip",
                     "filename",
                     "stream_transformer",
                 )
