@@ -179,9 +179,32 @@ async def _extract_url_impl(
         if "no_proxy" in request.query_params:
             response["query_params"]["no_proxy"] = request.query_params.get("no_proxy")
 
+        # Some extractors (e.g., DLHD) return this as top-level metadata for internal
+        # manifest processing. Redirect URL encoding expects it in query params.
+        if response.pop("force_playlist_proxy", False):
+            response["query_params"]["force_playlist_proxy"] = "1"
+
         if extractor_params.redirect_stream:
+            encode_args = {
+                key: response[key]
+                for key in (
+                    "mediaflow_proxy_url",
+                    "endpoint",
+                    "destination_url",
+                    "query_params",
+                    "request_headers",
+                    "propagate_response_headers",
+                    "remove_response_headers",
+                    "encryption_handler",
+                    "expiration",
+                    "ip",
+                    "filename",
+                    "stream_transformer",
+                )
+                if key in response
+            }
             stream_url = encode_mediaflow_proxy_url(
-                **response,
+                **encode_args,
                 response_headers=proxy_headers.response,
             )
             return RedirectResponse(url=stream_url, status_code=302)

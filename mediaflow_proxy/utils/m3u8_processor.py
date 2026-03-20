@@ -691,12 +691,17 @@ class M3U8Processor:
             # otherwise the proxied destination URL gets the wrong upstream hostname.
             if self.key_url and line.startswith("#EXT-X-KEY"):
                 uri = uri._replace(scheme=self.key_url.scheme, netloc=self.key_url.netloc)
+
+            resolved_key_url = uri.geturl()
+            if not uri.scheme:
+                resolved_key_url = parse.urljoin(base_url, resolved_key_url)
+
             # Check if this is a DLHD stream with key params (needs stream endpoint for header computation)
             query_params = dict(self.request.query_params)
-            is_dlhd_key_request = "dlhd_salt" in query_params and "/key/" in uri.geturl()
+            is_dlhd_key_request = "dlhd_salt" in query_params and "/key/" in resolved_key_url
             # Use stream endpoint for DLHD key URLs, manifest endpoint for others
             new_uri = await self.proxy_url(
-                uri.geturl(), base_url, use_full_url=True, is_playlist=not is_dlhd_key_request
+                resolved_key_url, base_url, use_full_url=True, is_playlist=not is_dlhd_key_request
             )
             line = line.replace(f'URI="{original_uri}"', f'URI="{new_uri}"')
         return line

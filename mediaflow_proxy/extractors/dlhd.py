@@ -5,7 +5,7 @@ import time
 import logging
 
 from typing import Any, Dict, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 import aiohttp
 
@@ -514,6 +514,49 @@ class DLHDExtractor(BaseExtractor):
         except Exception as e:
             raise ExtractorError(f"Failed to extract lovecdn.ru stream: {e}")
 
+    async def _extract_proxy_server_flow(self, iframe_url: str, iframe_content: str, headers: dict) -> Dict[str, Any]:
+        """Extract streams from CHANNEL_KEY + M3U8_SERVER javascript flow."""
+        channel_key_match = re.search(r"(?:const|var|let)\s+CHANNEL_KEY\s*=\s*['\"]([^'\"]+)['\"]", iframe_content)
+        m3u8_server_match = re.search(r"(?:const|var|let)\s+M3U8_SERVER\s*=\s*['\"]([^'\"]+)['\"]", iframe_content)
+
+        if not channel_key_match or not m3u8_server_match:
+            raise ExtractorError("Not proxy-server flow: missing CHANNEL_KEY or M3U8_SERVER")
+
+        channel_key = channel_key_match.group(1).strip()
+        m3u8_server = m3u8_server_match.group(1).strip()
+        if not channel_key or not m3u8_server:
+            raise ExtractorError("Not proxy-server flow: empty CHANNEL_KEY or M3U8_SERVER")
+
+        parsed_iframe = urlparse(iframe_url)
+        iframe_origin = f"{parsed_iframe.scheme}://{parsed_iframe.netloc}"
+        lookup_url = f"https://{m3u8_server}/server_lookup?channel_id={channel_key}"
+        lookup_headers = {
+            "User-Agent": headers["User-Agent"],
+            "Referer": iframe_url,
+            "Origin": iframe_origin,
+            "Accept": "application/json, text/plain, */*",
+        }
+
+        lookup_resp = await self._make_request(lookup_url, headers=lookup_headers, timeout=10)
+        lookup_data = lookup_resp.json()
+        server_key = lookup_data.get("server_key")
+        if not server_key:
+            raise ExtractorError(f"Proxy-server flow failed: no server_key in lookup response {lookup_data}")
+
+        stream_url = f"https://{m3u8_server}/proxy/{server_key}/{channel_key}/mono.css"
+        stream_headers = {
+            "User-Agent": headers["User-Agent"],
+            "Referer": iframe_url,
+            "Origin": iframe_origin,
+        }
+
+        return {
+            "destination_url": stream_url,
+            "request_headers": stream_headers,
+            "mediaflow_endpoint": "hls_manifest_proxy",
+            "force_playlist_proxy": True,
+        }
+
     async def _extract_direct_stream(self, channel_id: str) -> Dict[str, Any]:
         """
         Direct stream extraction using server lookup API with the new auth flow.
@@ -618,7 +661,9 @@ class DLHDExtractor(BaseExtractor):
 
     async def _extract_via_iframe(self, url: str, channel_id: str) -> Dict[str, Any]:
         """Legacy iframe-based extraction flow - used as fallback."""
-        baseurl = "https://dlhd.dad/"
+        parsed_url = urlparse(url)
+        baseurl = f"{parsed_url.scheme}://{parsed_url.netloc}/"
+        main_page_url = url
 
         daddy_origin = urlparse(baseurl).scheme + "://" + urlparse(baseurl).netloc
         daddylive_headers = {
@@ -632,35 +677,50 @@ class DLHDExtractor(BaseExtractor):
         use_flaresolverr = settings.flaresolverr_url is not None
         resp1 = await self._make_request(url, headers=daddylive_headers, timeout=15, use_flaresolverr=use_flaresolverr)
         resp1_text = resp1.text
+        if resp1.url:
+            main_page_url = resp1.url
+            baseurl = f"{urlparse(resp1.url).scheme}://{urlparse(resp1.url).netloc}/"
+            daddylive_headers["Referer"] = baseurl
+            daddylive_headers["Origin"] = urlparse(baseurl).scheme + "://" + urlparse(baseurl).netloc
 
         # Update headers with FlareSolverr user-agent after initial request
         if self._flaresolverr_user_agent:
             daddylive_headers["User-Agent"] = self._flaresolverr_user_agent
 
         player_links = re.findall(r'<button[^>]*data-url="([^"]+)"[^>]*>Player\s*\d+</button>', resp1_text)
-        if not player_links:
-            raise ExtractorError("No player links found on the page.")
+
+        iframe_candidates: list[tuple[str, str]] = []
+
+        def add_iframe_candidate(candidate_url: str, referer_url: str):
+            normalized_url = urljoin(referer_url or main_page_url, candidate_url)
+            key = (normalized_url, referer_url)
+            if key not in iframe_candidates:
+                iframe_candidates.append(key)
+                logger.info(f"Found iframe candidate: {normalized_url}")
+
+        direct_iframes = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', resp1_text, re.IGNORECASE)
+        for iframe in direct_iframes:
+            add_iframe_candidate(iframe, resp1.url)
 
         # Try all players and collect all valid iframes
         last_player_error = None
-        iframe_candidates = []
-
         for player_url in player_links:
             try:
                 if not player_url.startswith("http"):
-                    player_url = baseurl + player_url.lstrip("/")
+                    player_url = urljoin(main_page_url, player_url)
 
-                daddylive_headers["Referer"] = player_url
-                daddylive_headers["Origin"] = player_url
-                resp2 = await self._make_request(player_url, headers=daddylive_headers, timeout=12)
+                parsed_player = urlparse(player_url)
+                player_origin = f"{parsed_player.scheme}://{parsed_player.netloc}"
+                player_headers = daddylive_headers.copy()
+                player_headers["Origin"] = player_origin
+
+                resp2 = await self._make_request(player_url, headers=player_headers, timeout=12)
                 resp2_text = resp2.text
-                iframes2 = re.findall(r'<iframe.*?src="([^"]*)"', resp2_text)
+                player_referer = resp2.url or player_url
+                iframes2 = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', resp2_text, re.IGNORECASE)
 
-                # Collect all found iframes
                 for iframe in iframes2:
-                    if iframe not in iframe_candidates:
-                        iframe_candidates.append(iframe)
-                        logger.info(f"Found iframe candidate: {iframe}")
+                    add_iframe_candidate(iframe, player_referer)
 
             except Exception as e:
                 last_player_error = e
@@ -675,7 +735,7 @@ class DLHDExtractor(BaseExtractor):
         # Try each iframe until one works
         last_iframe_error = None
 
-        for iframe_candidate in iframe_candidates:
+        for iframe_candidate, iframe_referer in iframe_candidates:
             try:
                 logger.info(f"Trying iframe: {iframe_candidate}")
 
@@ -684,17 +744,35 @@ class DLHDExtractor(BaseExtractor):
                     logger.warning(f"Invalid iframe URL format: {iframe_candidate}")
                     continue
 
+                iframe_headers = daddylive_headers.copy()
+                iframe_headers["Referer"] = iframe_referer
+                iframe_headers["Origin"] = f"{urlparse(iframe_referer).scheme}://{urlparse(iframe_referer).netloc}"
+
                 self._iframe_context = iframe_candidate
-                resp3 = await self._make_request(iframe_candidate, headers=daddylive_headers, timeout=12)
+                resp3 = await self._make_request(iframe_candidate, headers=iframe_headers, timeout=12)
                 iframe_content = resp3.text
+                iframe_candidate = resp3.url or iframe_candidate
+                parsed_iframe = urlparse(iframe_candidate)
+                iframe_domain = parsed_iframe.netloc
+                resolved_iframe_headers = iframe_headers.copy()
+                resolved_iframe_headers["Referer"] = iframe_candidate
+                resolved_iframe_headers["Origin"] = f"{parsed_iframe.scheme}://{parsed_iframe.netloc}"
                 logger.info(f"Successfully loaded iframe from: {iframe_domain}")
+
+                try:
+                    logger.info("Attempting proxy-server flow extraction.")
+                    return await self._extract_proxy_server_flow(
+                        iframe_candidate, iframe_content, resolved_iframe_headers
+                    )
+                except ExtractorError:
+                    pass
 
                 if "lovecdn.ru" in iframe_domain:
                     logger.info("Detected lovecdn.ru iframe - using alternative extraction")
-                    return await self._extract_lovecdn_stream(iframe_candidate, iframe_content, daddylive_headers)
+                    return await self._extract_lovecdn_stream(iframe_candidate, iframe_content, resolved_iframe_headers)
                 else:
                     logger.info("Attempting new auth flow extraction.")
-                    return await self._extract_new_auth_flow(iframe_candidate, iframe_content, daddylive_headers)
+                    return await self._extract_new_auth_flow(iframe_candidate, iframe_content, resolved_iframe_headers)
 
             except Exception as e:
                 logger.warning(f"Failed to process iframe {iframe_candidate}: {e}")
