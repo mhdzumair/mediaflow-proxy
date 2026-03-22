@@ -186,6 +186,26 @@ Set the following environment variables:
 - `DASH_SEGMENT_CACHE_TTL`: Optional. TTL in seconds for cached DASH segments. Default: `60`. Longer values help with slow network playback.
 - `FORWARDED_ALLOW_IPS`: Optional. Controls which IP addresses are trusted to provide forwarded headers (X-Forwarded-For, X-Forwarded-Proto, etc.) when MediaFlow Proxy is deployed behind reverse proxies or load balancers. Default: `127.0.0.1`. See [Forwarded Headers Configuration](#forwarded-headers-configuration) for detailed usage.
 
+### Docker and Gunicorn
+
+The official Docker image runs **Gunicorn** with **Uvicorn workers**. The following environment variables map to Gunicorn’s command-line options (defaults match the previous fixed invocation):
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | TCP port when `GUNICORN_BIND` is unset (`0.0.0.0:$PORT`). Also used by the `mediaflow-proxy` CLI and `python -m mediaflow_proxy`. | `8888` |
+| `GUNICORN_BIND` | Full `--bind` value (e.g. `0.0.0.0:8889`). If set, overrides the address implied by `PORT`. | *(unset)* |
+| `GUNICORN_WORKERS` | Worker count (`-w`). | `4` |
+| `WEB_CONCURRENCY` | If set, overrides `GUNICORN_WORKERS` (used by Heroku and similar hosts). | *(unset)* |
+| `GUNICORN_WORKER_CLASS` | Worker class (`-k`). | `uvicorn.workers.UvicornWorker` |
+| `GUNICORN_TIMEOUT` | Worker timeout in seconds. | `120` |
+| `GUNICORN_MAX_REQUESTS` | Restart workers after this many requests. | `500` |
+| `GUNICORN_MAX_REQUESTS_JITTER` | Random jitter added to `GUNICORN_MAX_REQUESTS`. | `200` |
+| `GUNICORN_ACCESS_LOGFILE` | Access log destination (`-` = stdout). | `-` |
+| `GUNICORN_ERROR_LOGFILE` | Error log destination (`-` = stderr). | `-` |
+| `GUNICORN_LOG_LEVEL` | Gunicorn log level. | `info` |
+
+**Gluetun:** Gluetun’s built-in HTTP proxy often listens on **8888**, which conflicts with MediaFlow Proxy’s default. Set `PORT` to a free port (for example `8889`) and map that port on the Gluetun service (when using `network_mode: "service:gluetun"`, publish the port on the Gluetun container), or set `GUNICORN_BIND=0.0.0.0:8889` explicitly.
+
 ### Redis Configuration (Optional)
 
 Redis enables cross-worker coordination for rate limiting and caching. This is **recommended** when running with multiple workers (`--workers N`) to prevent CDN rate-limiting issues (e.g., Vidoza 509 errors).
@@ -965,6 +985,10 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
    ```
    docker run -p 8888:8888 -e API_PASSWORD=your_password mhdzumair/mediaflow-proxy
    ```
+   Custom listen port (host and container must match the chosen `PORT`):
+   ```
+   docker run -p 8889:8889 -e PORT=8889 -e API_PASSWORD=your_password mhdzumair/mediaflow-proxy
+   ```
 ### Using Docker Compose
 
 1. Set the `API_PASSWORD` and other environment variables in `.env`:
@@ -997,7 +1021,7 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
    ```
    mediaflow-proxy
    ```
-   You can access the server at `http://localhost:8888`.
+   You can access the server at `http://localhost:8888` (or `http://localhost:$PORT` if you set the `PORT` environment variable).
 
 4. To run the server with uvicorn options: (Optional)
    ```
@@ -1047,6 +1071,10 @@ MediaFlow Proxy now includes a built-in speed test feature for testing RealDebri
 2. Run the Docker container:
    ```
    docker run -d -p 8888:8888 -e API_PASSWORD=your_password --restart unless-stopped --name mediaflow-proxy mediaflow-proxy
+   ```
+   Example with a non-default port:
+   ```
+   docker run -d -p 8889:8889 -e PORT=8889 -e API_PASSWORD=your_password --restart unless-stopped --name mediaflow-proxy mediaflow-proxy
    ```
 
 ### Option 2: Premium Hosted Service (ElfHosted)
