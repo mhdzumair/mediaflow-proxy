@@ -14,8 +14,6 @@ MediaFlow Proxy is a streaming proxy for HTTP(S), HLS (M3U8), and MPEG-DASH—in
 docker run -p 8888:8888 -e API_PASSWORD=your_password mhdzumair/mediaflow-proxy
 ```
 
-With the server running, open **Swagger UI** at `http://localhost:8888/docs` for live API details (unless `DISABLE_DOCS` is set).
-
 ## Highlights
 
 - DASH (ClearKey) to HLS, HLS manipulation, generic HTTP(S) proxy with custom headers  
@@ -30,8 +28,6 @@ With the server running, open **Swagger UI** at `http://localhost:8888/docs` for
 | User & operator manual | [Documentation site](https://mhdzumair.github.io/mediaflow-proxy/) |
 | Markdown sources | [`docs/`](docs/) in this repository |
 | Build docs locally | `uv sync --group docs` then `uv run mkdocs serve` |
-
-**GitHub Pages:** In the repository **Settings → Pages**, set **Build and deployment → Source** to **GitHub Actions** so pushes to `main` that touch `docs/` or `mkdocs.yml` publish the site.
 
 ## Contributing
 
