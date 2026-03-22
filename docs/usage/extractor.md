@@ -4,6 +4,36 @@
 
 The extractor endpoint extracts direct video stream URLs from various video hosting services. It supports an optional file extension in the URL for better player compatibility.
 
+### Supported extractors (`host` parameter)
+
+Use these exact strings as the `host` query parameter. The canonical list is defined in [`mediaflow_proxy/extractors/factory.py`](https://github.com/mhdzumair/mediaflow-proxy/blob/main/mediaflow_proxy/extractors/factory.py) (`ExtractorFactory._extractors`).
+
+| `host` value |
+|--------------|
+| `DLHD` |
+| `Doodstream` |
+| `F16Px` |
+| `Fastream` |
+| `FileLions` |
+| `FileMoon` |
+| `Gupload` |
+| `LiveTV` |
+| `LuluStream` |
+| `Maxstream` |
+| `Mixdrop` |
+| `Okru` |
+| `Sportsonline` |
+| `Streamtape` |
+| `StreamWish` |
+| `Supervideo` |
+| `TurboVidPlay` |
+| `Uqload` |
+| `Vavoo` |
+| `Vidmoly` |
+| `Vidoza` |
+| `VixCloud` |
+| `Voe` |
+
 ### Endpoints
 
 | Endpoint | Description |
