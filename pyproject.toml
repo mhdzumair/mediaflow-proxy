@@ -42,7 +42,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/mhdzumair/mediaflow-proxy"
 Repository = "https://github.com/mhdzumair/mediaflow-proxy"
-Documentation = "https://github.com/mhdzumair/mediaflow-proxy#readme"
+Documentation = "https://mhdzumair.github.io/mediaflow-proxy/"
 
 [project.scripts]
 mediaflow-proxy = "mediaflow_proxy.main:run"
@@ -53,6 +53,10 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
     "python-dotenv>=1.0.0",
+]
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.0",
 ]
 
 [build-system]

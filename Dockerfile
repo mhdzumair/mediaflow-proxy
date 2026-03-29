@@ -42,7 +42,15 @@ FROM python:3.14-slim
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE="1"
 ENV PYTHONUNBUFFERED="1"
-ENV PORT="8888"
+ENV PORT="8888" \
+    GUNICORN_WORKERS="4" \
+    GUNICORN_WORKER_CLASS="uvicorn.workers.UvicornWorker" \
+    GUNICORN_TIMEOUT="120" \
+    GUNICORN_MAX_REQUESTS="500" \
+    GUNICORN_MAX_REQUESTS_JITTER="200" \
+    GUNICORN_ACCESS_LOGFILE="-" \
+    GUNICORN_ERROR_LOGFILE="-" \
+    GUNICORN_LOG_LEVEL="info"
 
 # Install only runtime dependencies (no dev packages)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -78,4 +86,4 @@ ENV PATH="/mediaflow_proxy/.venv/bin:$PATH"
 EXPOSE 8888
 
 # Run the application with Gunicorn (use python -m to avoid venv path issues)
-CMD ["sh", "-c", "exec python -m gunicorn mediaflow_proxy.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8888 --timeout 120 --max-requests 500 --max-requests-jitter 200 --access-logfile - --error-logfile - --log-level info --forwarded-allow-ips \"${FORWARDED_ALLOW_IPS:-127.0.0.1}\""]
+CMD ["sh", "-c", "exec python -m gunicorn mediaflow_proxy.main:app -w \"${WEB_CONCURRENCY:-${GUNICORN_WORKERS:-4}}\" -k \"${GUNICORN_WORKER_CLASS:-uvicorn.workers.UvicornWorker}\" --bind \"${GUNICORN_BIND:-0.0.0.0:${PORT:-8888}}\" --timeout \"${GUNICORN_TIMEOUT:-120}\" --max-requests \"${GUNICORN_MAX_REQUESTS:-500}\" --max-requests-jitter \"${GUNICORN_MAX_REQUESTS_JITTER:-200}\" --access-logfile \"${GUNICORN_ACCESS_LOGFILE:--}\" --error-logfile \"${GUNICORN_ERROR_LOGFILE:--}\" --log-level \"${GUNICORN_LOG_LEVEL:-info}\" --forwarded-allow-ips \"${FORWARDED_ALLOW_IPS:-127.0.0.1}\""]

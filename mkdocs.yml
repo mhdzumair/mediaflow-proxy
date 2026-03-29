@@ -1,0 +1,63 @@
+site_name: MediaFlow Proxy
+site_description: Documentation for MediaFlow Proxy — HLS, DASH, ClearKey DRM, and streaming proxy features.
+site_url: https://mhdzumair.github.io/mediaflow-proxy/
+repo_url: https://github.com/mhdzumair/mediaflow-proxy
+repo_name: mhdzumair/mediaflow-proxy
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+
+markdown_extensions:
+  - tables
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - attr_list
+
+nav:
+  - Home: index.md
+  - Features: features.md
+  - Installation: installation.md
+  - Configuration:
+      - Environment variables: configuration/environment.md
+      - Docker, Gunicorn & Redis: configuration/runtime.md
+      - Acestream: configuration/acestream.md
+      - Telegram: configuration/telegram.md
+      - Networking & reverse proxies: configuration/networking.md
+      - Speed test: configuration/speedtest.md
+  - Usage:
+      - Overview & endpoints: usage/overview.md
+      - Video extractor: usage/extractor.md
+      - Xtream Codes proxy: usage/xtream.md
+      - URL parameters & generation: usage/url-params-and-encoding.md
+      - Examples: usage/examples.md
+  - Integrations:
+      - Debrid & Stremio: integrations/debrid-stremio.md
+  - Guides:
+      - Base64 URLs: guides/base64-urls.md
+  - Reference:
+      - Limitations: reference/limitations.md
+  - Community:
+      - Acknowledgements: community/acknowledgements.md
+      - Contributing: community/contributing.md

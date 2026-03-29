@@ -725,6 +725,9 @@ async def proxy_stream_endpoint(
 
     if "range" not in proxy_headers.request:
         proxy_headers.request["range"] = "bytes=0-"
+        # Mark that this range was auto-added (not from client)
+        # This is used in handlers.py to decide whether to convert 206->200
+        proxy_headers.auto_added_range = True
 
     if filename:
         # If a filename is provided (not a segment), set it in the headers using RFC 6266 format

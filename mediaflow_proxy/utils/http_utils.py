@@ -689,6 +689,7 @@ class ProxyRequestHeaders:
     response: dict
     remove: list  # headers to remove from response
     propagate: dict  # response headers to propagate to segments (rp_ prefix)
+    auto_added_range: bool = False  # True if range header was auto-added by proxy (not from client)
 
 
 def apply_header_manipulation(
