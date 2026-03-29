@@ -1,9 +1,11 @@
-import uuid
-
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import RedirectResponse
 
-from mediaflow_proxy.speedtest.service import SpeedTestService, SpeedTestProvider
+from mediaflow_proxy.speedtest.models import (
+    BrowserSpeedTestConfig,
+    BrowserSpeedTestRequest,
+)
+from mediaflow_proxy.speedtest.service import SpeedTestService
 
 speedtest_router = APIRouter()
 
@@ -11,33 +13,29 @@ speedtest_router = APIRouter()
 speedtest_service = SpeedTestService()
 
 
-@speedtest_router.get("/", summary="Show speed test interface")
+@speedtest_router.get("/", summary="Show browser speed test interface")
 async def show_speedtest_page():
-    """Return the speed test HTML interface."""
+    """Return the browser-based speed test HTML interface."""
     return RedirectResponse(url="/speedtest.html")
 
 
-@speedtest_router.post("/start", summary="Start a new speed test", response_model=dict)
-async def start_speedtest(background_tasks: BackgroundTasks, provider: SpeedTestProvider, request: Request):
-    """Start a new speed test for the specified provider."""
-    task_id = str(uuid.uuid4())
-    api_key = request.headers.get("api_key")
+@speedtest_router.post("/config", summary="Get browser speed test configuration")
+async def get_browser_speedtest_config(
+    test_request: BrowserSpeedTestRequest,
+) -> BrowserSpeedTestConfig:
+    """Get configuration for browser-based speed test."""
+    try:
+        provider_impl = speedtest_service.get_provider(test_request.provider, test_request.api_key)
 
-    # Create and initialize the task
-    await speedtest_service.create_test(task_id, provider, api_key)
+        # Get test URLs and user info
+        test_urls, user_info = await provider_impl.get_test_urls()
+        config = await provider_impl.get_config()
 
-    # Schedule the speed test
-    background_tasks.add_task(speedtest_service.run_speedtest, task_id, provider, api_key)
-
-    return {"task_id": task_id}
-
-
-@speedtest_router.get("/results/{task_id}", summary="Get speed test results")
-async def get_speedtest_results(task_id: str):
-    """Get the results or current status of a speed test."""
-    task = await speedtest_service.get_test_results(task_id)
-
-    if not task:
-        raise HTTPException(status_code=404, detail="Speed test task not found or expired")
-
-    return task.dict()
+        return BrowserSpeedTestConfig(
+            provider=test_request.provider,
+            test_urls=test_urls,
+            test_duration=config.test_duration,
+            user_info=user_info,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))

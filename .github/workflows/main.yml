@@ -30,7 +30,7 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           tags: |
             mhdzumair/mediaflow-proxy:v${{ github.ref_name }}
@@ -44,15 +44,69 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-    - name: Install dependencies
+
+    - name: Extract version from tag
+      id: get_version
       run: |
-        pip install poetry
-        poetry build
+        # Remove 'v' prefix if present (e.g., v1.2.3 -> 1.2.3)
+        VERSION=${GITHUB_REF_NAME#v}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Extracted version: $VERSION"
+
+    - name: Update version in pyproject.toml
+      run: |
+        # Update the version in pyproject.toml using sed
+        sed -i 's/^version = ".*"/version = "${{ steps.get_version.outputs.version }}"/' pyproject.toml
+        echo "Updated pyproject.toml version to: ${{ steps.get_version.outputs.version }}"
+        # Verify the change
+        grep '^version = ' pyproject.toml
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Build package
+      run: uv build
+
     - name: Build and publish
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         password: ${{ secrets.PYPI_API_TOKEN }}
+
+  generate_release_notes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Persist GitHub-generated release body
+        run: |
+          cat << 'EOF' > github_generated_release_body.md
+          ${{ github.event.release.body }}
+          EOF
+
+      - name: Extract versions
+        id: extract_versions
+        run: |
+          if ! PREVIOUS_VERSION=$(grep -o '/compare/.*\.\.\.' github_generated_release_body.md | sed 's/\/compare\///' | sed 's/\.\.\.//' || true); then
+            echo "Error: Failed to extract previous version from release body"
+            exit 1
+          fi
+          echo "PREVIOUS_VERSION=${PREVIOUS_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Release Notes
+        run: |
+          make generate-notes VERSION_OLD=${{ steps.extract_versions.outputs.PREVIOUS_VERSION }} VERSION_NEW=${{ github.ref_name }} GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }} GITHUB_RELEASE_BODY_FILE=github_generated_release_body.md > release_notes.md
+
+      - name: Update Release Notes
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          body_path: release_notes.md
+          token: ${{ secrets.GITHUB_TOKEN }}
