@@ -3,6 +3,7 @@ from typing import Dict, Type
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 from mediaflow_proxy.extractors.dlhd import DLHDExtractor
 from mediaflow_proxy.extractors.doodstream import DoodStreamExtractor
+from mediaflow_proxy.extractors.city import CityExtractor
 from mediaflow_proxy.extractors.sportsonline import SportsonlineExtractor
 from mediaflow_proxy.extractors.filelions import FileLionsExtractor
 from mediaflow_proxy.extractors.filemoon import FileMoonExtractor
@@ -30,6 +31,7 @@ class ExtractorFactory:
     """Factory for creating URL extractors."""
 
     _extractors: Dict[str, Type[BaseExtractor]] = {
+        "City": CityExtractor,
         "Doodstream": DoodStreamExtractor,
         "FileLions": FileLionsExtractor,
         "FileMoon": FileMoonExtractor,
