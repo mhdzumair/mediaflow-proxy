@@ -284,6 +284,7 @@ class MPDInitParams(GenericParams):
 
 class ExtractorURLParams(GenericParams):
     host: Literal[
+        "City",
         "Doodstream",
         "FileLions",
         "FileMoon",
