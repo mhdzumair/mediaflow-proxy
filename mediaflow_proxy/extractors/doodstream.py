@@ -12,7 +12,9 @@ from mediaflow_proxy.utils.http_client import _ensure_routing_initialized, get_r
 
 logger = logging.getLogger(__name__)
 
-_DOOD_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+_DOOD_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
 
 
 class DoodStreamExtractor(BaseExtractor):
@@ -104,10 +106,13 @@ class DoodStreamExtractor(BaseExtractor):
             if cookies:
                 # Determine real serving domain from the cf_clearance cookie, since all
                 # DoodStream mirrors redirect to playmogo.com.
-                cf_domain = next(
-                    (c.get("domain", "").lstrip(".") for c in raw_cookies if c.get("name") == "cf_clearance"),
-                    None,
-                ) or "playmogo.com"
+                cf_domain = (
+                    next(
+                        (c.get("domain", "").lstrip(".") for c in raw_cookies if c.get("name") == "cf_clearance"),
+                        None,
+                    )
+                    or "playmogo.com"
+                )
                 retry_url = f"https://{cf_domain}/e/{video_id}"
                 logger.debug(
                     "FlareSolverr response lacked pass_md5 (final_url=%s); retrying %s with CF cookies via curl_cffi",
@@ -133,9 +138,7 @@ class DoodStreamExtractor(BaseExtractor):
                 # bypasses Cloudflare's TLS/bot checks without JS execution and
                 # works for most network locations that aren't challenged by
                 # DoodStream's server-side Turnstile gate.
-                logger.debug(
-                    "FlareSolverr cookie reuse also failed; falling back to curl_cffi for %s", embed_url
-                )
+                logger.debug("FlareSolverr cookie reuse also failed; falling back to curl_cffi for %s", embed_url)
                 return await self._extract_via_curl_cffi(embed_url, video_id)
 
         return await self._parse_embed_html(html, base_url)

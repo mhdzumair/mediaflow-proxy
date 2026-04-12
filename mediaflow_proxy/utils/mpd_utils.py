@@ -263,7 +263,7 @@ def parse_representation(
 
     profile = {
         "id": unique_id,
-        "rep_id": rep_id,       # raw XML @id for $RepresentationID$ template expansion
+        "rep_id": rep_id,  # raw XML @id for $RepresentationID$ template expansion
         "mimeType": mime_type,
         "lang": representation.get("@lang") or adaptation.get("@lang"),
         "codecs": representation.get("@codecs") or adaptation.get("@codecs"),

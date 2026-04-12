@@ -691,10 +691,10 @@ class MP4Decrypter:
                 # whose tenc KID was written in the opposite format can still match.
                 if len(extracted_kid) == 16:
                     swapped = (
-                        extracted_kid[3::-1]   # bytes 0-3 reversed
+                        extracted_kid[3::-1]  # bytes 0-3 reversed
                         + extracted_kid[5:3:-1]  # bytes 4-5 reversed
                         + extracted_kid[7:5:-1]  # bytes 6-7 reversed
-                        + extracted_kid[8:]      # bytes 8-15 unchanged
+                        + extracted_kid[8:]  # bytes 8-15 unchanged
                     )
                     key = self.key_map.get(bytes(swapped))
                     if key:

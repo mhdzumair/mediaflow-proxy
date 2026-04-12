@@ -523,9 +523,7 @@ def prepare_response_headers(
     # valid for the decompressed body we are forwarding.  Forwarding that stale
     # Content-Length causes h11 to raise "Too much data for declared Content-Length"
     # when the decompressed body is larger than the declared length.
-    upstream_content_encoding = any(
-        k.lower() == "content-encoding" for k in original_headers.keys()
-    )
+    upstream_content_encoding = any(k.lower() == "content-encoding" for k in original_headers.keys())
 
     # Handle aiohttp CIMultiDictProxy
     for k, v in original_headers.items():
