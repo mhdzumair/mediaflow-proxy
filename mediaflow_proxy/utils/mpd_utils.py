@@ -2,6 +2,7 @@ import logging
 import math
 import re
 import statistics
+import struct
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Union
 from urllib.parse import urljoin
@@ -251,12 +252,22 @@ def parse_representation(
     if "video" not in mime_type and "audio" not in mime_type:
         return None
 
+    # Raw rep.id from XML — used for $RepresentationID$ URL template expansion.
+    rep_id = representation.get("@id") or adaptation.get("@id") or "0"
+    adapt_id = adaptation.get("@id") or "0"
+    bandwidth_for_id = int(representation.get("@bandwidth") or adaptation.get("@bandwidth") or 0)
+    # Globally unique profile ID: "{adapt_id}_{rep_id}_{bandwidth}".
+    # Within one AdaptationSet multiple representations can share the same @id
+    # (same quality tier, different codec variant), so we include bandwidth to distinguish.
+    unique_id = f"{adapt_id}_{rep_id}_{bandwidth_for_id}"
+
     profile = {
-        "id": representation.get("@id") or adaptation.get("@id"),
+        "id": unique_id,
+        "rep_id": rep_id,       # raw XML @id for $RepresentationID$ template expansion
         "mimeType": mime_type,
         "lang": representation.get("@lang") or adaptation.get("@lang"),
         "codecs": representation.get("@codecs") or adaptation.get("@codecs"),
-        "bandwidth": int(representation.get("@bandwidth") or adaptation.get("@bandwidth")),
+        "bandwidth": bandwidth_for_id,
         "startWithSAP": (_get_key(adaptation, representation, "@startWithSAP") or "1") == "1",
         "mediaPresentationDuration": media_presentation_duration,
     }
@@ -394,7 +405,7 @@ def parse_segment_template(
     # Initialization
     if "@initialization" in item:
         media = item["@initialization"]
-        media = media.replace("$RepresentationID$", profile["id"])
+        media = media.replace("$RepresentationID$", profile.get("rep_id", profile["id"]))
         media = media.replace("$Bandwidth$", str(profile["bandwidth"]))
         # Combine base_url and media, then resolve against mpd_url
         if base_url:
@@ -640,7 +651,7 @@ def create_segment_data(
         Dict: The created segment data.
     """
     media_template = item["@media"]
-    media = media_template.replace("$RepresentationID$", profile["id"])
+    media = media_template.replace("$RepresentationID$", profile.get("rep_id", profile["id"]))
     media = media.replace("$Number%04d$", f"{segment['number']:04d}")
     media = media.replace("$Number$", str(segment["number"]))
     media = media.replace("$Bandwidth$", str(profile["bandwidth"]))
@@ -848,6 +859,17 @@ def parse_segment_base(representation: dict, profile: dict, mpd_url: str) -> Lis
     elif total_duration is None:
         total_duration = 0
 
+    # Derive the media byte range: media data starts immediately after the init segment.
+    # init_range is "start-end" (e.g. "0-657"), so media begins at end+1.
+    # Without this, the proxy tries to download the whole file which causes CDN timeouts.
+    media_range = None
+    if init_range:
+        try:
+            end_byte = int(init_range.split("-")[1])
+            media_range = f"{end_byte + 1}-"
+        except (ValueError, IndexError):
+            pass
+
     # For SegmentBase, we return a single segment representing the entire media
     # The media URL is the same as initUrl but will be accessed with different byte ranges
     return [
@@ -858,8 +880,115 @@ def parse_segment_base(representation: dict, profile: dict, mpd_url: str) -> Lis
             "extinf": total_duration if total_duration > 0 else 1.0,
             "indexRange": index_range,
             "initRange": init_range,
+            "mediaRange": media_range,
         }
     ]
+
+
+def parse_sidx_fragments(sidx_bytes: bytes, index_range_start: int) -> List[Dict]:
+    """
+    Parse a SIDX (Segment Index) box and return per-fragment byte ranges and durations.
+
+    The SIDX box lists subsegment sizes and durations so the player can seek directly
+    to any fragment without scanning the whole file.  We use this to generate one HLS
+    segment entry per fragment, enabling efficient seeking in SegmentBase MPDs.
+
+    Args:
+        sidx_bytes:        Raw bytes starting at index_range_start in the media file.
+                           May include other boxes (e.g. styp) before the sidx box.
+        index_range_start: Byte offset of sidx_bytes[0] within the media file.
+
+    Returns:
+        List of dicts, each with:
+            'start'               – first byte of fragment in media file (inclusive)
+            'end'                 – last byte of fragment in media file (inclusive)
+            'duration_timescale'  – subsegment duration in SIDX timescale units
+            'timescale'           – SIDX timescale (ticks per second)
+    """
+    # Scan forward to find the sidx box (may be preceded by styp or other boxes)
+    offset = 0
+    sidx_box_start = -1
+    while offset + 8 <= len(sidx_bytes):
+        box_size = struct.unpack_from(">I", sidx_bytes, offset)[0]
+        box_type = sidx_bytes[offset + 4 : offset + 8]
+        if box_type == b"sidx":
+            sidx_box_start = offset
+            break
+        if box_size < 8:
+            break
+        offset += box_size
+
+    if sidx_box_start < 0:
+        return []
+
+    sidx_file_start = index_range_start + sidx_box_start
+    sidx_size = struct.unpack_from(">I", sidx_bytes, sidx_box_start)[0]
+    sidx_file_end = sidx_file_start + sidx_size  # first byte AFTER the sidx box
+
+    off = sidx_box_start + 8  # skip box-size (4) + box-type (4)
+    if off >= len(sidx_bytes):
+        return []
+
+    version = sidx_bytes[off]
+    off += 4  # version (1) + flags (3)
+
+    off += 4  # reference_id (4)
+
+    if off + 4 > len(sidx_bytes):
+        return []
+    timescale = struct.unpack_from(">I", sidx_bytes, off)[0]
+    off += 4
+
+    if version == 0:
+        off += 4  # earliest_presentation_time (4)
+        if off + 4 > len(sidx_bytes):
+            return []
+        first_offset = struct.unpack_from(">I", sidx_bytes, off)[0]
+        off += 4
+    else:
+        off += 8  # earliest_presentation_time (8)
+        if off + 8 > len(sidx_bytes):
+            return []
+        first_offset = struct.unpack_from(">Q", sidx_bytes, off)[0]
+        off += 8
+
+    off += 2  # reserved (2)
+    if off + 2 > len(sidx_bytes):
+        return []
+    reference_count = struct.unpack_from(">H", sidx_bytes, off)[0]
+    off += 2
+
+    # First fragment starts immediately after SIDX + first_offset bytes of gap
+    frag_start = sidx_file_end + first_offset
+
+    fragments = []
+    for _ in range(reference_count):
+        if off + 12 > len(sidx_bytes):
+            break
+
+        ref_field = struct.unpack_from(">I", sidx_bytes, off)[0]
+        off += 4
+        ref_type = (ref_field >> 31) & 1
+        referenced_size = ref_field & 0x7FFF_FFFF
+
+        duration = struct.unpack_from(">I", sidx_bytes, off)[0]
+        off += 4
+
+        off += 4  # SAP field (ignored)
+
+        if ref_type == 0:  # media reference (not an index-of-indexes reference)
+            fragments.append(
+                {
+                    "start": frag_start,
+                    "end": frag_start + referenced_size - 1,
+                    "duration_timescale": duration,
+                    "timescale": timescale,
+                }
+            )
+
+        frag_start += referenced_size
+
+    return fragments
 
 
 def parse_duration(duration_str: str) -> float:

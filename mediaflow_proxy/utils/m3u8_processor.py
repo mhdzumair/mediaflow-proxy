@@ -159,6 +159,11 @@ class M3U8Processor:
             request.url_for("hls_manifest_proxy").replace(scheme=get_original_scheme(request))
         ).replace("/hls/manifest.m3u8", "/hls/segment")
         self.playlist_url = None  # Will be set when processing starts
+        # Per HLS spec, any URI on the line immediately following #EXT-X-STREAM-INF
+        # is a variant sub-playlist, not a segment. Track this so proxy_content_url
+        # can route it to the manifest endpoint regardless of file extension or query
+        # params (e.g. VixCloud uses ?type=video which looks like a segment URL).
+        self._after_stream_inf = False
 
     def _should_apply_start_offset(self, content: str) -> bool:
         """
@@ -656,10 +661,25 @@ class M3U8Processor:
             str: The processed line.
         """
         if "URI=" in line:
+            self._after_stream_inf = False
             return await self.process_key_line(line, base_url)
         elif not line.startswith("#") and line.strip():
+            if self._after_stream_inf:
+                # Per HLS spec §4.3.4.2, the URI on the line immediately following
+                # #EXT-X-STREAM-INF is always a variant sub-playlist, never a segment.
+                # Route it to the manifest proxy regardless of extension or query params
+                # (e.g. VixCloud uses ?type=video rather than a .m3u8 extension).
+                self._after_stream_inf = False
+                full_url = parse.urljoin(base_url, line)
+                return await self.proxy_url(full_url, base_url, use_full_url=True, is_playlist=True)
             return await self.proxy_content_url(line, base_url)
         else:
+            if line.startswith("#EXT-X-STREAM-INF"):
+                self._after_stream_inf = True
+            elif line.startswith("#"):
+                # Any other tag resets the flag — EXT-X-STREAM-INF must be
+                # immediately followed by a URI with no intervening tags.
+                self._after_stream_inf = False
             return line
 
     async def process_key_line(self, line: str, base_url: str) -> str:

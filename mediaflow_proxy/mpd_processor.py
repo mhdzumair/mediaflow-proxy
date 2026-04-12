@@ -4,16 +4,20 @@ import math
 import statistics
 import time
 
+from aiohttp import ClientTimeout
 from fastapi import Request, Response, HTTPException
 
 from mediaflow_proxy.drm.decrypter import decrypt_segment, process_drm_init_segment
 from mediaflow_proxy.utils.crypto_utils import encryption_handler
+from mediaflow_proxy.utils.http_client import create_aiohttp_session
 from mediaflow_proxy.utils.http_utils import (
     encode_mediaflow_proxy_url,
+    fetch_with_retry,
     get_original_scheme,
     ProxyRequestHeaders,
     apply_header_manipulation,
 )
+from mediaflow_proxy.utils.mpd_utils import parse_sidx_fragments
 from mediaflow_proxy.utils.dash_prebuffer import dash_prebuffer
 from mediaflow_proxy.utils.cache_utils import get_cached_processed_init, set_cached_processed_init
 from mediaflow_proxy.utils.m3u8_processor import SkipSegmentFilter
@@ -151,6 +155,68 @@ async def process_manifest(
     return Response(content=hls_content, media_type="application/vnd.apple.mpegurl", headers=proxy_headers.response)
 
 
+async def _expand_segment_base_segments(profiles: list, req_headers: dict) -> None:
+    """
+    For SegmentBase profiles with a single segment that has an @indexRange, fetch the
+    SIDX box and expand the single segment entry into per-fragment segments.
+
+    This allows mpv/ffmpeg to seek by requesting only the relevant fragment from the
+    CDN instead of re-downloading the whole file from byte 938 every time.
+
+    Modifies *profiles* in-place; on any failure the original single-segment entry
+    is kept as a fallback.
+    """
+    timeout = ClientTimeout(connect=10, sock_read=30, total=60)
+
+    for profile in profiles:
+        segments = profile.get("segments", [])
+        if len(segments) != 1:
+            continue
+
+        seg = segments[0]
+        index_range: str = seg.get("indexRange") or ""
+        media_url: str = seg.get("media") or ""
+        init_range: str = seg.get("initRange") or ""
+
+        if not index_range or not media_url:
+            continue  # no SIDX info → keep single-segment fallback
+
+        try:
+            headers = dict(req_headers)
+            headers["Range"] = f"bytes={index_range}"
+
+            async with create_aiohttp_session(media_url, timeout=timeout) as (session, proxy_url):
+                response = await fetch_with_retry(session, "GET", media_url, headers, proxy=proxy_url)
+                sidx_bytes = await response.read()
+
+            index_range_start = int(index_range.split("-")[0])
+            fragments = parse_sidx_fragments(sidx_bytes, index_range_start)
+
+            if not fragments:
+                logger.warning(f"SIDX parse returned no fragments for {media_url}, keeping single-segment fallback")
+                continue
+
+            new_segments = [
+                {
+                    "type": "segment",
+                    "media": media_url,
+                    "number": i + 1,
+                    "extinf": frag["duration_timescale"] / frag["timescale"],
+                    "initRange": init_range,
+                    "mediaRange": f"{frag['start']}-{frag['end']}",
+                }
+                for i, frag in enumerate(fragments)
+            ]
+            profile["segments"] = new_segments
+            logger.info(
+                f"SegmentBase SIDX expanded {media_url!r} → {len(new_segments)} fragments "
+                f"({new_segments[0]['extinf']:.3f}s each)"
+            )
+
+        except Exception as exc:
+            logger.warning(f"SIDX expansion failed for {media_url}: {exc}; keeping single-segment fallback")
+
+
 async def process_playlist(
     request: Request,
     mpd_dict: dict,
@@ -179,6 +245,10 @@ async def process_playlist(
     matching_profiles = [p for p in mpd_dict["profiles"] if p["id"] == profile_id]
     if not matching_profiles:
         raise HTTPException(status_code=404, detail="Profile not found")
+
+    # For SegmentBase profiles (single large file with SIDX), expand into per-fragment
+    # segments so that mpv/ffmpeg can seek by requesting only the relevant fragment.
+    await _expand_segment_base_segments(matching_profiles, dict(proxy_headers.request))
 
     hls_content = build_hls_playlist(mpd_dict, matching_profiles, request, skip_segments, start_offset)
 
@@ -379,22 +449,79 @@ def build_hls(
         max_height = max(p[0].get("height", 0) for p in video_profiles.values())
         video_profiles = {k: v for k, v in video_profiles.items() if v[0].get("height", 0) >= max_height}
 
-    # Add audio streams
-    for i, (profile, playlist_url) in enumerate(audio_profiles.values()):
-        is_default = "YES" if i == 0 else "NO"  # Set the first audio track as default
-        lang = profile.get("lang", "und")
-        bandwidth = profile.get("bandwidth", "128000")
-        name = f"Audio {lang} ({bandwidth})" if lang != "und" else f"Audio {i + 1} ({bandwidth})"
-        hls.append(
-            f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="{name}",DEFAULT={is_default},AUTOSELECT=YES,LANGUAGE="{lang}",URI="{playlist_url}"'
+    if not is_ts_mode and video_profiles:
+        # Sort by bandwidth descending; keep highest bandwidth per unique rep_id
+        sorted_by_bw = sorted(video_profiles.values(), key=lambda pv: pv[0].get("bandwidth", 0), reverse=True)
+        seen_rep_ids = set()
+        deduped = []
+        for profile, playlist_url in sorted_by_bw:
+            rep_id = profile.get("rep_id", profile["id"])
+            if rep_id not in seen_rep_ids:
+                seen_rep_ids.add(rep_id)
+                deduped.append((profile, playlist_url))
+
+        if resolution:
+            # Explicit resolution: single matching variant
+            deduped = deduped[:1]
+        else:
+            # Limit ABR ladder: one entry per unique height, capped at MAX_VIDEO_VARIANTS.
+            # libavformat (mpv/ffmpeg) fetches ALL #EXT-X-STREAM-INF playlists and their
+            # init segments before playback regardless of BANDWIDTH hints —
+            # N variants = N × ~2 s of init-segment probing at startup.
+            MAX_VIDEO_VARIANTS = 5
+            seen_heights: set = set()
+            height_deduped = []
+            for p, url in deduped:
+                h = p.get("height", 0)
+                if h not in seen_heights:
+                    seen_heights.add(h)
+                    height_deduped.append((p, url))
+            deduped = height_deduped[:MAX_VIDEO_VARIANTS]
+        video_profiles = {p["id"]: (p, url) for p, url in deduped}
+
+    # Determine the default audio (English preferred, else highest bandwidth).
+    default_audio_id = None
+    if audio_profiles:
+        all_audio = list(audio_profiles.values())
+        en_audio = [(p, u) for p, u in all_audio if (p.get("lang") or "").startswith("en")]
+        default_profile, _ = max(en_audio or all_audio, key=lambda pu: pu[0].get("bandwidth", 0))
+        default_audio_id = default_profile["id"]
+
+    # Audio tracks: one entry per unique language, capped at MAX_AUDIO_TRACKS.
+    # Sort default track first (always within cap), then by bandwidth descending
+    # so the highest-quality codec per language wins.
+    # libavformat probes every #EXT-X-MEDIA entry regardless of DEFAULT/AUTOSELECT;
+    # capping at 4 keeps language selection while bounding startup probing.
+    MAX_AUDIO_TRACKS = 4
+    first_audio_codec = None
+    if audio_profiles:
+        sorted_audio = sorted(
+            audio_profiles.values(),
+            key=lambda pv: (pv[0]["id"] != default_audio_id, -pv[0].get("bandwidth", 0)),
         )
+        seen_langs = set()
+        count = 0
+        for profile, playlist_url in sorted_audio:
+            if count >= MAX_AUDIO_TRACKS:
+                break
+            lang = profile.get("lang", "und")
+            if lang in seen_langs:
+                continue
+            seen_langs.add(lang)
+            is_default = profile["id"] == default_audio_id
+            default_attr = "YES" if is_default else "NO"
+            autoselect_attr = "YES" if is_default else "NO"
+            bandwidth = profile.get("bandwidth", 128000)
+            name = f"Audio {lang} ({bandwidth})" if lang != "und" else f"Audio 1 ({bandwidth})"
+            hls.append(
+                f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="{name}",DEFAULT={default_attr},AUTOSELECT={autoselect_attr},LANGUAGE="{lang}",URI="{playlist_url}"'
+            )
+            if is_default:
+                first_audio_codec = profile.get("codecs", "")
+            count += 1
 
     # Build combined codecs string (video + audio) for EXT-X-STREAM-INF
     # ExoPlayer requires CODECS to list all codecs when AUDIO group is referenced
-    first_audio_codec = None
-    if audio_profiles:
-        first_audio_profile = next(iter(audio_profiles.values()))[0]
-        first_audio_codec = first_audio_profile.get("codecs", "")
 
     # Add video streams
     for profile, playlist_url in video_profiles.values():
@@ -518,9 +645,13 @@ def build_hls_playlist(
     skip_filter = SkipSegmentFilter(skip_segments) if skip_segments else None
 
     # In TS mode, we don't use EXT-X-MAP because TS segments are self-contained
-    # (PAT/PMT/VPS/SPS/PPS are embedded in each segment)
-    # Use EXT-X-MAP for live streams, but only for fMP4 (not TS)
-    use_map = is_live and not is_ts_mode
+    # (PAT/PMT/VPS/SPS/PPS are embedded in each segment).
+    # Use EXT-X-MAP for:
+    #   - live fMP4 streams (init changes with discontinuities)
+    #   - SegmentBase fMP4 (init and media are different byte ranges of the same file;
+    #     without EXT-X-MAP every segment would redundantly include the moov box)
+    has_segment_base = not is_ts_mode and any(p.get("initRange") for p in profiles)
+    use_map = not is_ts_mode and (is_live or has_segment_base)
 
     # Select appropriate endpoint based on remux mode
     if is_ts_mode:
@@ -658,6 +789,9 @@ def build_hls_playlist(
             # Segment may also have its own range (for SegmentBase)
             if "initRange" in segment:
                 segment_query_params["init_range"] = segment["initRange"]
+            # Media byte range: bytes after the init segment (SegmentBase only)
+            if segment.get("mediaRange"):
+                segment_query_params["segment_range"] = segment["mediaRange"]
 
             query_params.update(segment_query_params)
             hls.append(

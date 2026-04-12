@@ -263,6 +263,10 @@ class MPDSegmentParams(GenericParams):
         False,
         description="Whether EXT-X-MAP is used (init sent separately). If true, don't concatenate init with segment.",
     )
+    segment_range: Optional[str] = Field(
+        None,
+        description="Byte range for the media segment (e.g. '658-'). Used for SegmentBase MPDs where init and segment share the same file.",
+    )
 
 
 class MPDInitParams(GenericParams):

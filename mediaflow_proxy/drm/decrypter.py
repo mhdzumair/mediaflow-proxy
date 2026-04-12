@@ -645,17 +645,23 @@ class MP4Decrypter:
 
         return sample_info
 
-    def _get_key_for_track(self, track_id: int) -> bytes:
+    def _get_key_for_track(self, track_id: int) -> Optional[bytes]:
         """
         Retrieves the decryption key for a given track ID from the key map.
         Uses the KID extracted from the tenc box if available, otherwise falls back to
         using the first key if only one key is provided.
 
+        Returns None (rather than raising) when no matching key can be found — the
+        caller is expected to handle None by skipping decryption for that track
+        and passing the encrypted data through unchanged.  This mirrors the Rust
+        implementation and avoids crashing the whole moof/mdat pipeline when
+        content uses slightly different KID byte-ordering than the URL parameters.
+
         Args:
             track_id (int): The track ID.
 
         Returns:
-            bytes: The decryption key for the specified track ID.
+            Optional[bytes]: The decryption key, or None if no key found.
         """
         # If we have an extracted KID for this track, use it to look up the key
         if track_id in self.extracted_kids:
@@ -668,13 +674,31 @@ class MP4Decrypter:
                 if len(self.key_map) == 1:
                     return next(iter(self.key_map.values()))
             else:
-                # Use the extracted KID to look up the key
+                # Direct lookup: tenc KID matches a provided key_id byte-for-byte
                 key = self.key_map.get(extracted_kid)
                 if key:
                     return key
-                # If KID doesn't match, try fallback
-                # Note: This is expected when KID in file doesn't match provided key_id
-                # The provided key_id should still work if it's the correct decryption key
+
+                # PlayReady GUID fallback: some content packagers store the KID in
+                # the tenc box using little-endian byte order for the first three UUID
+                # components (the PlayReady GUID format), while the MPD advertises
+                # @cenc:default_KID in standard big-endian UUID order.
+                #
+                # UUID:    AABBCCDD-EEFF-GGHH-II...
+                # LE GUID: DDCCBBAA-FFEE-HHGG-II...  (first 4, next 2, next 2 swapped)
+                #
+                # Try both directions so that audio-only or video-only init segments
+                # whose tenc KID was written in the opposite format can still match.
+                if len(extracted_kid) == 16:
+                    swapped = (
+                        extracted_kid[3::-1]   # bytes 0-3 reversed
+                        + extracted_kid[5:3:-1]  # bytes 4-5 reversed
+                        + extracted_kid[7:5:-1]  # bytes 6-7 reversed
+                        + extracted_kid[8:]      # bytes 8-15 unchanged
+                    )
+                    key = self.key_map.get(bytes(swapped))
+                    if key:
+                        return key
 
         # Fallback: if only one key provided, use it (backward compatibility)
         if len(self.key_map) == 1:
@@ -683,9 +707,12 @@ class MP4Decrypter:
         # Try using track_id as KID (for multi-key scenarios)
         track_id_bytes = track_id.to_bytes(4, "big")
         key = self.key_map.get(track_id_bytes)
-        if not key:
-            raise ValueError(f"No key found for track ID {track_id}")
-        return key
+        if key:
+            return key
+
+        # No key found — return None so callers can pass encrypted data through
+        # rather than aborting the entire segment stream.
+        return None
 
     @staticmethod
     def _process_sample(

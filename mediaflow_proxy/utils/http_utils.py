@@ -360,13 +360,21 @@ class Streamer:
         await self.session.close()
 
 
-async def download_file_with_retry(url: str, headers: dict) -> bytes:
+async def download_file_with_retry(
+    url: str,
+    headers: dict,
+    timeout: typing.Optional[ClientTimeout] = None,
+) -> bytes:
     """
     Downloads a file with retry logic.
 
     Args:
         url: The URL of the file to download.
         headers: The headers to include in the request.
+        timeout: Optional aiohttp ClientTimeout override. When None the global
+            transport timeout is used.  Pass a ClientTimeout with sock_read set
+            (and total=None) for large ranged downloads so that the per-chunk
+            read deadline is used instead of a hard total-download limit.
 
     Returns:
         bytes: The downloaded file content.
@@ -374,7 +382,7 @@ async def download_file_with_retry(url: str, headers: dict) -> bytes:
     Raises:
         DownloadError: If the download fails after retries.
     """
-    async with create_aiohttp_session(url) as (session, proxy_url):
+    async with create_aiohttp_session(url, timeout=timeout) as (session, proxy_url):
         try:
             response = await fetch_with_retry(session, "GET", url, headers, proxy=proxy_url)
             return await response.read()

@@ -101,9 +101,26 @@ class DASHPreBuffer(BasePrebuffer):
                 logger.warning(f"No profiles found in MPD for prebuffering: {mpd_url}")
                 return
 
-            # Now get segments for each profile by parsing with profile_id
+            # Early-out for SegmentBase VOD content.
+            # SegmentBase profiles have initRange set (byte range within a large single file).
+            # Prebuffering them means downloading 100 MB+ per profile — not useful.
+            # If every profile is SegmentBase, skip the expensive per-profile segment
+            # parsing entirely and only prewarm init segments via the direct cache path.
+            all_segment_base = all(p.get("initRange") is not None for p in base_profiles)
+            if all_segment_base and not is_live:
+                logger.info(
+                    f"[prebuffer_dash_manifest] Skipping SegmentBase VOD: {mpd_url} "
+                    f"({len(base_profiles)} profiles, all SegmentBase)"
+                )
+                return
+
+            # Now get segments for each profile by parsing with profile_id.
+            # Skip SegmentBase profiles — their "segments" are whole-file downloads.
             profiles_with_segments = []
             for profile in base_profiles:
+                if profile.get("initRange") is not None:
+                    # SegmentBase profile — skip expensive segment parsing
+                    continue
                 profile_id = profile.get("id")
                 if profile_id:
                     parsed_with_segments = await get_cached_mpd(
@@ -166,6 +183,21 @@ class DASHPreBuffer(BasePrebuffer):
         init_urls = []
 
         for profile in profiles:
+            # Skip SegmentBase profiles entirely.
+            # SegmentBase "segments" are byte-range slices of a single large file
+            # (e.g. a25.mp4 = 122 MB). Prebuffering them without a Range header
+            # would download the entire file per profile — potentially GB of data
+            # for all audio tracks before a single second of playback is served.
+            # SegmentBase is identified by the profile having initRange (byte range
+            # within the base file) or by segments having mediaRange set.
+            segments = profile.get("segments", [])
+            is_segment_base = profile.get("initRange") is not None or (
+                segments and segments[0].get("mediaRange") is not None
+            )
+            if is_segment_base:
+                logger.debug(f"[_prebuffer_profiles] Skipping SegmentBase profile: {profile.get('id')}")
+                continue
+
             # Collect init segment URL
             init_url = profile.get("initUrl")
             if init_url:
@@ -174,8 +206,6 @@ class DASHPreBuffer(BasePrebuffer):
             if not include_media:
                 continue
 
-            # Get segments to prebuffer
-            segments = profile.get("segments", [])
             if not segments:
                 continue
 

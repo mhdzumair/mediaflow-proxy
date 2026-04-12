@@ -2,12 +2,14 @@ import asyncio
 import base64
 import logging
 import time
-from typing import Optional
+from typing import Optional, AsyncGenerator
 from urllib.parse import urlparse, parse_qs
 
 import aiohttp
+from aiohttp import ClientTimeout
 import tenacity
 from fastapi import Request, Response, HTTPException
+from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
 from .const import SUPPORTED_RESPONSE_HEADERS
@@ -516,10 +518,23 @@ def prepare_response_headers(
     remove_set = set(h.lower() for h in (remove_headers or []))
     response_headers = {}
 
+    # aiohttp transparently decompresses gzip/deflate/br responses. When it does,
+    # the original Content-Length (which was the *compressed* size) is no longer
+    # valid for the decompressed body we are forwarding.  Forwarding that stale
+    # Content-Length causes h11 to raise "Too much data for declared Content-Length"
+    # when the decompressed body is larger than the declared length.
+    upstream_content_encoding = any(
+        k.lower() == "content-encoding" for k in original_headers.keys()
+    )
+
     # Handle aiohttp CIMultiDictProxy
     for k, v in original_headers.items():
         k_lower = k.lower()
         if k_lower in SUPPORTED_RESPONSE_HEADERS and k_lower not in remove_set:
+            # Drop Content-Length when the upstream compressed the body — the
+            # decompressed size differs and the header would be wrong.
+            if k_lower == "content-length" and upstream_content_encoding:
+                continue
             response_headers[k_lower] = v
 
     # Apply propagate headers first (for segments), then response headers (response takes precedence)
@@ -666,6 +681,26 @@ async def fetch_and_process_m3u8(
         return handle_exceptions(e)
 
 
+def _parse_combined_key_param(key_id: str | None, key: str | None) -> tuple[str | None, str | None]:
+    """
+    Support the combined ``kid:key,kid:key`` format commonly passed as a single ``key`` param.
+
+    When ``key_id`` is absent and ``key`` looks like ``kid1:key1,kid2:key2`` (every
+    comma-separated part contains exactly one colon), split it into separate
+    ``key_id`` and ``key`` values so the rest of the pipeline receives the canonical
+    ``key_id=kid1,kid2`` / ``key=key1,key2`` format.
+
+    This format is convenient when using tools like mpv that express ClearKey
+    pairs as ``kid:key`` strings.
+    """
+    if key and not key_id:
+        pairs = [p.strip() for p in key.split(",") if p.strip()]
+        if pairs and all(":" in p for p in pairs):
+            key_id = ",".join(p.split(":", 1)[0] for p in pairs)
+            key = ",".join(p.split(":", 1)[1] for p in pairs)
+    return key_id, key
+
+
 def _normalize_drm_key_value(value: str) -> str:
     """
     Normalize a DRM key_id or key value to lowercase hex.
@@ -792,7 +827,9 @@ async def get_manifest(
             request, mpd_dict, proxy_headers, None, None, manifest_params.resolution, skip_segments
         )
 
-    key_id, key = await handle_drm_key_data(manifest_params.key_id, manifest_params.key, drm_info)
+    # Support combined kid:key,kid:key format passed as a single key= param
+    key_id_param, key_param = _parse_combined_key_param(manifest_params.key_id, manifest_params.key)
+    key_id, key = await handle_drm_key_data(key_id_param, key_param, drm_info)
 
     # Normalize key_id and key: convert from base64 to hex when needed.
     # Each value may be a comma-separated list for multi-key DRM; each part is
@@ -841,6 +878,139 @@ async def get_playlist(
     )
 
 
+async def _stream_segment_base_drm(
+    init_url: str,
+    init_range: Optional[str],
+    init_headers: dict,
+    init_cache_token: str,
+    init_cache_ttl: Optional[int],
+    segment_url: str,
+    segment_headers: dict,
+    key_id: str,
+    key: str,
+    use_map: bool,
+) -> AsyncGenerator[bytes, None]:
+    """
+    Async generator for streaming a DRM-protected SegmentBase segment.
+
+    The generator is started AFTER FastAPI has already sent HTTP 200 response
+    headers to the player (StreamingResponse sends headers before iterating the
+    body).  All blocking CDN I/O — both the init-segment fetch and the large
+    media-segment fetch — lives here, so zero network work happens before the
+    player receives its 200 OK.
+
+    Stream layout (use_map=False):
+        [yield]   processed moov (~600 B) — sent after init fetch, player gets codec info
+        [yield …] decrypted moof + mdat per fragment — streamed as they arrive
+    """
+    import struct
+    from mediaflow_proxy.drm.decrypter import MP4Decrypter, MP4Atom, _build_key_map
+    from mediaflow_proxy.utils.http_client import create_aiohttp_session
+    from mediaflow_proxy.utils.http_utils import fetch_with_retry
+
+    # Fetch the init segment inside the generator — this runs after HTTP 200
+    # headers are already in-flight, so the player never times out waiting for
+    # the response line.
+    try:
+        init_content = await get_cached_init_segment(
+            init_url,
+            init_headers,
+            cache_token=init_cache_token,
+            ttl=init_cache_ttl,
+            byte_range=init_range,
+        )
+    except Exception as e:
+        logger.warning(f"SegmentBase init fetch failed in stream: {e}")
+        return
+
+    if not init_content:
+        logger.warning(f"SegmentBase init segment empty for {init_url}")
+        return
+
+    # Build a single decrypter instance primed with the init segment so that
+    # track_encryption_settings / iv_size / encryption_scheme are all populated
+    # before we start processing media boxes.
+    key_map = _build_key_map(key_id, key)
+    decrypter = MP4Decrypter(key_map)
+
+    # Yield cleaned init immediately.  Calling process_init_only() also primes
+    # the decrypter.
+    if not use_map:
+        try:
+            processed_init = decrypter.process_init_only(init_content)
+            yield processed_init
+        except Exception as e:
+            logger.warning(f"SegmentBase init processing failed: {e}")
+            return
+    else:
+        # EXT-X-MAP: init served separately; still prime the decrypter
+        try:
+            decrypter.process_init_only(init_content)
+        except Exception as e:
+            logger.warning(f"SegmentBase init priming failed: {e}")
+            return
+
+    # Stream the media range from the CDN and process each MP4 box as it
+    # arrives.  We maintain a rolling byte buffer and parse 8-byte box headers
+    # (4-byte big-endian size + 4-byte type) to know when a complete box has
+    # accumulated, then hand it to the decrypter immediately.
+    seg_timeout = ClientTimeout(connect=10, sock_read=60, total=None)
+    buf = bytearray()
+
+    try:
+        async with create_aiohttp_session(segment_url, timeout=seg_timeout) as (session, proxy_url):
+            response = await fetch_with_retry(session, "GET", segment_url, segment_headers, proxy=proxy_url)
+
+            async for chunk in response.content.iter_chunked(65536):
+                buf.extend(chunk)
+
+                # Drain all complete boxes from the front of the buffer
+                while len(buf) >= 8:
+                    box_size = struct.unpack_from(">I", buf, 0)[0]
+
+                    # box_size == 1 means a 64-bit extended size follows (rare in
+                    # streaming segments); box_size == 0 means "to end of file".
+                    # Neither is expected here — fall through to flush at the end.
+                    if box_size < 8:
+                        break
+
+                    if len(buf) < box_size:
+                        break  # Incomplete box — wait for more data
+
+                    atom_type = bytes(buf[4:8])
+                    atom_data = bytearray(buf[8:box_size])
+                    del buf[:box_size]
+
+                    # Drop sidx: its byte-offset references point to the original
+                    # encrypted stream and become incorrect after senc/saiz/saio
+                    # stripping. Omitting it lets the demuxer fall back to scanning
+                    # moof boxes sequentially, which is always correct.
+                    if atom_type == b"sidx":
+                        continue
+
+                    # When use_map=True the moov is served separately via EXT-X-MAP.
+                    # If the CDN ignores the Range header and returns the full file,
+                    # the stream would contain a moov we must not re-emit.
+                    if use_map and atom_type == b"moov":
+                        continue
+
+                    atom = MP4Atom(atom_type, box_size, atom_data)
+                    try:
+                        processed = decrypter._process_atom(atom_type, atom)
+                        yield processed.pack()
+                    except Exception as e:
+                        logger.warning(f"Box processing error ({atom_type!r}): {e}")
+                        # Yield the original box so the stream isn't truncated
+                        yield struct.pack(">I", box_size) + atom_type + bytes(atom_data)
+
+        # Flush any trailing bytes (should not happen for a well-formed MP4)
+        if buf:
+            yield bytes(buf)
+
+    except Exception as e:
+        logger.warning(f"SegmentBase media streaming failed for {segment_url}: {e}")
+
+
 async def get_segment(
     segment_params: MPDSegmentParams,
     proxy_headers: ProxyRequestHeaders,
@@ -867,16 +1037,60 @@ async def get_segment(
         segment_url = segment_params.segment_url
         should_remux = force_remux_ts if force_remux_ts is not None else settings.remux_to_ts
 
+        # For SegmentBase MPDs, segment_range specifies the byte range of media data
+        # (e.g. "658-" meaning everything after the init segment).  Apply it as a
+        # Range header so we never try to download a whole large file.
+        segment_headers = dict(proxy_headers.request)
+        if segment_params.segment_range:
+            segment_headers["Range"] = f"bytes={segment_params.segment_range}"
+
         # Check processed segment cache first (avoids re-decrypting/re-remuxing)
         is_processed = bool(segment_params.key_id or should_remux)
         if is_processed:
-            processed_content = await get_cached_processed_segment(segment_url, segment_params.key_id, should_remux)
+            cache_key = f"{segment_url}|{segment_params.segment_range or ''}"
+            processed_content = await get_cached_processed_segment(cache_key, segment_params.key_id, should_remux)
             if processed_content:
                 logger.info(f"Serving processed segment from cache: {segment_url}")
                 mimetype = "video/mp2t" if should_remux else segment_params.mime_type
                 response_headers = apply_header_manipulation({}, proxy_headers)
                 return Response(content=processed_content, media_type=mimetype, headers=response_headers)
 
+        # SegmentBase + DRM (non-remux): streaming path.
+        # Return StreamingResponse with zero blocking — all CDN I/O (init fetch
+        # + media stream) happens inside the generator, AFTER FastAPI has already
+        # sent HTTP 200 + headers to the player.  This prevents ffmpeg/mpv from
+        # reporting "Immediate exit requested" / "Operation timed out" when the
+        # CDN connection is slow.  Connection: close tells the player not to
+        # reuse this socket after the long-lived streaming response finishes.
+        if segment_params.segment_range and segment_params.key_id and not should_remux:
+            response_headers = apply_header_manipulation({}, proxy_headers)
+            response_headers["connection"] = "close"
+            return StreamingResponse(
+                _stream_segment_base_drm(
+                    init_url=segment_params.init_url,
+                    init_range=segment_params.init_range,
+                    init_headers=dict(proxy_headers.request),
+                    init_cache_token=segment_params.key_id,
+                    init_cache_ttl=live_cache_ttl,
+                    segment_url=segment_url,
+                    segment_headers=segment_headers,
+                    key_id=segment_params.key_id,
+                    key=segment_params.key,
+                    use_map=segment_params.use_map,
+                ),
+                media_type=segment_params.mime_type,
+                headers=response_headers,
+            )
+
+        # SegmentBase without DRM, or with TS remux: buffer then process.
+        # Use sock_read timeout so large files don't hit the 60 s total cap.
+        if segment_params.segment_range:
+            try:
+                seg_timeout = ClientTimeout(connect=10, sock_read=60, total=None)
+                segment_content = await download_file_with_retry(segment_url, segment_headers, timeout=seg_timeout)
+            except Exception as dl_err:
+                logger.warning(f"SegmentBase range download failed for {segment_url}: {dl_err}")
+                segment_content = None
         # Use event-based coordination for segment download
         # get_or_download() handles:
         # - Cache check
@@ -885,16 +1099,16 @@ async def get_segment(
         # - Caching the result
         # Player requests should get priority over background prebuffer activity.
         # Use a configurable lock timeout to balance responsiveness and cache reuse.
-        if settings.enable_dash_prebuffer:
+        elif settings.enable_dash_prebuffer:
             segment_content = await dash_prebuffer.get_or_download(
-                segment_url, proxy_headers.request, timeout=settings.dash_player_lock_timeout
+                segment_url, segment_headers, timeout=settings.dash_player_lock_timeout
             )
         else:
             # Prebuffer disabled - check cache then download directly
             segment_content = await get_cached_segment(segment_url)
             if not segment_content:
                 try:
-                    segment_content = await download_file_with_retry(segment_url, proxy_headers.request)
+                    segment_content = await download_file_with_retry(segment_url, segment_headers)
                     # Cache for future requests (synchronous to ensure it's cached before returning)
                     if segment_content and segment_params.is_live:
                         # Use create_task for non-blocking cache write, but segment is already downloaded
@@ -910,7 +1124,7 @@ async def get_segment(
         # Then fall back to a direct download if still not cached.
         # This is critical for live streams where the prebuffer may be busy
         # downloading other segments/profiles.
-        if not segment_content:
+        if not segment_content and not segment_params.segment_range:
             # Final cache check - download may have completed during lock wait
             segment_content = await get_cached_segment(segment_url)
             if segment_content:
@@ -918,7 +1132,7 @@ async def get_segment(
             else:
                 logger.info(f"Prebuffer returned no content, falling back to direct download: {segment_url}")
                 try:
-                    segment_content = await download_file_with_retry(segment_url, proxy_headers.request)
+                    segment_content = await download_file_with_retry(segment_url, segment_headers)
                     # Cache on success for future requests
                     if segment_content and segment_params.is_live:
                         asyncio.create_task(
