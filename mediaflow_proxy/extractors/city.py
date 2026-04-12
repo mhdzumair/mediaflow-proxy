@@ -108,7 +108,7 @@ class CityExtractor(BaseExtractor):
 
         response = await self._make_request(clean_url, headers=headers)
         if response.status != 200:
-            raise ExtractorError("Failed to load CinemaCity page")
+            raise ExtractorError("Failed to load City page")
 
         soup = BeautifulSoup(response.text, "lxml")
         file_data = None
