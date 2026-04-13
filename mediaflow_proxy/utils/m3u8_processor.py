@@ -716,11 +716,15 @@ class M3U8Processor:
             if not uri.scheme:
                 resolved_key_url = parse.urljoin(base_url, resolved_key_url)
 
-            # EXT-X-KEY URIs are always raw binary AES keys — never a playlist.
-            # Always route them through the segment/stream proxy (is_playlist=False) so
-            # the raw bytes are returned to the player, not parsed as M3U8.
+            # #EXT-X-MEDIA and #EXT-X-I-FRAME-STREAM-INF carry sub-playlist URIs
+            # (audio/subtitle/i-frame rendition playlists) that must be routed through
+            # the manifest proxy so their own segment URLs get rewritten.
+            # All other tags with URI= (#EXT-X-KEY, #EXT-X-MAP, #EXT-X-SESSION-KEY)
+            # reference raw binary data and must go through the segment proxy so the
+            # raw bytes are returned to the player without M3U8 parsing.
+            is_sub_playlist = line.startswith(("#EXT-X-MEDIA", "#EXT-X-I-FRAME-STREAM-INF"))
             new_uri = await self.proxy_url(
-                resolved_key_url, base_url, use_full_url=True, is_playlist=False
+                resolved_key_url, base_url, use_full_url=True, is_playlist=is_sub_playlist, is_key=not is_sub_playlist
             )
             line = line.replace(f'URI="{original_uri}"', f'URI="{new_uri}"')
         return line
@@ -749,9 +753,17 @@ class M3U8Processor:
         # Determine routing strategy based on configuration
         routing_strategy = settings.m3u8_content_routing
 
-        # Check if we should force MediaFlow proxy for all playlist URLs
+        # If force_playlist_proxy is set, route all content through the proxy but
+        # distinguish actual playlists from segments: sending raw MPEG-TS bytes to
+        # the manifest endpoint (is_playlist=True) causes a "#EXTM3U not found" error
+        # because the endpoint tries to parse binary segment data as an HLS playlist.
+        # Segments disguised as .js/.css (e.g. chevy streams) must go to the segment
+        # endpoint (is_playlist=False) so the bytes are streamed back as-is.
         if self.force_playlist_proxy:
-            return await self.proxy_url(full_url, base_url, use_full_url=True, is_playlist=True)
+            parsed_url = parse.urlparse(full_url)
+            content_is_playlist = parsed_url.path.endswith((".m3u", ".m3u8", ".m3u_plus")) or \
+                parse.parse_qs(parsed_url.query).get("type", [""])[0] in ["m3u", "m3u8", "m3u_plus"]
+            return await self.proxy_url(full_url, base_url, use_full_url=True, is_playlist=content_is_playlist)
 
         # For playlist URLs, always use MediaFlow proxy regardless of strategy
         # Check for actual playlist file extensions, not just substring matches
@@ -807,7 +819,14 @@ class M3U8Processor:
                     segment_urls.append(parse.urljoin(base_url, line))
         return segment_urls
 
-    async def proxy_url(self, url: str, base_url: str, use_full_url: bool = False, is_playlist: bool = True) -> str:
+    async def proxy_url(
+        self,
+        url: str,
+        base_url: str,
+        use_full_url: bool = False,
+        is_playlist: bool = True,
+        is_key: bool = False,
+    ) -> str:
         """
         Proxies a URL, encoding it with the MediaFlow proxy URL.
 
@@ -816,6 +835,7 @@ class M3U8Processor:
             base_url (str): The base URL to resolve relative URLs.
             use_full_url (bool): Whether to use the URL as-is (True) or join with base_url (False).
             is_playlist (bool): Whether this is a playlist URL (uses manifest endpoint) or segment URL (uses stream endpoint).
+            is_key (bool): Whether this is a key/init-segment URL (suppresses AES param injection).
 
         Returns:
             str: The proxied URL.
@@ -843,31 +863,25 @@ class M3U8Processor:
         if is_playlist:
             proxy_url = self.mediaflow_proxy_url
         else:
-            # Check if this is a DLHD key URL (needs /stream endpoint for header computation)
-            is_dlhd_key = "dlhd_salt" in query_params and "/key/" in full_url
-            if is_dlhd_key:
-                # Use /stream endpoint for DLHD key URLs
-                proxy_url = self.mediaflow_proxy_url.replace("/hls/manifest.m3u8", "/stream")
-            else:
-                # Determine segment extension from the URL
-                # Default to .ts for traditional HLS, but detect fMP4 extensions
-                segment_ext = "ts"
-                url_lower = full_url.lower()
-                # Check for fMP4/CMAF extensions
-                if url_lower.endswith(".m4s"):
-                    segment_ext = "m4s"
-                elif url_lower.endswith(".mp4"):
-                    segment_ext = "mp4"
-                elif url_lower.endswith(".m4a"):
-                    segment_ext = "m4a"
-                elif url_lower.endswith(".m4v"):
-                    segment_ext = "m4v"
-                elif url_lower.endswith(".aac"):
-                    segment_ext = "aac"
-                # Build segment proxy URL with correct extension
-                proxy_url = f"{self.segment_proxy_base_url}.{segment_ext}"
-                # Remove h_range header - each segment should handle its own range requests
-                query_params.pop("h_range", None)
+            # Determine segment extension from the URL
+            # Default to .ts for traditional HLS, but detect fMP4 extensions
+            segment_ext = "ts"
+            url_lower = full_url.lower()
+            # Check for fMP4/CMAF extensions
+            if url_lower.endswith(".m4s"):
+                segment_ext = "m4s"
+            elif url_lower.endswith(".mp4"):
+                segment_ext = "mp4"
+            elif url_lower.endswith(".m4a"):
+                segment_ext = "m4a"
+            elif url_lower.endswith(".m4v"):
+                segment_ext = "m4v"
+            elif url_lower.endswith(".aac"):
+                segment_ext = "aac"
+            # Build segment proxy URL with correct extension
+            proxy_url = f"{self.segment_proxy_base_url}.{segment_ext}"
+            # Remove h_range header - each segment should handle its own range requests
+            query_params.pop("h_range", None)
 
         return encode_mediaflow_proxy_url(
             proxy_url,

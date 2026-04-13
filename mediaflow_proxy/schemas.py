@@ -300,7 +300,6 @@ class ExtractorURLParams(GenericParams):
         "Maxstream",
         "LiveTV",
         "LuluStream",
-        "DLHD",
         "Fastream",
         "TurboVidPlay",
         "Vidmoly",

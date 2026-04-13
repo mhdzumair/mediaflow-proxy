@@ -1,11 +1,9 @@
-import asyncio
 import logging
 import re
 from functools import lru_cache
 from typing import Annotated
 from urllib.parse import quote, unquote
 
-import aiohttp
 from fastapi import Request, Depends, APIRouter, Query, HTTPException, Response
 from fastapi.datastructures import QueryParams
 
@@ -29,18 +27,14 @@ from mediaflow_proxy.schemas import (
 )
 from mediaflow_proxy.utils.base64_utils import process_potential_base64_url
 from mediaflow_proxy.utils.extractor_helpers import (
-    check_and_extract_dlhd_stream,
     check_and_extract_sportsonline_stream,
 )
 from mediaflow_proxy.utils.hls_prebuffer import hls_prebuffer
-from mediaflow_proxy.utils.hls_utils import parse_hls_playlist, find_stream_by_resolution
 from mediaflow_proxy.utils.http_utils import (
     get_proxy_headers,
     ProxyRequestHeaders,
     apply_header_manipulation,
 )
-from mediaflow_proxy.utils.http_client import create_aiohttp_session
-from mediaflow_proxy.utils.m3u8_processor import M3U8Processor
 from mediaflow_proxy.utils.stream_transformers import apply_transformer_to_bytes
 
 
@@ -181,52 +175,6 @@ async def hls_manifest_proxy(
     # Sanitize destination URL to fix common encoding issues
     hls_params.destination = sanitize_url(hls_params.destination)
 
-    # Check if this is a retry after 403 error (dlhd_retry parameter)
-    force_refresh = request.query_params.get("dlhd_retry") == "1"
-
-    # Check if destination contains DLHD pattern and extract stream directly
-    dlhd_result = await check_and_extract_dlhd_stream(
-        request, hls_params.destination, proxy_headers, force_refresh=force_refresh
-    )
-    dlhd_original_url = None
-    if dlhd_result:
-        # Store original DLHD URL for cache invalidation on 403 errors
-        dlhd_original_url = hls_params.destination
-
-        # Update destination and headers with extracted stream data
-        hls_params.destination = dlhd_result["destination_url"]
-        extracted_headers = dlhd_result.get("request_headers", {})
-        proxy_headers.request.update(extracted_headers)
-
-        # Check if extractor wants key-only proxy (DLHD uses hls_key_proxy endpoint)
-        if dlhd_result.get("mediaflow_endpoint") == "hls_key_proxy":
-            hls_params.key_only_proxy = True
-
-        # Check if extractor wants to force playlist proxy (needed for .css disguised m3u8)
-        if dlhd_result.get("force_playlist_proxy"):
-            hls_params.force_playlist_proxy = True
-
-        # Also add headers to query params so they propagate to key/segment requests
-        # This is necessary because M3U8Processor encodes headers as h_* query params
-        query_dict = dict(request.query_params)
-        for header_name, header_value in extracted_headers.items():
-            # Add header with h_ prefix to query params
-            query_dict[f"h_{header_name}"] = header_value
-        # Add DLHD original URL to track for cache invalidation
-        if dlhd_original_url:
-            query_dict["dlhd_original"] = dlhd_original_url
-        # Add DLHD key params if present (for dynamic key header computation)
-        if dlhd_result.get("dlhd_channel_salt"):
-            query_dict["dlhd_salt"] = dlhd_result["dlhd_channel_salt"]
-        if dlhd_result.get("dlhd_auth_token"):
-            query_dict["dlhd_token"] = dlhd_result["dlhd_auth_token"]
-        if dlhd_result.get("dlhd_iframe_url"):
-            query_dict["dlhd_iframe"] = dlhd_result["dlhd_iframe_url"]
-        # Remove retry flag from subsequent requests
-        query_dict.pop("dlhd_retry", None)
-        # Update request query params
-        request._query_params = QueryParams(query_dict)
-
     # Check if destination contains Sportsonline pattern and extract stream directly
     sportsonline_result = await check_and_extract_sportsonline_stream(request, hls_params.destination, proxy_headers)
     if sportsonline_result:
@@ -244,123 +192,8 @@ async def hls_manifest_proxy(
         for header_name, header_value in extracted_headers.items():
             # Add header with h_ prefix to query params
             query_dict[f"h_{header_name}"] = header_value
-        # Remove retry flag from subsequent requests
-        query_dict.pop("dlhd_retry", None)
         # Update request query params
         request._query_params = QueryParams(query_dict)
-
-    # Wrap the handler to catch 403 errors and retry with cache invalidation
-    try:
-        result = await _handle_hls_with_dlhd_retry(request, hls_params, proxy_headers, dlhd_original_url)
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"Unexpected error in hls_manifest_proxy: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-async def _handle_hls_with_dlhd_retry(
-    request: Request, hls_params: HLSManifestParams, proxy_headers: ProxyRequestHeaders, dlhd_original_url: str | None
-):
-    """
-    Handle HLS request with automatic retry on 403 errors for DLHD streams.
-    """
-    # Check if resolution selection is needed (either max_res or specific resolution)
-    if hls_params.max_res or hls_params.resolution:
-        async with create_aiohttp_session(hls_params.destination) as (session, proxy_url):
-            try:
-                response = await session.get(
-                    hls_params.destination,
-                    headers=proxy_headers.request,
-                    proxy=proxy_url,
-                )
-                response.raise_for_status()
-                playlist_content = await response.text()
-            except aiohttp.ClientResponseError as e:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Failed to fetch HLS manifest from origin: {e.status}",
-                ) from e
-            except asyncio.TimeoutError as e:
-                raise HTTPException(
-                    status_code=504,
-                    detail=f"Timeout while fetching HLS manifest: {e}",
-                ) from e
-            except aiohttp.ClientError as e:
-                raise HTTPException(status_code=502, detail=f"Network error fetching HLS manifest: {e}") from e
-
-        streams = parse_hls_playlist(playlist_content, base_url=hls_params.destination)
-        if not streams:
-            raise HTTPException(status_code=404, detail="No streams found in the manifest.")
-
-        # Select stream based on resolution parameter or max_res
-        if hls_params.resolution:
-            selected_stream = find_stream_by_resolution(streams, hls_params.resolution)
-            if not selected_stream:
-                raise HTTPException(
-                    status_code=404, detail=f"No suitable stream found for resolution {hls_params.resolution}."
-                )
-        else:
-            # max_res: select highest resolution
-            selected_stream = max(
-                streams,
-                key=lambda s: s.get("resolution", (0, 0))[0] * s.get("resolution", (0, 0))[1],
-            )
-
-        if selected_stream.get("resolution", (0, 0)) == (0, 0):
-            logger.warning(
-                "Selected stream has resolution (0, 0); resolution parsing may have failed or not be available in the manifest."
-            )
-
-        # Rebuild the manifest preserving master-level directives
-        # but removing non-selected variant blocks
-        lines = playlist_content.splitlines()
-        selected_variant_index = streams.index(selected_stream)
-
-        variant_index = -1
-        new_manifest_lines = []
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            if line.startswith("#EXT-X-STREAM-INF"):
-                variant_index += 1
-                next_line = ""
-                if i + 1 < len(lines) and not lines[i + 1].startswith("#"):
-                    next_line = lines[i + 1]
-
-                # Only keep the selected variant
-                if variant_index == selected_variant_index:
-                    new_manifest_lines.append(line)
-                    if next_line:
-                        new_manifest_lines.append(next_line)
-
-                # Skip variant block (stream-inf + optional url)
-                i += 2 if next_line else 1
-                continue
-
-            # Preserve all other lines (master directives, media tags, etc.)
-            new_manifest_lines.append(line)
-            i += 1
-
-        new_manifest = "\n".join(new_manifest_lines)
-
-        # Parse skip segments (already returns list of dicts with 'start' and 'end' keys)
-        skip_segments_list = hls_params.get_skip_segments()
-
-        # Process the new manifest to proxy all URLs within it
-        processor = M3U8Processor(
-            request,
-            hls_params.key_url,
-            hls_params.force_playlist_proxy,
-            hls_params.key_only_proxy,
-            hls_params.no_proxy,
-            skip_segments_list,
-            hls_params.start_offset,
-        )
-        processed_manifest = await processor.process_m3u8(new_manifest, base_url=hls_params.destination)
-
-        return Response(content=processed_manifest, media_type="application/vnd.apple.mpegurl")
 
     return await handle_hls_stream_proxy(request, hls_params, proxy_headers, hls_params.transformer)
 
@@ -476,10 +309,14 @@ async def hls_segment_proxy(
             response_headers = apply_header_manipulation(base_headers, proxy_headers)
             return Response(content=segment_data, media_type=mime_type, headers=response_headers)
 
-        # get_or_download returned None (timeout or error) - fall through to streaming
-        logger.warning(f"[hls_segment_proxy] Prebuffer timeout, using direct streaming: {segment_url}")
+        # get_or_download returned None (timeout or error) - fall through to direct fetch
+        logger.warning(f"[hls_segment_proxy] Prebuffer timeout, using direct fetch: {segment_url}")
 
-    # Fallback to direct streaming
+    # Fallback to direct streaming.
+    # Override the response Content-Type so that CDN-served MPEG-TS segments
+    # are not interpreted as a non-video format.
+    if mime_type != "application/octet-stream":
+        proxy_headers.response["content-type"] = mime_type
     return await handle_stream_request("GET", segment_url, proxy_headers, transformer)
 
 
@@ -675,35 +512,6 @@ async def proxy_stream_endpoint(
 
     # Sanitize destination URL to fix common encoding issues
     destination = sanitize_url(destination)
-
-    # Check if this is a DLHD key URL request with key params in query
-    dlhd_salt = request.query_params.get("dlhd_salt")
-    dlhd_token = request.query_params.get("dlhd_token")
-    if dlhd_salt and "/key/" in destination:
-        # This is a DLHD key URL - compute dynamic headers via executor to avoid blocking
-        from mediaflow_proxy.extractors.dlhd import compute_key_headers
-
-        key_headers = await asyncio.to_thread(compute_key_headers, destination, dlhd_salt)
-        if key_headers:
-            ts, nonce, key_path, fingerprint = key_headers
-            proxy_headers.request.update(
-                {
-                    "X-Key-Timestamp": str(ts),
-                    "X-Key-Nonce": str(nonce),
-                    "X-Fingerprint": fingerprint,
-                    "X-Key-Path": key_path,
-                }
-            )
-            if dlhd_token:
-                proxy_headers.request["Authorization"] = f"Bearer {dlhd_token}"
-            logger.info(f"[proxy_stream] Computed DLHD key headers for: {destination}")
-
-    # Check if destination contains DLHD pattern and extract stream directly
-    dlhd_result = await check_and_extract_dlhd_stream(request, destination, proxy_headers)
-    if dlhd_result:
-        # Update destination and headers with extracted stream data
-        destination = dlhd_result["destination_url"]
-        proxy_headers.request.update(dlhd_result.get("request_headers", {}))
 
     # Handle transcode mode — transcode uses time-based seeking, not byte ranges
     if transcode:

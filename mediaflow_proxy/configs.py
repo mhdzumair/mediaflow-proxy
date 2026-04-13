@@ -75,9 +75,10 @@ class Settings(BaseSettings):
     remux_to_ts: bool = False  # Remux fMP4 segments to MPEG-TS for ExoPlayer/VLC compatibility.
     processed_segment_cache_ttl: int = 60  # TTL (seconds) for caching processed (decrypted/remuxed) segments.
 
-    # FlareSolverr settings (for Cloudflare bypass)
-    flaresolverr_url: str | None = None  # FlareSolverr service URL. Example: http://localhost:8191
-    flaresolverr_timeout: int = 60  # Timeout (seconds) for FlareSolverr requests.
+    # Byparr settings — Firefox/Camoufox-based solver for Cloudflare bypass and chevy IP whitelist.
+    # https://github.com/ThePhaseless/Byparr  (drop-in FlareSolverr-compatible API)
+    byparr_url: str | None = None  # Byparr service URL. Example: http://localhost:8192
+    byparr_timeout: int = 60  # Timeout (seconds) for Byparr requests.
 
     # Acestream settings
     enable_acestream: bool = False  # Whether to enable Acestream proxy support.

@@ -1,7 +1,6 @@
 from typing import Dict, Type
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
-from mediaflow_proxy.extractors.dlhd import DLHDExtractor
 from mediaflow_proxy.extractors.doodstream import DoodStreamExtractor
 from mediaflow_proxy.extractors.city import CityExtractor
 from mediaflow_proxy.extractors.sportsonline import SportsonlineExtractor
@@ -25,6 +24,7 @@ from mediaflow_proxy.extractors.vidoza import VidozaExtractor
 from mediaflow_proxy.extractors.vixcloud import VixCloudExtractor
 from mediaflow_proxy.extractors.fastream import FastreamExtractor
 from mediaflow_proxy.extractors.voe import VoeExtractor
+from mediaflow_proxy.extractors.vidfast import VidFastExtractor
 
 
 class ExtractorFactory:
@@ -48,13 +48,13 @@ class ExtractorFactory:
         "Maxstream": MaxstreamExtractor,
         "LiveTV": LiveTVExtractor,
         "LuluStream": LuluStreamExtractor,
-        "DLHD": DLHDExtractor,
         "Vavoo": VavooExtractor,
         "Vidmoly": VidmolyExtractor,
         "Vidoza": VidozaExtractor,
         "Fastream": FastreamExtractor,
         "Voe": VoeExtractor,
         "Sportsonline": SportsonlineExtractor,
+        "VidFast": VidFastExtractor,
     }
 
     @classmethod

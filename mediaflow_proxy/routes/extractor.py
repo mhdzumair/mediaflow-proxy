@@ -179,7 +179,7 @@ async def _extract_url_impl(
         if "no_proxy" in request.query_params:
             response["query_params"]["no_proxy"] = request.query_params.get("no_proxy")
 
-        # Some extractors (e.g., DLHD) return this as top-level metadata for internal
+        # Some extractors return force_playlist_proxy as top-level metadata for internal
         # manifest processing. Redirect URL encoding expects it in query params.
         if response.pop("force_playlist_proxy", False):
             response["query_params"]["force_playlist_proxy"] = "1"

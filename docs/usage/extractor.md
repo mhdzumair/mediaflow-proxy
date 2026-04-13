@@ -10,7 +10,6 @@ Use these exact strings as the `host` query parameter. The canonical list is def
 
 | `host` value |
 |--------------|
-| `DLHD` |
 | `Doodstream` |
 | `F16Px` |
 | `Fastream` |

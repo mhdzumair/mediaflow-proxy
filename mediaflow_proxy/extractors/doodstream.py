@@ -25,9 +25,10 @@ class DoodStreamExtractor(BaseExtractor):
     Turnstile CAPTCHA before serving the pass_md5 URL.
 
     Extraction order:
-    1. FlareSolverr  — set FLARESOLVERR_URL (real Chrome → Turnstile auto-validates)
-    2. curl_cffi     — Chrome impersonation; works when Turnstile is not triggered,
-                       raises a descriptive error if captcha is detected.
+    1. Byparr  — set BYPARR_URL (Firefox/Camoufox → Turnstile auto-validates,
+                 not blocked by DisableDevtool.js)
+    2. curl_cffi — Chrome impersonation; works when Turnstile is not triggered,
+                   raises a descriptive error if captcha is detected.
     """
 
     async def extract(self, url: str, **kwargs):
@@ -36,75 +37,69 @@ class DoodStreamExtractor(BaseExtractor):
         if not video_id:
             raise ExtractorError("Invalid DoodStream URL: no video ID found")
 
-        if settings.flaresolverr_url:
+        if settings.byparr_url:
             try:
-                return await self._extract_via_flaresolverr(url, video_id)
+                return await self._extract_via_byparr(url, video_id)
             except ExtractorError:
                 raise
 
         return await self._extract_via_curl_cffi(url, video_id)
 
     # ------------------------------------------------------------------
-    # Path 1 – FlareSolverr (real Chrome → Turnstile auto-validates)
+    # Path 1 – Byparr (Firefox/Camoufox → Turnstile auto-validates)
     # ------------------------------------------------------------------
 
-    async def _extract_via_flaresolverr(self, url: str, video_id: str) -> dict:
+    async def _extract_via_byparr(self, url: str, video_id: str) -> dict:
         """
-        Use FlareSolverr to bypass Cloudflare protection on the DoodStream embed page.
+        Use Byparr to bypass Cloudflare protection on the DoodStream embed page.
 
-        Strategy: fetch the embed page without any injected script. FlareSolverr's
-        real Chrome browser auto-passes Cloudflare's bot checks and often bypasses
-        the Turnstile CAPTCHA gate directly, returning the embed HTML with pass_md5.
-        If the response doesn't contain pass_md5, reuse the CF cookies + UA from
-        FlareSolverr in a follow-up curl_cffi request (which avoids re-triggering
-        the bot check).
+        Strategy: fetch the embed page without any injected script. Byparr's
+        Firefox/Camoufox browser auto-passes Cloudflare's bot checks and often
+        bypasses the Turnstile CAPTCHA gate directly, returning the embed HTML
+        with pass_md5.  If the response doesn't contain pass_md5, reuse the CF
+        cookies + UA from Byparr in a follow-up curl_cffi request (which avoids
+        re-triggering the bot check).
         """
-        endpoint = f"{settings.flaresolverr_url.rstrip('/')}/v1"
+        endpoint = f"{settings.byparr_url.rstrip('/')}/v1"
         embed_url = url if "/e/" in url else f"https://{urlparse(url).netloc}/e/{video_id}"
         payload = {
             "cmd": "request.get",
             "url": embed_url,
-            "maxTimeout": settings.flaresolverr_timeout * 1000,
+            "maxTimeout": settings.byparr_timeout * 1000,
         }
 
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 endpoint,
                 json=payload,
-                timeout=aiohttp.ClientTimeout(total=settings.flaresolverr_timeout + 15),
+                timeout=aiohttp.ClientTimeout(total=settings.byparr_timeout + 15),
             ) as resp:
                 if resp.status != 200:
-                    raise ExtractorError(f"FlareSolverr HTTP {resp.status}")
+                    raise ExtractorError(f"Byparr HTTP {resp.status}")
                 data = await resp.json()
 
         if data.get("status") != "ok":
-            raise ExtractorError(f"FlareSolverr: {data.get('message', 'unknown error')}")
+            raise ExtractorError(f"Byparr: {data.get('message', 'unknown error')}")
 
         solution = data.get("solution", {})
         final_url = solution.get("url", embed_url)
-        # Guard against FlareSolverr navigating away (e.g. chrome://new-tab-page/)
         if not final_url.startswith("http"):
             final_url = embed_url
         base_url = f"https://{urlparse(final_url).netloc}"
         html = solution.get("response", "")
 
         if "pass_md5" not in html:
-            # FlareSolverr may navigate to chrome://new-tab-page/ because the embed
-            # page runs DisableDevtool and calls window.close() when it detects
-            # Chrome DevTools are open (which FlareSolverr uses internally).
+            # Byparr may not have the pass_md5 in the initial response.
             # Try two recovery strategies in order:
             #
-            # 1. Cookie reuse — if FlareSolverr collected CF clearance cookies before
-            #    navigation, inject them into a curl_cffi request.
-            # 2. Plain curl_cffi — Chrome TLS impersonation without JS execution; works
-            #    for most network locations that don't trigger a Turnstile challenge.
+            # 1. Cookie reuse — if Byparr collected CF clearance cookies before
+            #    the page loaded fully, inject them into a curl_cffi request.
+            # 2. Plain curl_cffi — Chrome TLS impersonation without JS execution.
             raw_cookies = solution.get("cookies", [])
             cookies = {c["name"]: c["value"] for c in raw_cookies}
             ua = solution.get("userAgent", _DOOD_UA)
 
             if cookies:
-                # Determine real serving domain from the cf_clearance cookie, since all
-                # DoodStream mirrors redirect to playmogo.com.
                 cf_domain = (
                     next(
                         (c.get("domain", "").lstrip(".") for c in raw_cookies if c.get("name") == "cf_clearance"),
@@ -114,7 +109,7 @@ class DoodStreamExtractor(BaseExtractor):
                 )
                 retry_url = f"https://{cf_domain}/e/{video_id}"
                 logger.debug(
-                    "FlareSolverr response lacked pass_md5 (final_url=%s); retrying %s with CF cookies via curl_cffi",
+                    "Byparr response lacked pass_md5 (final_url=%s); retrying %s with CF cookies via curl_cffi",
                     final_url,
                     retry_url,
                 )
@@ -133,11 +128,7 @@ class DoodStreamExtractor(BaseExtractor):
                     base_url = f"https://{urlparse(final_url).netloc}"
 
             if "pass_md5" not in html:
-                # Cookie reuse failed too. Fall through to plain curl_cffi — it
-                # bypasses Cloudflare's TLS/bot checks without JS execution and
-                # works for most network locations that aren't challenged by
-                # DoodStream's server-side Turnstile gate.
-                logger.debug("FlareSolverr cookie reuse also failed; falling back to curl_cffi for %s", embed_url)
+                logger.debug("Byparr cookie reuse also failed; falling back to curl_cffi for %s", embed_url)
                 return await self._extract_via_curl_cffi(embed_url, video_id)
 
         return await self._parse_embed_html(html, base_url)
@@ -203,7 +194,7 @@ class DoodStreamExtractor(BaseExtractor):
             raise ExtractorError(
                 "DoodStream: pass_md5 endpoint returned no stream URL "
                 "(captcha session may have expired). "
-                "Ensure FLARESOLVERR_URL is set for reliable extraction."
+                "Ensure BYPARR_URL is set for reliable extraction."
             )
 
         token_match = re.search(r"token=([^&\s'\"]+)", html)

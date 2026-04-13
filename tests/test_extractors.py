@@ -18,7 +18,6 @@ from mediaflow_proxy.extractors.factory import ExtractorFactory
 # All extractors registered in the factory
 # The env var name is derived from the extractor name (uppercase)
 ALL_EXTRACTORS = [
-    "DLHD",
     "Doodstream",
     "Fastream",
     "FileLions",

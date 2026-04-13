@@ -181,7 +181,6 @@ def initialize_routing_from_config(transport_config) -> None:
     # Hardcoded routes for specific domains (SSL verification disabled)
     hardcoded_domains = [
         "all://jxoplay.xyz",
-        "all://dlhd.dad",
         "all://*.newkso.ru",
     ]
 
