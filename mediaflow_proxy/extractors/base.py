@@ -9,7 +9,7 @@ import json
 import logging
 
 from mediaflow_proxy.configs import settings
-from mediaflow_proxy.utils.http_client import create_aiohttp_session
+from mediaflow_proxy.utils.http_client import create_aiohttp_session, _ensure_routing_initialized, get_routing_config
 from mediaflow_proxy.utils.http_utils import DownloadError
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,16 @@ class BaseExtractor(ABC):
         self.mediaflow_endpoint = "proxy_stream_endpoint"
         # merge incoming headers (e.g. Accept-Language / Referer) with default base headers
         self.base_headers.update(request_headers or {})
+
+    @staticmethod
+    def _get_proxy(url: str) -> str | None:
+        """Return the configured proxy URL for *url*, or None if no proxy applies."""
+        try:
+            _ensure_routing_initialized()
+            route = get_routing_config().match_url(url)
+            return route.proxy_url
+        except Exception:
+            return None
 
     async def _make_request(
         self,

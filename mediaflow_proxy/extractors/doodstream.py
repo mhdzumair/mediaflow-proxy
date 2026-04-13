@@ -8,7 +8,6 @@ from curl_cffi.requests import AsyncSession
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 from mediaflow_proxy.configs import settings
-from mediaflow_proxy.utils.http_client import _ensure_routing_initialized, get_routing_config
 
 logger = logging.getLogger(__name__)
 
@@ -146,16 +145,6 @@ class DoodStreamExtractor(BaseExtractor):
     # ------------------------------------------------------------------
     # Path 2 – curl_cffi (bypasses CF bot protection; Turnstile may block)
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _get_proxy(url: str) -> str | None:
-        """Return the configured proxy URL for *url*, or None."""
-        try:
-            _ensure_routing_initialized()
-            route = get_routing_config().match_url(url)
-            return route.proxy_url
-        except Exception:
-            return None
 
     async def _extract_via_curl_cffi(self, url: str, video_id: str) -> dict:
         proxy = self._get_proxy(url)

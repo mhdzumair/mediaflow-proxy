@@ -24,12 +24,17 @@ class SupervideoExtractor(BaseExtractor):
 
         Uses curl_cffi with Chrome impersonation to bypass Cloudflare.
         """
-
         patterns = [r'file:"(.*?)"']
+        proxy = self._get_proxy(url)
 
         try:
             async with AsyncSession() as session:
-                response = await session.get(url, impersonate="chrome")
+                response = await session.get(
+                    url,
+                    impersonate="chrome",
+                    timeout=30,
+                    **({"proxy": proxy} if proxy else {}),
+                )
 
                 if response.status_code != 200:
                     raise ExtractorError(f"HTTP {response.status_code} while fetching {url}")

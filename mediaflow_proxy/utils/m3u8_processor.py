@@ -716,12 +716,11 @@ class M3U8Processor:
             if not uri.scheme:
                 resolved_key_url = parse.urljoin(base_url, resolved_key_url)
 
-            # Check if this is a DLHD stream with key params (needs stream endpoint for header computation)
-            query_params = dict(self.request.query_params)
-            is_dlhd_key_request = "dlhd_salt" in query_params and "/key/" in resolved_key_url
-            # Use stream endpoint for DLHD key URLs, manifest endpoint for others
+            # EXT-X-KEY URIs are always raw binary AES keys — never a playlist.
+            # Always route them through the segment/stream proxy (is_playlist=False) so
+            # the raw bytes are returned to the player, not parsed as M3U8.
             new_uri = await self.proxy_url(
-                resolved_key_url, base_url, use_full_url=True, is_playlist=not is_dlhd_key_request
+                resolved_key_url, base_url, use_full_url=True, is_playlist=False
             )
             line = line.replace(f'URI="{original_uri}"', f'URI="{new_uri}"')
         return line
