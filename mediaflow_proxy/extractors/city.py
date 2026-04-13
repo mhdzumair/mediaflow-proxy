@@ -9,7 +9,6 @@ from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
 
 class CityExtractor(BaseExtractor):
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.mediaflow_endpoint = "hls_manifest_proxy"
@@ -43,7 +42,7 @@ class CityExtractor(BaseExtractor):
         return None
 
     def pick_stream(self, file_data, season: int = 1, episode: int = 1):
-        
+
         if isinstance(file_data, str):
             return file_data
 
@@ -131,7 +130,7 @@ class CityExtractor(BaseExtractor):
                 raw_json = self.extract_json_array(decoded)
                 if raw_json:
                     try:
-                        raw_json = re.sub(r'\\(.)', r'\1', raw_json)
+                        raw_json = re.sub(r"\\(.)", r"\1", raw_json)
                         file_data = json.loads(raw_json)
                     except Exception:
                         file_data = raw_json

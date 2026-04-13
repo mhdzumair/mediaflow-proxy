@@ -761,8 +761,9 @@ class M3U8Processor:
         # endpoint (is_playlist=False) so the bytes are streamed back as-is.
         if self.force_playlist_proxy:
             parsed_url = parse.urlparse(full_url)
-            content_is_playlist = parsed_url.path.endswith((".m3u", ".m3u8", ".m3u_plus")) or \
-                parse.parse_qs(parsed_url.query).get("type", [""])[0] in ["m3u", "m3u8", "m3u_plus"]
+            content_is_playlist = parsed_url.path.endswith((".m3u", ".m3u8", ".m3u_plus")) or parse.parse_qs(
+                parsed_url.query
+            ).get("type", [""])[0] in ["m3u", "m3u8", "m3u_plus"]
             return await self.proxy_url(full_url, base_url, use_full_url=True, is_playlist=content_is_playlist)
 
         # For playlist URLs, always use MediaFlow proxy regardless of strategy
