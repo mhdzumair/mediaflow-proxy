@@ -306,6 +306,8 @@ class ExtractorURLParams(GenericParams):
         "Vidoza",
         "Voe",
         "Sportsonline",
+        "Vavoo",
+        "VidFast",
     ] = Field(..., description="The host to extract the URL from.")
     destination: Annotated[str, Field(description="The URL of the stream.", alias="d")]
     redirect_stream: bool = Field(False, description="Whether to redirect to the stream endpoint automatically.")
