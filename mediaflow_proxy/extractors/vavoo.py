@@ -3,7 +3,7 @@ import time
 import re
 import uuid
 from typing import Any, Dict, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from mediaflow_proxy.extractors.base import BaseExtractor, ExtractorError
 
@@ -19,6 +19,7 @@ class VavooExtractor(BaseExtractor):
 
     def __init__(self, request_headers: dict):
         super().__init__(request_headers)
+        # Endpoint is resolved dynamically per-extraction based on the stream URL type.
         self.mediaflow_endpoint = "proxy_stream_endpoint"
 
     async def _get_auth_signature(self) -> Optional[str]:
@@ -262,10 +263,16 @@ class VavooExtractor(BaseExtractor):
                 "user-agent": self.API_UA,
                 "referer": "https://vavoo.to/",
             }
+            wv_path = urlparse(resolved_url).path.lower()
+            wv_endpoint = (
+                "hls_manifest_proxy"
+                if wv_path.endswith((".m3u8", ".m3u", ".m3u_plus"))
+                else self.mediaflow_endpoint
+            )
             return {
                 "destination_url": resolved_url,
                 "request_headers": stream_headers,
-                "mediaflow_endpoint": self.mediaflow_endpoint,
+                "mediaflow_endpoint": wv_endpoint,
             }
 
         resolved_url = None
@@ -302,8 +309,18 @@ class VavooExtractor(BaseExtractor):
             }
             logger.info("Using Direct Fallback Mode: %s", resolved_url)
 
+        # Use HLS manifest proxy when the resolved URL is an M3U8 playlist so
+        # the proxy rewrites relative segment URLs before the player sees them.
+        # TS / raw stream URLs go through the stream proxy as-is.
+        path = urlparse(resolved_url).path.lower()
+        m3u8_endpoint = (
+            "hls_manifest_proxy"
+            if path.endswith((".m3u8", ".m3u", ".m3u_plus"))
+            else self.mediaflow_endpoint
+        )
+
         return {
             "destination_url": resolved_url,
             "request_headers": stream_headers,
-            "mediaflow_endpoint": self.mediaflow_endpoint,
+            "mediaflow_endpoint": m3u8_endpoint,
         }
