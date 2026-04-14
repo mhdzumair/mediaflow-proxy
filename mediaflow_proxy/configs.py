@@ -114,6 +114,9 @@ class Settings(BaseSettings):
     upstream_retry_delay: float = 1.0  # Delay (seconds) between retry attempts.
     graceful_stream_end: bool = True  # Return valid empty playlist instead of error when upstream fails.
 
+    # EPG proxy settings
+    epg_cache_ttl: int = 3600  # TTL (seconds) for cached EPG/XMLTV data. Default 1 hour.
+
     # Redis settings
     redis_url: str | None = None  # Redis URL for distributed locking and caching. None = disabled.
     cache_namespace: str | None = (

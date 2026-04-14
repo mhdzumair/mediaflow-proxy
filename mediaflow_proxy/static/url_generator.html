@@ -174,6 +174,9 @@
             <button onclick="switchTab('telegram')" id="tab-telegram" class="tab-btn px-6 py-3 rounded-xl font-semibold text-sm bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 shadow-md">
                 <i class="fa-brands fa-telegram"></i> Telegram
             </button>
+            <button onclick="switchTab('epg')" id="tab-epg" class="tab-btn px-6 py-3 rounded-xl font-semibold text-sm bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 shadow-md">
+                📅 EPG Proxy
+            </button>
         </div>
 
         <!-- Proxy URL Generator Tab -->
@@ -1577,6 +1580,242 @@
                 </div>
             </div>
         </div>
+
+        <!-- EPG Proxy Tab -->
+        <div id="panel-epg" class="tab-panel hidden animate-fade-in">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 border border-gray-200 dark:border-gray-700">
+                <h2 class="text-xl font-bold text-gray-800 dark:text-white mb-2 flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-sm">📅</span>
+                    EPG Proxy URL Generator
+                </h2>
+                <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                    Proxy any XMLTV/EPG source through MediaFlow with caching. Compatible with
+                    <strong>Channels DVR</strong>, Plex, Emby, Jellyfin, TiviMate, and all XMLTV-based clients.
+                </p>
+
+                <!-- What is EPG info box -->
+                <div class="bg-teal-50 dark:bg-teal-900/20 rounded-xl p-4 border border-teal-200 dark:border-teal-800 mb-6">
+                    <div class="flex items-start gap-3">
+                        <svg class="w-5 h-5 text-teal-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <div class="text-sm text-teal-800 dark:text-teal-200">
+                            <p class="font-semibold mb-1">EPG vs DVR — what's the difference?</p>
+                            <p><strong>EPG</strong> (Electronic Program Guide) is the XMLTV schedule data file that tells your player/DVR what's on TV and when.</p>
+                            <p class="mt-1"><strong>Channels DVR</strong> is a popular DVR application that <em>reads</em> EPG data to populate its TV guide and schedule recordings. This proxy sits between Channels DVR (or any other client) and your upstream EPG source.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-5">
+                    <!-- Proxy Base URL -->
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">MediaFlow Proxy URL <span class="text-red-500">*</span></label>
+                        <input type="url" id="epg-proxy-url" placeholder="http://localhost:8888"
+                            class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-500">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Base URL of your MediaFlow proxy instance</p>
+                    </div>
+
+                    <!-- EPG Source URL -->
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">EPG Source URL <span class="text-red-500">*</span></label>
+                        <input type="url" id="epg-source-url" placeholder="http://provider.com/epg.xml or http://provider.com/xmltv.php?username=x&password=y"
+                            class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-500">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Your upstream XMLTV/EPG source URL</p>
+                    </div>
+
+                    <!-- Cache TTL -->
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Cache Duration <span class="text-gray-400 font-normal">(optional)</span></label>
+                        <div class="flex gap-3 items-center">
+                            <select id="epg-cache-ttl" class="input-field px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-500 text-sm">
+                                <option value="">Default (1 hour)</option>
+                                <option value="1800">30 minutes</option>
+                                <option value="3600">1 hour</option>
+                                <option value="7200">2 hours</option>
+                                <option value="14400">4 hours</option>
+                                <option value="21600">6 hours</option>
+                                <option value="43200">12 hours</option>
+                                <option value="86400">24 hours</option>
+                                <option value="0">Disabled (no cache)</option>
+                            </select>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">EPG data rarely changes — longer cache = fewer upstream requests</p>
+                        </div>
+                    </div>
+
+                    <!-- Base64 Encode Toggle -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <div class="flex items-center gap-3 mb-2">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="epg-base64" class="sr-only peer" checked>
+                                <div class="w-11 h-6 bg-gray-300 dark:bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                            </label>
+                            <span class="text-sm font-semibold text-gray-700 dark:text-gray-200">Base64-encode source URL</span>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Recommended — hides credentials in your EPG source URL and prevents URL-parsing issues</p>
+                    </div>
+
+                    <!-- Custom Headers for Protected Sources -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <div class="flex items-center justify-between mb-3">
+                            <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Custom Request Headers <span class="text-gray-400 font-normal">(optional)</span></h4>
+                            <button onclick="addEpgHeader()" class="text-xs px-3 py-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition-colors font-medium">
+                                + Add Header
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">Use for EPG sources that require authentication (e.g. Authorization: Bearer token)</p>
+                        <div id="epg-headers-list" class="space-y-2">
+                            <!-- Headers injected here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Generate Button -->
+                <div class="mt-6">
+                    <button onclick="generateEpgUrl()" class="generate-btn w-full py-3.5 rounded-xl text-white font-semibold text-sm" style="background: linear-gradient(135deg, #10b981 0%, #0d9488 100%);">
+                        Generate EPG Proxy URL
+                    </button>
+                </div>
+
+                <!-- Output -->
+                <div id="epg-output" class="mt-6 hidden">
+                    <!-- URL Card -->
+                    <div class="bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-xl p-6 border border-emerald-200 dark:border-emerald-800 mb-6">
+                        <h3 class="text-base font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                            </svg>
+                            Your EPG Proxy URL
+                        </h3>
+                        <div class="flex gap-2">
+                            <div class="url-output flex-1 rounded-xl px-4 py-3 text-green-400 text-xs break-all leading-relaxed">
+                                <code id="epg-result-url"></code>
+                            </div>
+                            <button onclick="copyEpgUrl(event)" class="copy-btn px-4 py-2 rounded-xl text-white font-semibold text-sm flex-shrink-0 self-start">
+                                📋 Copy
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Setup Instructions -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3 flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                            Setup Instructions
+                        </h4>
+                        <div class="space-y-3 text-sm">
+
+                            <!-- Channels DVR -->
+                            <div class="collapsible">
+                                <div class="collapsible-header flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors" onclick="toggleCollapsible(this)">
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">📡 Channels DVR</span>
+                                    <svg class="w-4 h-4 text-gray-500 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                    </svg>
+                                </div>
+                                <div class="collapsible-content">
+                                    <div class="p-3 text-gray-600 dark:text-gray-400">
+                                        <ol class="list-decimal list-inside space-y-1">
+                                            <li>Open Channels DVR web interface → <strong>Sources</strong></li>
+                                            <li>Click <strong>Add Source</strong> → choose <strong>Custom Channels</strong></li>
+                                            <li>Under the channel list, find the <strong>EPG</strong> or <strong>Program Guide</strong> section</li>
+                                            <li>Paste the generated URL as your <strong>EPG / XMLTV URL</strong></li>
+                                            <li>Save and trigger a guide refresh</li>
+                                        </ol>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Plex -->
+                            <div class="collapsible">
+                                <div class="collapsible-header flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors" onclick="toggleCollapsible(this)">
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">🟡 Plex</span>
+                                    <svg class="w-4 h-4 text-gray-500 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                    </svg>
+                                </div>
+                                <div class="collapsible-content">
+                                    <div class="p-3 text-gray-600 dark:text-gray-400">
+                                        <ol class="list-decimal list-inside space-y-1">
+                                            <li>Open Plex → <strong>Settings → Live TV &amp; DVR</strong></li>
+                                            <li>Set up or edit your tuner/M3U source</li>
+                                            <li>In the EPG/Guide Data step, choose <strong>XMLTV Guide</strong></li>
+                                            <li>Paste the generated URL as the <strong>XMLTV URL</strong></li>
+                                            <li>Complete setup and refresh guide data</li>
+                                        </ol>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Emby / Jellyfin -->
+                            <div class="collapsible">
+                                <div class="collapsible-header flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors" onclick="toggleCollapsible(this)">
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">🟢 Emby / Jellyfin</span>
+                                    <svg class="w-4 h-4 text-gray-500 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                    </svg>
+                                </div>
+                                <div class="collapsible-content">
+                                    <div class="p-3 text-gray-600 dark:text-gray-400">
+                                        <ol class="list-decimal list-inside space-y-1">
+                                            <li>Open Emby/Jellyfin → <strong>Dashboard → Live TV</strong></li>
+                                            <li>Click <strong>+</strong> next to <em>TV Guide Data Providers</em></li>
+                                            <li>Select <strong>XMLTV</strong> as the guide provider type</li>
+                                            <li>Paste the generated URL as the <strong>XMLTV URL</strong></li>
+                                            <li>Save — guide data will refresh automatically</li>
+                                        </ol>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- TiviMate -->
+                            <div class="collapsible">
+                                <div class="collapsible-header flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors" onclick="toggleCollapsible(this)">
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">📱 TiviMate</span>
+                                    <svg class="w-4 h-4 text-gray-500 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                    </svg>
+                                </div>
+                                <div class="collapsible-content">
+                                    <div class="p-3 text-gray-600 dark:text-gray-400">
+                                        <ol class="list-decimal list-inside space-y-1">
+                                            <li>Open TiviMate → <strong>Settings → Playlists</strong></li>
+                                            <li>Select your playlist → <strong>EPG</strong></li>
+                                            <li>Tap <strong>Add EPG Source</strong></li>
+                                            <li>Paste the generated URL and save</li>
+                                        </ol>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Generic XMLTV -->
+                            <div class="collapsible">
+                                <div class="collapsible-header flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors" onclick="toggleCollapsible(this)">
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">🎯 Any XMLTV-compatible app</span>
+                                    <svg class="w-4 h-4 text-gray-500 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                    </svg>
+                                </div>
+                                <div class="collapsible-content">
+                                    <div class="p-3 text-gray-600 dark:text-gray-400">
+                                        <p class="mb-2">Use the generated URL anywhere an <strong>XMLTV URL</strong> or <strong>EPG URL</strong> is accepted:</p>
+                                        <ul class="list-disc list-inside space-y-1">
+                                            <li>The proxy returns standard XMLTV XML</li>
+                                            <li>Responses are cached (reduces load on your provider)</li>
+                                            <li>Set <code>cache_ttl=0</code> to always fetch fresh data</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </main>
 
     <script>
@@ -3036,10 +3275,83 @@ TELEGRAM_SESSION_STRING=${sessionString}`;
             }
         }
 
+        // ─── EPG Proxy ────────────────────────────────────────────────────────
+
+        let epgHeaderCount = 0;
+
+        function addEpgHeader(name = '', value = '') {
+            const list = document.getElementById('epg-headers-list');
+            const id = epgHeaderCount++;
+            const row = document.createElement('div');
+            row.className = 'flex gap-2 items-center epg-header-row';
+            row.dataset.id = id;
+            row.innerHTML = `
+                <input type="text" placeholder="Header name (e.g. Authorization)" value="${name}"
+                    class="epg-header-name input-field flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-500 text-sm">
+                <input type="text" placeholder="Header value (e.g. Bearer token123)" value="${value}"
+                    class="epg-header-value input-field flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-500 text-sm">
+                <button onclick="this.closest('.epg-header-row').remove()"
+                    class="flex-shrink-0 w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/30 text-red-500 hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors flex items-center justify-center text-sm">
+                    ✕
+                </button>`;
+            list.appendChild(row);
+        }
+
+        function generateEpgUrl() {
+            const proxyUrl = (document.getElementById('epg-proxy-url').value || window.location.origin).replace(/\/$/, '');
+            const sourceUrl = document.getElementById('epg-source-url').value.trim();
+            const cacheTtl  = document.getElementById('epg-cache-ttl').value;
+            const useBase64 = document.getElementById('epg-base64').checked;
+            const apiPassword = document.getElementById('globalApiPassword').value.trim();
+
+            if (!sourceUrl) {
+                alert('Please enter an EPG Source URL.');
+                return;
+            }
+
+            // Build destination param
+            let dest = sourceUrl;
+            if (useBase64) {
+                dest = btoa(sourceUrl).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            }
+
+            const params = new URLSearchParams();
+            params.set('d', dest);
+            if (apiPassword) params.set('api_password', apiPassword);
+            if (cacheTtl !== '') params.set('cache_ttl', cacheTtl);
+
+            // Collect custom headers
+            document.querySelectorAll('.epg-header-row').forEach(row => {
+                const name  = row.querySelector('.epg-header-name').value.trim();
+                const value = row.querySelector('.epg-header-value').value.trim();
+                if (name && value) {
+                    params.set(`h_${name}`, value);
+                }
+            });
+
+            const finalUrl = `${proxyUrl}/proxy/epg?${params.toString()}`;
+            document.getElementById('epg-result-url').textContent = finalUrl;
+            document.getElementById('epg-output').classList.remove('hidden');
+            document.getElementById('epg-output').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function copyEpgUrl(event) {
+            const url = document.getElementById('epg-result-url').textContent;
+            navigator.clipboard.writeText(url).then(() => {
+                const btn = event.currentTarget;
+                const original = btn.textContent;
+                btn.textContent = '✅ Copied!';
+                setTimeout(() => { btn.textContent = original; }, 2000);
+            });
+        }
+
+        // ─── End EPG Proxy ────────────────────────────────────────────────────
+
         // Check for hash on page load to switch to correct tab
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('encoded-proxy-url').value = window.location.origin;
-            
+            document.getElementById('epg-proxy-url').value = window.location.origin;
+
             // Check if URL has hash
             if (window.location.hash === '#xc') {
                 switchTab('xc');
@@ -3047,6 +3359,8 @@ TELEGRAM_SESSION_STRING=${sessionString}`;
                 switchTab('acestream');
             } else if (window.location.hash === '#telegram') {
                 switchTab('telegram');
+            } else if (window.location.hash === '#epg') {
+                switchTab('epg');
             }
         });
     </script>

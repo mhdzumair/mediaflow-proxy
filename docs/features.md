@@ -20,6 +20,16 @@
 - Support for expired or self-signed SSL certificates
 - Public IP address retrieval for Debrid services integration
 
+## EPG Proxy
+
+- **XMLTV/EPG pass-through proxy** — fetch and serve EPG schedule data from any upstream source
+- **Built-in caching** with configurable TTL (default 1 hour via `EPG_CACHE_TTL`) — reduces upstream load
+- Compatible with **Channels DVR**, Plex, Emby, Jellyfin, TiviMate, and all XMLTV-based clients
+- Supports **custom request headers** (`h_<Name>` params) for protected EPG sources (e.g., `h_Authorization=Bearer token`)
+- Accepts plain and **base64-encoded** destination URLs
+- Per-request TTL override via `cache_ttl` query parameter
+- Returns `X-EPG-Cache: HIT/MISS` header for observability
+
 ## Xtream Codes (XC) API Proxy
 - **Stateless XC API proxy** for IPTV players
 - Support for live streams, VOD, series, and **catch-up/timeshift**

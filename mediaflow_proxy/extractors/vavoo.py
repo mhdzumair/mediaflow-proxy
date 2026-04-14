@@ -265,9 +265,7 @@ class VavooExtractor(BaseExtractor):
             }
             wv_path = urlparse(resolved_url).path.lower()
             wv_endpoint = (
-                "hls_manifest_proxy"
-                if wv_path.endswith((".m3u8", ".m3u", ".m3u_plus"))
-                else self.mediaflow_endpoint
+                "hls_manifest_proxy" if wv_path.endswith((".m3u8", ".m3u", ".m3u_plus")) else self.mediaflow_endpoint
             )
             return {
                 "destination_url": resolved_url,
@@ -314,9 +312,7 @@ class VavooExtractor(BaseExtractor):
         # TS / raw stream URLs go through the stream proxy as-is.
         path = urlparse(resolved_url).path.lower()
         m3u8_endpoint = (
-            "hls_manifest_proxy"
-            if path.endswith((".m3u8", ".m3u", ".m3u_plus"))
-            else self.mediaflow_endpoint
+            "hls_manifest_proxy" if path.endswith((".m3u8", ".m3u", ".m3u_plus")) else self.mediaflow_endpoint
         )
 
         return {

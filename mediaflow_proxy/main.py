@@ -13,6 +13,7 @@ from starlette.staticfiles import StaticFiles
 from mediaflow_proxy.configs import settings
 from mediaflow_proxy.middleware import UIAccessControlMiddleware
 from mediaflow_proxy.routes.proxy import proxy_router
+from mediaflow_proxy.routes.epg import epg_router
 from mediaflow_proxy.routes.extractor import extractor_router
 from mediaflow_proxy.routes.speedtest import speedtest_router
 from mediaflow_proxy.routes.playlist_builder import playlist_builder_router
@@ -303,6 +304,7 @@ async def check_base64_url(url: str):
 
 
 app.include_router(proxy_router, prefix="/proxy", tags=["proxy"], dependencies=[Depends(verify_api_key)])
+app.include_router(epg_router, prefix="/proxy", tags=["epg"], dependencies=[Depends(verify_api_key)])
 if settings.enable_acestream:
     from mediaflow_proxy.routes.acestream import acestream_router
 

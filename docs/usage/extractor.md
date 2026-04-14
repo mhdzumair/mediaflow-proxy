@@ -8,30 +8,34 @@ The extractor endpoint extracts direct video stream URLs from various video host
 
 Use these exact strings as the `host` query parameter. The canonical list is defined in [`mediaflow_proxy/extractors/factory.py`](https://github.com/mhdzumair/mediaflow-proxy/blob/main/mediaflow_proxy/extractors/factory.py) (`ExtractorFactory._extractors`).
 
-| `host` value |
-|--------------|
-| `Doodstream` |
-| `F16Px` |
-| `Fastream` |
-| `FileLions` |
-| `FileMoon` |
-| `Gupload` |
-| `LiveTV` |
-| `LuluStream` |
-| `Maxstream` |
-| `Mixdrop` |
-| `Okru` |
-| `Sportsonline` |
-| `Streamtape` |
-| `StreamWish` |
-| `Supervideo` |
-| `TurboVidPlay` |
-| `Uqload` |
-| `Vavoo` |
-| `Vidmoly` |
-| `Vidoza` |
-| `VixCloud` |
-| `Voe` |
+The matching is **case-insensitive** — `vidfast`, `VidFast`, and `VIDFAST` are all accepted.
+
+| `host` value | Notes |
+|---|---|
+| `City` | |
+| `Doodstream` | |
+| `F16Px` | |
+| `Fastream` | |
+| `FileLions` | |
+| `FileMoon` | |
+| `Gupload` | |
+| `LiveTV` | |
+| `LuluStream` | |
+| `Maxstream` | |
+| `Mixdrop` | |
+| `Okru` | ok.ru / odnoklassniki |
+| `Sportsonline` | Sportsonline / Sportzonline live streams |
+| `Streamtape` | |
+| `StreamWish` | |
+| `Supervideo` | |
+| `TurboVidPlay` | |
+| `Uqload` | |
+| `Vavoo` | Vavoo.to streams |
+| `VidFast` | vidfast.pro (ythd.org → cloudnestra.com chain) |
+| `Vidmoly` | |
+| `Vidoza` | |
+| `VixCloud` | |
+| `Voe` | |
 
 ### Endpoints
 
