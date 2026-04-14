@@ -46,7 +46,8 @@ class VixCloudExtractor(BaseExtractor):
             iframe = soup.find("iframe").get("src")
             response = await self._make_request(iframe, headers={"x-inertia": "true", "x-inertia-version": version})
         elif "movie" in url or "tv" in url:
-            site_url = (url.split('/movie') or url.split('/tv'))[0]
+            marker = "/movie" if "/movie" in url else "/tv"
+            site_url = (url.split(marker))[0]
             parts = url.split(site_url)
             headers = {
                 "Referer": f"{site_url}/",
