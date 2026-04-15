@@ -46,7 +46,17 @@ class VixCloudExtractor(BaseExtractor):
             iframe = soup.find("iframe").get("src")
             response = await self._make_request(iframe, headers={"x-inertia": "true", "x-inertia-version": version})
         elif "movie" in url or "tv" in url:
-            response = await self._make_request(url)
+            marker = "/movie" if "/movie" in url else "/tv"
+            site_url = (url.split(marker))[0]
+            parts = url.split(site_url)
+            headers = {
+                "Referer": f"{site_url}/",
+                "Origin": f"{site_url}",
+            }
+
+            response = await self._make_request(site_url + '/api' + parts[1])
+
+            response = await self._make_request(site_url + '/' + response.json()['src'],headers=headers)
 
         if response.status != 200:
             raise ExtractorError("Failed to extract URL components, Invalid Request")
