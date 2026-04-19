@@ -54,9 +54,9 @@ class VixCloudExtractor(BaseExtractor):
                 "Origin": f"{site_url}",
             }
 
-            response = await self._make_request(site_url + '/api' + parts[1])
+            response = await self._make_request(site_url + "/api" + parts[1])
 
-            response = await self._make_request(site_url + '/' + response.json()['src'],headers=headers)
+            response = await self._make_request(site_url + "/" + response.json()["src"], headers=headers)
 
         if response.status != 200:
             raise ExtractorError("Failed to extract URL components, Invalid Request")
