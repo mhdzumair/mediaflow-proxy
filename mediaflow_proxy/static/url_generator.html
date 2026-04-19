@@ -1831,6 +1831,21 @@
             localStorage.setItem('theme', newTheme);
         });
 
+        // Persist the global API password across pages (speedtest, playlist
+        // builder) so the user only has to type it once — otherwise speedtest
+        // calls /proxy/stream without the password and gets 401.
+        (function restoreApiPassword() {
+            const el = document.getElementById('globalApiPassword');
+            if (!el) return;
+            const saved = localStorage.getItem('mediaflow_api_password');
+            if (saved) el.value = saved;
+            el.addEventListener('input', () => {
+                const v = el.value.trim();
+                if (v) localStorage.setItem('mediaflow_api_password', v);
+                else localStorage.removeItem('mediaflow_api_password');
+            });
+        })();
+
 
         // Tab switching
         function switchTab(tabName) {
