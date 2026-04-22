@@ -16,7 +16,12 @@ playlist_builder_router = APIRouter()
 
 
 def rewrite_m3u_links_streaming(
-    m3u_lines_iterator: Iterator[str], base_url: str, api_password: Optional[str]
+    m3u_lines_iterator: Iterator[str],
+    base_url: str,
+    api_password: Optional[str],
+    max_res: bool = False,
+    redirect_stream: bool = True,
+    no_proxy: bool = True,
 ) -> Iterator[str]:
     """
     Rewrites links from an M3U line iterator according to the specified rules,
@@ -99,7 +104,13 @@ def rewrite_m3u_links_streaming(
                 processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}"
             elif "vixsrc.to" in logical_line:
                 encoded_url = urllib.parse.quote(logical_line, safe="")
-                processed_url_content = f"{base_url}/extractor/video?host=VixCloud&redirect_stream=true&d={encoded_url}&max_res=true&no_proxy=true"
+                processed_url_content = (
+                    f"{base_url}/extractor/video?host=VixCloud"
+                    f"&redirect_stream={str(redirect_stream).lower()}"
+                    f"&d={encoded_url}"
+                    f"&max_res={str(max_res).lower()}"
+                    f"&no_proxy={str(no_proxy).lower()}"
+                )
             elif ".m3u8" in logical_line:
                 encoded_url = urllib.parse.quote(logical_line, safe="")
                 processed_url_content = f"{base_url}/proxy/hls/manifest.m3u8?d={encoded_url}"
@@ -232,7 +243,14 @@ def parse_channel_entries(lines: list[str]) -> list[list[str]]:
     return entries
 
 
-async def async_generate_combined_playlist(playlist_definitions: list[str], base_url: str, api_password: Optional[str]):
+async def async_generate_combined_playlist(
+    playlist_definitions: list[str],
+    base_url: str,
+    api_password: Optional[str],
+    max_res: bool = False,
+    redirect_stream: bool = True,
+    no_proxy: bool = True,
+):
     """Genera una playlist combinata da multiple definizioni, scaricando in parallelo."""
     # Prepara i task di download
     download_tasks = []
@@ -318,7 +336,9 @@ async def async_generate_combined_playlist(playlist_definitions: list[str], base
 
             if should_proxy:
                 # Usa un iteratore fittizio per processare una sola linea
-                rewritten_url_iter = rewrite_m3u_links_streaming(iter([url]), base_url, api_password)
+                rewritten_url_iter = rewrite_m3u_links_streaming(
+                    iter([url]), base_url, api_password, max_res, redirect_stream, no_proxy
+                )
                 yield next(rewritten_url_iter, url)  # Prende l'URL riscritto, con fallback all'originale
             else:
                 yield url  # Lascia l'URL invariato
@@ -327,7 +347,9 @@ async def async_generate_combined_playlist(playlist_definitions: list[str], base
     for playlist_data in unsorted_playlists_data:
         lines_iterator = iter(playlist_data["lines"])
         if playlist_data["proxy"]:
-            lines_iterator = rewrite_m3u_links_streaming(lines_iterator, base_url, api_password)
+            lines_iterator = rewrite_m3u_links_streaming(
+                lines_iterator, base_url, api_password, max_res, redirect_stream, no_proxy
+            )
 
         for line in yield_header_once(lines_iterator):
             yield line
@@ -336,14 +358,26 @@ async def async_generate_combined_playlist(playlist_definitions: list[str], base
 @playlist_builder_router.get("/playlist")
 async def proxy_handler(
     request: Request,
-    d: str = Query(..., description="Query string con le definizioni delle playlist", alias="d"),
-    api_password: Optional[str] = Query(None, description="Password API per MFP"),
+    d: str = Query(..., description="Semicolon-separated playlist URL definitions"),
+    api_password: Optional[str] = Query(None, description="MFP API password"),
+    max_res: bool = Query(False, description="Redirect extractor streams to the highest available resolution"),
+    redirect_stream: bool = Query(True, description="Redirect extractor to the direct stream URL"),
+    no_proxy: bool = Query(True, description="Skip proxying internal segment URLs for extractor streams"),
 ):
     """
-    Endpoint per il proxy delle playlist M3U con supporto MFP.
+    Proxy and merge one or more M3U playlists, rewriting stream URLs through MFP.
 
-    Formato query string: playlist1&url1;playlist2&url2
-    Esempio: https://mfp.com:pass123&http://provider.com/playlist.m3u
+    **`d` format** — semicolon-separated playlist definitions:
+    - Plain URL: `http://provider.com/playlist.m3u`
+    - With sort prefix: `sort:http://provider.com/playlist.m3u`
+    - Without rewriting: `no_proxy:http://provider.com/playlist.m3u`
+    - Combinable: `sort:no_proxy:http://provider.com/playlist.m3u`
+
+    Stream URLs in each playlist are automatically rewritten to route through the
+    appropriate MFP proxy endpoint (`/proxy/hls`, `/proxy/mpd`, `/extractor/video`).
+
+    **Extractor parameters** (`max_res`, `redirect_stream`, `no_proxy`) apply to
+    streams that go through `/extractor/video` (e.g. vixsrc.to links).
     """
     try:
         if not d:
@@ -371,7 +405,9 @@ async def proxy_handler(
                     base_url = base_url_part
 
         async def generate_response():
-            async for line in async_generate_combined_playlist(playlist_definitions, base_url, api_password):
+            async for line in async_generate_combined_playlist(
+                playlist_definitions, base_url, api_password, max_res, redirect_stream, no_proxy
+            ):
                 yield line
 
         return StreamingResponse(
