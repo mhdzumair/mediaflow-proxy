@@ -29,6 +29,10 @@ docker run -p 8888:8888 -e API_PASSWORD=your_password mhdzumair/mediaflow-proxy
 | Markdown sources | [`docs/`](docs/) in this repository |
 | Build docs locally | `uv sync --group docs` then `uv run mkdocs serve` |
 
+## High-throughput alternative ⚡
+
+For lower memory usage and higher throughput — especially on constrained hardware (small VPS, NAS, Raspberry Pi) — see **[MediaFlow Proxy Light](https://github.com/mhdzumair/mediaflow-proxy-light)**, a Rust reimplementation that is fully API-compatible with this proxy. Benchmarks show 7–8× less memory, 1.7–3.4× less CPU per request, and up to 4× higher throughput. Existing tokens, encrypted URLs, and client integrations work without changes.
+
 ## Contributing
 
 Contributions are welcome! see [Contributing](docs/community/contributing.md) in the docs and open a Pull Request on [GitHub](https://github.com/mhdzumair/mediaflow-proxy).

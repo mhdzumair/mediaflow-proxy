@@ -25,6 +25,10 @@ For install options (Compose, pip, uv, hosted services), see [Installation](inst
 | Endpoints and usage | [Usage overview](usage/overview.md) |
 | Debrid / Stremio integration | [Debrid & Stremio](integrations/debrid-stremio.md) |
 
+## High-throughput alternative ⚡
+
+If you need lower memory usage, higher throughput, or are running on constrained hardware (small VPS, NAS, Raspberry Pi), consider **[MediaFlow Proxy Light](https://github.com/mhdzumair/mediaflow-proxy-light)** — a Rust reimplementation that is API-compatible with this proxy and runs on the same endpoints. Benchmarks show 7–8× less memory, 1.7–3.4× less CPU per request, and up to 4× higher throughput. Existing tokens, encrypted URLs, and client integrations work without changes.
+
 ## Project links
 
 - [Source on GitHub](https://github.com/mhdzumair/mediaflow-proxy)
