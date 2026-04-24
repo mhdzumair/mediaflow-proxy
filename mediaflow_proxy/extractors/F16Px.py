@@ -37,7 +37,7 @@ class F16PxExtractor(BaseExtractor):
             raise ExtractorError("F16PX: Invalid embed URL")
 
         media_id = match.group(1)
-        api_url = f"https://{host}/api/videos/{media_id}/embed/playback"
+        api_url = f"https://{host}/api/videos/{media_id}/playback"
 
         headers = self.base_headers.copy()
         headers["referer"] = f"https://{host}/"
