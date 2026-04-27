@@ -107,7 +107,7 @@
 For a hassle-free, high-performance deployment of MediaFlow Proxy, consider the premium hosted service through ElfHosted.
 
 To purchase:
-1. Visit [https://store.elfhosted.com/product/mediaflow-proxy](https://store.elfhosted.com/product/mediaflow-proxy)
+1. Visit the [ElfHosted MediaFlow Proxy product page](https://store.elfhosted.com/product/mediaflow-proxy-2x4k-booster/?utm_source=github&utm_medium=docs&utm_campaign=mediaflow-proxy-docs)
 2. Follow ElfHosted's setup instructions
 
 Benefits:
