@@ -39,6 +39,17 @@ dependencies = [
     "av>=14.0.0",
 ]
 
+[project.optional-dependencies]
+# Local OCR engines for the Maxstream / uprot.net captcha bypass.
+# Install with:  pip install "mediaflow-proxy[maxstream]"
+# (the system tesseract-ocr binary must also be available — apt install
+# tesseract-ocr on Debian/Ubuntu).
+maxstream = [
+    "Pillow",
+    "pytesseract",
+    "ddddocr",
+]
+
 [project.urls]
 Homepage = "https://github.com/mhdzumair/mediaflow-proxy"
 Repository = "https://github.com/mhdzumair/mediaflow-proxy"
