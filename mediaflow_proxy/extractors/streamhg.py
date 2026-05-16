@@ -5,7 +5,7 @@ from mediaflow_proxy.utils.packed import eval_solver
 
 
 class StreamHGExtractor(BaseExtractor):
-    """Mixdrop URL extractor."""
+    """StreamHG URL extractor."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.mediaflow_endpoint = "hls_manifest_proxy"
