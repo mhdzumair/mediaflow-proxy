@@ -25,6 +25,8 @@ from mediaflow_proxy.extractors.vixcloud import VixCloudExtractor
 from mediaflow_proxy.extractors.fastream import FastreamExtractor
 from mediaflow_proxy.extractors.voe import VoeExtractor
 from mediaflow_proxy.extractors.vidfast import VidFastExtractor
+from mediaflow_proxy.extractors.streamhg import StreamHGExtractor
+
 
 
 class ExtractorFactory:
@@ -55,6 +57,7 @@ class ExtractorFactory:
         "Voe": VoeExtractor,
         "Sportsonline": SportsonlineExtractor,
         "VidFast": VidFastExtractor,
+        "StreamHG": StreamHGExtractor
     }
 
     @classmethod
