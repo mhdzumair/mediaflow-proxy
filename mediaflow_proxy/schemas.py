@@ -207,6 +207,13 @@ class MPDManifestParams(GenericParams):
         None,
         description="Override global REMUX_TO_TS setting per-request. true = force TS remuxing, false = force fMP4 passthrough, omit = use server default.",
     )
+    audio_lang: Optional[str] = Field(
+        "en",
+        description=(
+            "Select a specific audio language (BCP 47 tag, e.g., 'en', 'es', 'es-AR'). "
+            "Falls back to the highest-bandwidth audio if exact match not found. Defaults to 'en'."
+        ),
+    )
 
     @field_validator("resolution", mode="before")
     @classmethod

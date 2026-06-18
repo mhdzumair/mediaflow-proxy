@@ -120,6 +120,7 @@ async def process_manifest(
     key: str = None,
     resolution: str = None,
     skip_segments: list = None,
+    audio_lang: str = "en"
 ) -> Response:
     """
     Processes the MPD manifest and converts it to an HLS manifest.
@@ -132,11 +133,13 @@ async def process_manifest(
         key (str, optional): The DRM key. Defaults to None.
         resolution (str, optional): Target resolution (e.g., '1080p', '720p'). Defaults to None.
         skip_segments (list, optional): List of time segments to skip. Each item should have 'start' and 'end' keys.
+        audio_lang (str, optional): Select a specific audio language (BCP 47 tag, e.g., 'en', 'es', 'es-AR').
+            Falls back to the highest-bandwidth audio if exact match not found. Defaults to 'en'.
 
     Returns:
         Response: The HLS manifest as an HTTP response.
     """
-    hls_content = build_hls(mpd_dict, request, key_id, key, resolution, skip_segments)
+    hls_content = build_hls(mpd_dict, request, key_id, key, resolution, skip_segments, audio_lang)
 
     # Start DASH pre-buffering in background if enabled
     if settings.enable_dash_prebuffer:
@@ -391,6 +394,7 @@ def build_hls(
     key: str = None,
     resolution: str = None,
     skip_segments: list = None,
+    audio_lang: str = "en"
 ) -> str:
     """
     Builds an HLS manifest from the MPD manifest.
@@ -402,6 +406,8 @@ def build_hls(
         key (str, optional): The DRM key. Defaults to None.
         resolution (str, optional): Target resolution (e.g., '1080p', '720p'). Defaults to None.
         skip_segments (list, optional): List of time segments to skip. Each item should have 'start' and 'end' keys.
+        audio_lang (str, optional): Select a specific audio language (BCP 47 tag, e.g., 'en', 'es', 'es-AR').
+            Falls back to the highest-bandwidth audio if exact match not found. Defaults to 'en'.
 
     Returns:
         str: The HLS manifest as a string.
@@ -479,12 +485,12 @@ def build_hls(
             deduped = height_deduped[:MAX_VIDEO_VARIANTS]
         video_profiles = {p["id"]: (p, url) for p, url in deduped}
 
-    # Determine the default audio (English preferred, else highest bandwidth).
+    # Determine the default audio (audio_lang preferred, else highest bandwidth).
     default_audio_id = None
     if audio_profiles:
         all_audio = list(audio_profiles.values())
-        en_audio = [(p, u) for p, u in all_audio if (p.get("lang") or "").startswith("en")]
-        default_profile, _ = max(en_audio or all_audio, key=lambda pu: pu[0].get("bandwidth", 0))
+        default_audio = [(p, u) for p, u in all_audio if (p.get("lang") or "").startswith(audio_lang)]
+        default_profile, _ = max(default_audio or all_audio, key=lambda pu: pu[0].get("bandwidth", 0))
         default_audio_id = default_profile["id"]
 
     # Audio tracks: one entry per unique language, capped at MAX_AUDIO_TRACKS.

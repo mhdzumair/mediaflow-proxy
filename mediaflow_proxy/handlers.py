@@ -822,7 +822,7 @@ async def get_manifest(
     if drm_info and not drm_info.get("isDrmProtected"):
         # For non-DRM protected MPD, we still create an HLS manifest
         return await process_manifest(
-            request, mpd_dict, proxy_headers, None, None, manifest_params.resolution, skip_segments
+            request, mpd_dict, proxy_headers, None, None, manifest_params.resolution, skip_segments, manifest_params.audio_lang
         )
 
     # Support combined kid:key,kid:key format passed as a single key= param
@@ -838,7 +838,7 @@ async def get_manifest(
     key = _normalize_drm_key_value(key)
 
     return await process_manifest(
-        request, mpd_dict, proxy_headers, key_id, key, manifest_params.resolution, skip_segments
+        request, mpd_dict, proxy_headers, key_id, key, manifest_params.resolution, skip_segments, manifest_params.audio_lang
     )
 
 

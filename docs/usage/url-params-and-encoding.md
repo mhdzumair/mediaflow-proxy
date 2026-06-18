@@ -14,6 +14,12 @@ Select a specific resolution stream instead of the highest or default.
 - **Effect:** Selects the stream matching the specified resolution. Falls back to the closest lower resolution if exact match is not found.  
 - **Supported Endpoints:** `/proxy/hls/manifest.m3u8`, `/proxy/mpd/manifest.m3u8`
 
+**`&audio_lang=es`**  
+Select a specific audio language (BCP 47 tag, e.g., 'en', 'es', 'es-AR'). Defaults to 'en'.
+- **Usage:** Add `&audio_lang=es` (or `pt`, `es-AR`, etc.) to the proxy URL  
+- **Effect:** Selects the audio matching the specified language. Falls back to the highest-bandwidth audio if exact match not found. 
+- **Supported Endpoints:** `/proxy/mpd/manifest.m3u8`
+
 **`&no_proxy=true`**  
 Disables the proxy for the current destination, performing a direct request.  
 - **Usage:** Add `&no_proxy=true` to the proxy URL  

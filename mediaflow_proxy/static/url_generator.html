@@ -371,6 +371,14 @@
                         </select>
                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Select specific resolution (falls back to closest lower if not available)</p>
                     </div>
+
+                    <!-- Audio Language -->
+                    <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Audio</h4>
+                        <input type="text" id="mpd-audio-lang" placeholder="en (BCP 47 language tag)"
+                            class="input-field w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:border-indigo-500 text-sm">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Set audio language (English by default, else highest bandwidth)</p>
+                    </div>
                     
                     <!-- Skip Segments Section -->
                     <div class="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
@@ -2226,6 +2234,10 @@
                 const resolution = document.getElementById('mpd-resolution').value;
                 if (resolution) params.append('resolution', resolution);
                 
+                // Audio language
+                const audioLang = document.getElementById('mpd-audio-lang').value.trim();
+                if (audioLang) params.append('audio_lang', audioLang);
+
                 // Skip segments
                 const skipSegments = document.getElementById('mpd-skip-segments').value.trim();
                 if (skipSegments) params.append('skip', skipSegments);
