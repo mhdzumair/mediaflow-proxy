@@ -529,7 +529,39 @@ _BLOCKED_REQUEST_HEADERS = frozenset(
 )
 
 
-def _check_forward_destination(destination: str) -> None:
+async def _resolve_hostname_ips(hostname: str) -> list:
+    """Resolve a hostname to its IP addresses. A hostname that is already a
+    numeric IP literal is returned as-is, with no DNS lookup.
+    """
+    try:
+        return [ipaddress.ip_address(hostname)]
+    except ValueError:
+        pass
+
+    try:
+        loop = asyncio.get_running_loop()
+        infos = await loop.getaddrinfo(hostname, None)
+    except OSError as e:
+        raise HTTPException(status_code=400, detail=f"Could not resolve host '{hostname}': {e}")
+
+    return [ipaddress.ip_address(info[4][0]) for info in infos]
+
+
+async def _check_not_internal_address(hostname: str) -> None:
+    """Block a destination whose hostname resolves to a private, loopback,
+    link-local, or unspecified address. A hostname is checked by resolving
+    it first, so a name that only points at an internal address once DNS is
+    followed is caught the same as a bare IP literal would be.
+    """
+    for ip in await _resolve_hostname_ips(hostname):
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_unspecified:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Destination '{hostname}' resolves to a private/internal address",
+            )
+
+
+async def _check_forward_destination(destination: str) -> None:
     """SSRF guard and allowlist/denylist check for /proxy/forward."""
     parsed = urlparse(destination)
 
@@ -560,13 +592,10 @@ def _check_forward_destination(destination: str) -> None:
     if hostname in ("localhost", "ip6-localhost", "ip6-loopback"):
         raise HTTPException(status_code=403, detail="Forwarding to localhost is not allowed")
 
-    # Block private/loopback/link-local IPs given as literals
-    try:
-        addr = ipaddress.ip_address(hostname)
-        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_unspecified:
-            raise HTTPException(status_code=403, detail="Forwarding to private/loopback addresses is not allowed")
-    except ValueError:
-        pass  # Not a numeric IP — hostname-based SSRF is the caller's responsibility
+    # Block private/loopback/link-local addresses, resolving hostnames first
+    # so a name that only resolves to one of these (e.g. via nip.io) is
+    # caught the same as a bare IP literal.
+    await _check_not_internal_address(hostname)
 
 
 @proxy_router.api_route(
@@ -591,7 +620,7 @@ async def proxy_forward_endpoint(
     stripped before forwarding so the caller's IP is not leaked.
     """
     destination = sanitize_url(destination)
-    _check_forward_destination(destination)
+    await _check_forward_destination(destination)
 
     # Strip IP-disclosure headers — the whole point is hiding the origin IP
     for h in _IP_DISCLOSURE_HEADERS:
@@ -714,6 +743,10 @@ async def proxy_stream_endpoint(
 
     # Sanitize destination URL to fix common encoding issues
     destination = sanitize_url(destination)
+
+    stream_hostname = (urlparse(destination).hostname or "").lower()
+    if stream_hostname:
+        await _check_not_internal_address(stream_hostname)
 
     # Handle transcode mode — transcode uses time-based seeking, not byte ranges
     if transcode:
