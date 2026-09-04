@@ -22,7 +22,6 @@ Configuration:
 import base64
 import logging
 import re
-import secrets
 from functools import lru_cache
 from typing import Annotated
 from urllib.parse import urljoin, urlencode, urlparse
@@ -331,7 +330,7 @@ def verify_xc_api_password(api_password: str | None):
         )
 
     # Verify the password matches
-    if not secrets.compare_digest(api_password, settings.api_password):
+    if api_password != settings.api_password:
         raise HTTPException(
             status_code=403,
             detail="Invalid API password",

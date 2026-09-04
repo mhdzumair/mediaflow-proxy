@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import secrets
 import sys
 from contextlib import asynccontextmanager
 from importlib import resources
@@ -105,9 +104,7 @@ async def verify_api_key(api_key: str = Security(api_password_query), api_key_al
     if not settings.api_password:
         return
 
-    if (api_key and secrets.compare_digest(api_key, settings.api_password)) or (
-        api_key_alt and secrets.compare_digest(api_key_alt, settings.api_password)
-    ):
+    if api_key == settings.api_password or api_key_alt == settings.api_password:
         return
 
     raise HTTPException(status_code=403, detail="Could not validate credentials")
