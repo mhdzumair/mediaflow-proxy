@@ -315,7 +315,9 @@ if settings.enable_telegram:
     app.include_router(telegram_router, prefix="/proxy", tags=["telegram"], dependencies=[Depends(verify_api_key)])
 app.include_router(extractor_router, prefix="/extractor", tags=["extractors"], dependencies=[Depends(verify_api_key)])
 app.include_router(speedtest_router, prefix="/speedtest", tags=["speedtest"], dependencies=[Depends(verify_api_key)])
-app.include_router(playlist_builder_router, prefix="/playlist", tags=["playlist"])
+app.include_router(
+    playlist_builder_router, prefix="/playlist", tags=["playlist"], dependencies=[Depends(verify_api_key)]
+)
 # Root-level XC endpoints for IPTV player compatibility (handles its own API key verification)
 app.include_router(xtream_root_router, tags=["xtream"])
 
