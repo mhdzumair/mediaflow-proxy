@@ -54,6 +54,13 @@ mpv "http://localhost:8888/proxy/hls/manifest.m3u8?d=https://devstreaming-cdn.ap
 mpv "http://localhost:8888/proxy/hls/manifest.m3u8?d=https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8&max_res=true&api_password=your_password"
 ```
 
+### DASH Stream with Audio Selection
+
+```bash
+# Select specific audio (es)
+mpv "http://localhost:8888/proxy/mpd/manifest.m3u8?d=https://example.com/manifest.mpd&audio_lang=es&api_password=your_password"
+```
+
 ### HLS/DASH Stream with Segment Skipping (Intro/Outro Skip)
 
 ```bash
