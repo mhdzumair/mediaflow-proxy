@@ -29,7 +29,7 @@ Set the following environment variables:
 
 ### `/proxy/forward` settings
 
-- `PUBLIC_IP`: Optional. Static public IP returned by `/proxy/ip` and substituted for `{mediaflow_ip}` in forwarded requests. Auto-detected from `api.ipify.org` / `checkip.amazonaws.com` on first use when not set.
+- `PUBLIC_IP`: Optional. Static public IP returned by `/proxy/ip` and substituted for `{mediaflow_ip}` in forwarded requests. When not set, each lookup uses the configured HTTP transport and the IP lookup services; detected addresses are not cached for the lifetime of the process.
 - `FORWARD_ALLOWED_HOSTS`: Optional. Comma-separated allowlist of hostnames for `/proxy/forward`. Empty = allow any host (default).
 - `FORWARD_DENIED_HOSTS`: Optional. Comma-separated denylist of additional hostnames. Private/loopback IPs are always blocked regardless of this setting.
 - `FORWARD_MAX_REQUEST_BODY_BYTES`: Optional. Maximum incoming request body size in bytes. Default: `52428800` (50 MB).
