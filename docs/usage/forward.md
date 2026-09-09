@@ -74,6 +74,13 @@ Returns `{"ip": "<public-ip>"}` — MediaFlow's outbound IP. Useful when you nee
 
 Configure a static value with the `PUBLIC_IP` environment variable to skip the auto-detection request.
 
+Auto-detection uses the configured HTTP transport, including `ALL_PROXY` and the
+`TRANSPORT_ROUTES` rules matching the IP lookup services. The result is refreshed
+on each lookup so a changed proxy/VPN address is not retained until restart.
+With destination-specific routing, the lookup services and the forwarded request
+must use the same egress for the detected address to match; auto-detection does
+not determine a separate public IP for every destination.
+
 ---
 
 ## Safety controls
@@ -155,7 +162,7 @@ New settings added to support `/proxy/forward`. All are optional.
 
 | Environment variable | Default | Description |
 |---|---|---|
-| `PUBLIC_IP` | *(auto-detected)* | Static public IP returned by `/proxy/ip` and substituted for `{mediaflow_ip}`. Skip auto-detection on startup. |
+| `PUBLIC_IP` | *(auto-detected)* | Static public IP returned by `/proxy/ip` and substituted for `{mediaflow_ip}`. Skips auto-detection requests. |
 | `FORWARD_ALLOWED_HOSTS` | `[]` | Comma-separated allowlist of hostnames. Empty = allow any host. |
 | `FORWARD_DENIED_HOSTS` | `[]` | Comma-separated denylist of hostnames (in addition to the built-in private-IP guard). |
 | `FORWARD_MAX_REQUEST_BODY_BYTES` | `52428800` (50 MB) | Maximum incoming request body size. Allows NZB/torrent file uploads. |

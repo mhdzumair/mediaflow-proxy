@@ -36,6 +36,7 @@ from mediaflow_proxy.utils.extractor_helpers import (
 from mediaflow_proxy.utils.hls_prebuffer import hls_prebuffer
 from mediaflow_proxy.utils.http_client import create_aiohttp_session
 from mediaflow_proxy.utils.http_utils import (
+    DownloadError,
     get_proxy_headers,
     ProxyRequestHeaders,
     apply_header_manipulation,
@@ -458,37 +459,17 @@ def _build_hls_query_params(request: Request, destination: str) -> str:
 
 
 MEDIAFLOW_IP_PLACEHOLDER = "{mediaflow_ip}"
-_IP_DETECT_URLS = ["https://api.ipify.org", "https://checkip.amazonaws.com"]
-_cached_public_ip: str | None = None
-_public_ip_lock: asyncio.Lock | None = None
 
 
 async def _resolve_public_ip() -> str | None:
-    """Return MediaFlow's public IP: configured value, cached detection, or None."""
-    global _cached_public_ip, _public_ip_lock
-
+    """Return the configured IP or detect it using the configured HTTP transport."""
     if settings.public_ip:
         return settings.public_ip
-    if _cached_public_ip:
-        return _cached_public_ip
 
-    if _public_ip_lock is None:
-        _public_ip_lock = asyncio.Lock()
-
-    async with _public_ip_lock:
-        if _cached_public_ip:
-            return _cached_public_ip
-        for url in _IP_DETECT_URLS:
-            try:
-                async with aiohttp.ClientSession() as sess:
-                    async with sess.get(url, timeout=ClientTimeout(total=5)) as resp:
-                        ip = (await resp.text()).strip()
-                        if ip:
-                            _cached_public_ip = ip
-                            return ip
-            except Exception:
-                continue
-    return None
+    try:
+        return (await get_public_ip())["ip"]
+    except DownloadError:
+        return None
 
 
 _IP_DISCLOSURE_HEADERS = frozenset(
@@ -922,14 +903,3 @@ async def init_endpoint(
         Response: The HTTP response with the processed init segment.
     """
     return await get_init_segment(init_params, proxy_headers)
-
-
-@proxy_router.get("/ip")
-async def get_mediaflow_proxy_public_ip():
-    """
-    Retrieves the public IP address of the MediaFlow proxy server.
-
-    Returns:
-        Response: The HTTP response with the public IP address in the form of a JSON object. {"ip": "xxx.xxx.xxx.xxx"}
-    """
-    return await get_public_ip()
