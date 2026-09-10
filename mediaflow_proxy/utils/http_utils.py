@@ -364,7 +364,8 @@ async def download_file_with_retry(
     url: str,
     headers: dict,
     timeout: typing.Optional[ClientTimeout] = None,
-) -> bytes:
+    return_url: bool = False,
+) -> typing.Union[bytes, typing.Tuple[bytes, str]]:
     """
     Downloads a file with retry logic.
 
@@ -375,9 +376,13 @@ async def download_file_with_retry(
             transport timeout is used.  Pass a ClientTimeout with sock_read set
             (and total=None) for large ranged downloads so that the per-chunk
             read deadline is used instead of a hard total-download limit.
+        return_url: If True, also return the final URL after following any
+            redirects (needed to resolve relative URLs in the downloaded
+            content, e.g. manifests, against the correct base).
 
     Returns:
-        bytes: The downloaded file content.
+        bytes: The downloaded file content, or a (content, final_url) tuple
+            when return_url is True.
 
     Raises:
         DownloadError: If the download fails after retries.
@@ -385,7 +390,10 @@ async def download_file_with_retry(
     async with create_aiohttp_session(url, timeout=timeout) as (session, proxy_url):
         try:
             response = await fetch_with_retry(session, "GET", url, headers, proxy=proxy_url)
-            return await response.read()
+            content = await response.read()
+            if return_url:
+                return content, str(response.url)
+            return content
         except DownloadError as e:
             logger.error(f"Failed to download file: {e}")
             raise e

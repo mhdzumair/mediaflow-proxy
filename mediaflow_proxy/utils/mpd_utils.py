@@ -172,8 +172,8 @@ def extract_drm_info(periods: List[Dict], mpd_url: str) -> Dict:
                 process_content_protection(representation.get("ContentProtection", []), drm_info)
 
     # If we have a license acquisition URL, make sure it's absolute
-    if "laUrl" in drm_info and not drm_info["laUrl"].startswith(("http://", "https://")):
-        drm_info["laUrl"] = urljoin(mpd_url, drm_info["laUrl"])
+    if "laUrl" in drm_info:
+        drm_info["laUrl"] = resolve_url(mpd_url, drm_info["laUrl"])
 
     return drm_info
 

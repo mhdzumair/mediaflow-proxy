@@ -77,20 +77,21 @@ async def get_cached_mpd(
     cached_data = await redis_utils.get_cached_mpd(mpd_url)
     if cached_data is not None:
         try:
-            return parse_mpd_dict(cached_data, mpd_url, parse_drm, parse_segment_profile_id)
+            resolved_url = cached_data.get("resolved_url", mpd_url)
+            return parse_mpd_dict(cached_data["mpd_dict"], resolved_url, parse_drm, parse_segment_profile_id)
         except Exception:
             # Invalid cached data, will re-download
             pass
 
     # Download and parse if not cached
     try:
-        mpd_content = await download_file_with_retry(mpd_url, headers)
+        mpd_content, resolved_url = await download_file_with_retry(mpd_url, headers, return_url=True)
         mpd_dict = parse_mpd(mpd_content)
-        parsed_dict = parse_mpd_dict(mpd_dict, mpd_url, parse_drm, parse_segment_profile_id)
+        parsed_dict = parse_mpd_dict(mpd_dict, resolved_url, parse_drm, parse_segment_profile_id)
 
-        # Cache the original MPD dict with TTL from minimumUpdatePeriod
+        # Cache the original MPD dict (and resolved URL) with TTL from minimumUpdatePeriod
         cache_ttl = parsed_dict.get("minimumUpdatePeriod") or redis_utils.DEFAULT_MPD_CACHE_TTL
-        await redis_utils.set_cached_mpd(mpd_url, mpd_dict, ttl=cache_ttl)
+        await redis_utils.set_cached_mpd(mpd_url, {"mpd_dict": mpd_dict, "resolved_url": resolved_url}, ttl=cache_ttl)
         return parsed_dict
     except DownloadError as error:
         logger.error(f"Error downloading MPD: {error}")
