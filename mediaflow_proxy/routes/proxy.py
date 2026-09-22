@@ -289,7 +289,10 @@ async def hls_segment_proxy(
         if key.startswith("h_"):
             headers[key[2:]] = value
 
-    if settings.enable_hls_prebuffer:
+    # The prebuffer stores complete resources by URL, not HTTP ranges.
+    # A cached whole file must not satisfy a partial-content request.
+    has_range = any(key.lower() == "range" and value.strip() for key, value in proxy_headers.request.items())
+    if settings.enable_hls_prebuffer and not has_range:
         # Notify the prefetcher that this segment is needed (priority download)
         # This ensures the player's segment is downloaded first, then prefetcher
         # continues with sequential prefetch of remaining segments
