@@ -218,7 +218,12 @@ class HTTPMediaSource:
         return self._file_size
 
     async def stream(self, offset: int = 0, limit: int | None = None) -> AsyncIterator[bytes]:
-        headers = dict(self._headers)
+        if offset < 0 or (limit is not None and limit < 0):
+            raise ValueError("Byte offset and limit must be nonnegative")
+        if limit == 0:
+            return
+        # The method arguments, rather than a caller-supplied Range, select bytes.
+        headers = {key: value for key, value in self._headers.items() if key.lower() != "range"}
 
         if offset > 0 or limit is not None:
             end = ""
@@ -234,5 +239,19 @@ class HTTPMediaSource:
                 allow_redirects=True,
             ) as resp:
                 resp.raise_for_status()
+                # An origin may ignore Range and send the complete representation.
+                # In that case discard its prefix without buffering the whole file.
+                skip = offset if resp.status == 200 else 0
+                remaining = limit
                 async for chunk in resp.content.iter_any():
-                    yield chunk
+                    if skip:
+                        discarded = min(skip, len(chunk))
+                        skip -= discarded
+                        chunk = chunk[discarded:]
+                    if remaining is not None:
+                        chunk = chunk[:remaining]
+                        remaining -= len(chunk)
+                    if chunk:
+                        yield chunk
+                    if remaining == 0:
+                        return
