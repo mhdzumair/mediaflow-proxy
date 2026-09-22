@@ -9,6 +9,8 @@ from urllib.parse import urljoin
 
 import xmltodict
 
+from mediaflow_proxy.utils.dash_timeline import expand_timeline
+
 logger = logging.getLogger(__name__)
 
 
@@ -87,15 +89,18 @@ def parse_mpd_dict(
         parsed_dict["availabilityStartTime"] = datetime.fromisoformat(
             mpd_dict["MPD"]["@availabilityStartTime"].replace("Z", "+00:00")
         )
-        parsed_dict["publishTime"] = datetime.fromisoformat(
-            mpd_dict["MPD"].get("@publishTime", "").replace("Z", "+00:00")
-        )
+        if mpd_dict["MPD"].get("@publishTime"):
+            parsed_dict["publishTime"] = datetime.fromisoformat(mpd_dict["MPD"]["@publishTime"].replace("Z", "+00:00"))
+        # All representations in one MPD refresh use the same availability edge.
+        parsed_dict["availabilityWindowEnd"] = datetime.now(tz=timezone.utc)
 
     periods = mpd_dict["MPD"]["Period"]
     periods = periods if isinstance(periods, list) else [periods]
 
-    for period in periods:
-        parsed_dict["PeriodStart"] = parse_duration(period.get("@start", "PT0S"))
+    period_bounds = _resolve_period_bounds(periods, media_presentation_duration)
+    for period, (period_start, period_duration) in zip(periods, period_bounds):
+        parsed_dict["PeriodStart"] = period_start
+        parsed_dict["PeriodDuration"] = period_duration
         adaptation_sets = period["AdaptationSet"]
         adaptation_sets = adaptation_sets if isinstance(adaptation_sets, list) else [adaptation_sets]
 
@@ -123,6 +128,42 @@ def parse_mpd_dict(
     parsed_dict["drmInfo"] = drm_info
 
     return parsed_dict
+
+
+def _resolve_period_bounds(periods: list[dict], presentation_duration: Optional[str]) -> list[tuple]:
+    """Resolve each period independently; the MPD duration is an absolute end."""
+    starts = [parse_duration(p["@start"]) if "@start" in p else None for p in periods]
+    durations = [parse_duration(p["@duration"]) if "@duration" in p else None for p in periods]
+    if starts and starts[0] is None:
+        starts[0] = 0.0
+    for index in range(1, len(periods)):
+        if starts[index] is None and starts[index - 1] is not None and durations[index - 1] is not None:
+            starts[index] = starts[index - 1] + durations[index - 1]
+    presentation_end = parse_duration(presentation_duration) if presentation_duration is not None else None
+    result = []
+    for index, start in enumerate(starts):
+        if start is None:
+            raise ValueError("Cannot determine DASH period start from the manifest")
+        duration = durations[index]
+        if duration is not None:
+            end = start + duration
+            next_start = starts[index + 1] if index + 1 < len(starts) else None
+            for boundary, message in (
+                (next_start, "DASH period duration overlaps the next period"),
+                (presentation_end, "DASH period end exceeds the presentation duration"),
+            ):
+                # Durations are parsed as floats; allow decimal addition roundoff.
+                if boundary is not None and end > boundary and not math.isclose(end, boundary, rel_tol=0, abs_tol=1e-9):
+                    raise ValueError(message)
+        if duration is None:
+            if index + 1 < len(starts) and starts[index + 1] is not None:
+                duration = starts[index + 1] - start
+            elif index == len(starts) - 1 and presentation_end is not None:
+                duration = presentation_end - start
+        if duration is not None and duration < 0:
+            raise ValueError("DASH period end precedes its start")
+        result.append((start, duration))
+    return result
 
 
 def pad_base64(encoded_key_id):
@@ -450,7 +491,21 @@ def parse_segment_timeline(
     presentation_time_offset = int(item.get("@presentationTimeOffset", 0))
     start_number = int(item.get("@startNumber", 1))
 
-    timeline_segments = preprocess_timeline(timelines, start_number, period_start, presentation_time_offset, timescale)
+    window_end = None
+    window_start = None
+    if parsed_dict.get("isLive"):
+        window_end = parsed_dict.get("availabilityWindowEnd") or datetime.now(tz=timezone.utc)
+        window_start = window_end - timedelta(seconds=parsed_dict.get("timeShiftBufferDepth", 120))
+    timeline_segments = expand_timeline(
+        timelines,
+        start_number,
+        period_start,
+        presentation_time_offset,
+        timescale,
+        period_duration=parsed_dict.get("PeriodDuration"),
+        window_start=window_start,
+        window_end=window_end,
+    )
 
     nominal_duration = _resolve_nominal_timeline_duration(timeline_segments)
     if nominal_duration:
@@ -496,32 +551,7 @@ def preprocess_timeline(
     Returns:
         List[Dict]: The list of preprocessed timeline segments.
     """
-    processed_data = []
-    current_time = 0
-    for timeline in timelines:
-        repeat = int(timeline.get("@r", 0))
-        duration = int(timeline["@d"])
-        start_time = int(timeline.get("@t", current_time))
-
-        for _ in range(repeat + 1):
-            segment_start_time = period_start + timedelta(seconds=(start_time - presentation_time_offset) / timescale)
-            segment_end_time = segment_start_time + timedelta(seconds=duration / timescale)
-            processed_data.append(
-                {
-                    "number": start_number,
-                    "start_time": segment_start_time,
-                    "end_time": segment_end_time,
-                    "duration": duration,
-                    "time": start_time,
-                    "duration_mpd_timescale": duration,
-                }
-            )
-            start_time += duration
-            start_number += 1
-
-        current_time = start_time
-
-    return processed_data
+    return expand_timeline(timelines, start_number, period_start, presentation_time_offset, timescale)
 
 
 def parse_segment_duration(
@@ -711,7 +741,7 @@ def create_segment_data(
                 "start_time": segment["start_time"],
                 "end_time": segment["end_time"],
                 "extinf": (segment["end_time"] - segment["start_time"]).total_seconds(),
-                "program_date_time": segment["start_time"].isoformat() + "Z",
+                "program_date_time": segment["start_time"].isoformat().replace("+00:00", "Z"),
             }
         )
     elif "start_time" in segment and "duration" in segment:
@@ -728,7 +758,7 @@ def create_segment_data(
                 "start_time": segment["start_time"],
                 "end_time": segment["start_time"] + timedelta(seconds=duration_seconds),
                 "extinf": duration_seconds,
-                "program_date_time": segment["start_time"].isoformat() + "Z",
+                "program_date_time": segment["start_time"].isoformat().replace("+00:00", "Z"),
             }
         )
     elif "duration" in segment:

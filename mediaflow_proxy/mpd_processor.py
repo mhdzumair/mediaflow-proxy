@@ -120,7 +120,7 @@ async def process_manifest(
     key: str = None,
     resolution: str = None,
     skip_segments: list = None,
-    audio_lang: str = "en"
+    audio_lang: str = "en",
 ) -> Response:
     """
     Processes the MPD manifest and converts it to an HLS manifest.
@@ -394,7 +394,7 @@ def build_hls(
     key: str = None,
     resolution: str = None,
     skip_segments: list = None,
-    audio_lang: str = "en"
+    audio_lang: str = "en",
 ) -> str:
     """
     Builds an HLS manifest from the MPD manifest.
